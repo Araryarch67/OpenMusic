@@ -50,6 +50,8 @@ dependencies:
   url_launcher: ^6.3.3
   flutter_inappwebview: ^6.2.0-beta.3
   crypto: ^3.0.7
+  audio_service: ^0.18.19
+  audio_service_mpris: ^0.2.1
 
 dependency_overrides:
   # The real Linux implementation of flutter_inappwebview links WPE WebKit,

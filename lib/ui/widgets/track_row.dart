@@ -5,6 +5,8 @@ import '../../services/metadata.dart';
 import '../../services/player_controller.dart';
 import '../shell_scope.dart';
 import '../tag_editor.dart';
+import '../../services/youtube_music_account.dart';
+import '../pages/youtube_music_page.dart' show openRemotePlaylist;
 import '../ytmusic_edit.dart';
 import '../theme.dart';
 import 'controls.dart';
@@ -157,6 +159,12 @@ class _TrackRowState extends State<TrackRow> {
 class _TrackMenu extends StatelessWidget {
   const _TrackMenu({required this.track, required this.visible});
 
+  static Future<void> _queued(BuildContext context, Future<void> change, String done) async {
+    final messenger = ScaffoldMessenger.of(context);
+    await change;
+    messenger.showSnackBar(SnackBar(content: Text(done), duration: const Duration(seconds: 2)));
+  }
+
   final Track track;
   final bool visible;
 
@@ -179,9 +187,25 @@ class _TrackMenu extends StatelessWidget {
           final host = Navigator.of(context).context;
           final editScope = PlaylistEditScope.maybeOf(context);
           return [
+            PopupMenuItem(
+              onTap: () => _queued(host, c.playNext([track]), 'Plays next'),
+              child: const ListTile(leading: Icon(Icons.playlist_play_rounded), title: Text('Play next')),
+            ),
+            PopupMenuItem(
+              onTap: () => _queued(host, c.addToQueue([track]), 'Added to queue'),
+              child: const ListTile(leading: Icon(Icons.queue_music_rounded), title: Text('Add to queue')),
+            ),
             if (artist != null)
               PopupMenuItem(
                 onTap: () => shell.openCollection(artist),
+                child: const ListTile(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
+              )
+            else if (track.artistId case final id?)
+              PopupMenuItem(
+                onTap: () => openRemotePlaylist(
+                  host,
+                  RemotePlaylist(id: id, browseId: id, title: track.artist.split(', ').first, count: 0),
+                ),
                 child: const ListTile(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
               ),
             if (album != null)

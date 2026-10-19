@@ -128,6 +128,8 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _updatePlaybackEvent();
       }),
       _player.stream.volume.listen((volume) {
+        // OpenMusic: mpv's volume is pinned at 100% while the app applies it.
+        if (JustAudioMediaKit.volumeOverride != null) return;
         _dataController.add(PlayerDataMessage(volume: volume / 100.0));
       }),
       _player.stream.completed.listen((completed) {
@@ -173,6 +175,8 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _dataController.add(PlayerDataMessage(speed: rate));
       }),
       _player.stream.log.listen((event) {
+        // OpenMusic: a skipped song's network read being cancelled is expected, not an error.
+        if (event.text.contains('Immediate exit requested')) return;
         // ignore: avoid_print
         print("MPV: [${event.level}] ${event.prefix}: ${event.text}");
       }),
@@ -285,7 +289,14 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   }
 
   @override
-  Future<SetVolumeResponse> setVolume(SetVolumeRequest request) {
+  Future<SetVolumeResponse> setVolume(SetVolumeRequest request) async {
+    // OpenMusic: the app may apply volume in its own filter instead of mpv's.
+    final override = JustAudioMediaKit.volumeOverride;
+    if (override != null) {
+      await override(_player, request.volume);
+      _dataController.add(PlayerDataMessage(volume: request.volume));
+      return SetVolumeResponse();
+    }
     return _player
         .setVolume(request.volume * 100.0)
         .then((value) => SetVolumeResponse());
@@ -321,6 +332,7 @@ class MediaKitPlayer extends AudioPlayerPlatform {
   @override
   Future<SeekResponse> seek(SeekRequest request) async {
     _logger.finest('seek(${request.toMap()})');
+    final jumped = request.index != null;
     if (request.index != null) {
       await _player.jump(request.index!);
       if (!_playing) await _player.pause();
@@ -333,7 +345,12 @@ class MediaKitPlayer extends AudioPlayerPlatform {
       final start = _currentMedia?.start;
       var nativePosition = position;
       if (start != null) nativePosition += start;
-      if (_player.state.duration.inSeconds > 0) {
+      // OpenMusic: after a jump the new file isn't open yet (state.duration is
+      // still the old song's), so mpv rejects a seek. A new song starts at its
+      // beginning anyway; any other position waits for the new duration.
+      if (jumped && nativePosition == Duration.zero) {
+        _setPosition = null;
+      } else if (!jumped && _player.state.duration.inSeconds > 0) {
         await _player.seek(nativePosition);
       } else {
         _setPosition = nativePosition;

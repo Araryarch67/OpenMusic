@@ -300,3 +300,37 @@ class LikeButton extends StatelessWidget {
     );
   }
 }
+
+/// "Follow" / "Following" for a YouTube Music artist (signed in through the app).
+class FollowButton extends StatelessWidget {
+  const FollowButton({super.key, required this.artistId, required this.name});
+
+  final String artistId;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final account = PlayerScope.of(context).ytMusic;
+    if (!account.canEdit) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: account,
+      builder: (context, _) {
+        final following = account.isFollowing(artistId);
+        return OutlinedButton(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppColors.textPrimary,
+            side: BorderSide(color: following ? AppColors.textSecondary : AppColors.textPrimary),
+            shape: const StadiumBorder(),
+            padding: const EdgeInsets.symmetric(horizontal: 18),
+          ),
+          onPressed: () => _report(
+            context,
+            () => account.setFollowing(artistId, !following),
+            following ? 'Unfollowed $name' : 'Following $name',
+          ),
+          child: Text(following ? 'Following' : 'Follow'),
+        );
+      },
+    );
+  }
+}

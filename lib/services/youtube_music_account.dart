@@ -24,11 +24,19 @@ class DeviceCode {
 }
 
 class YoutubeMusicLibrary {
-  const YoutubeMusicLibrary({required this.liked, required this.playlists, required this.recent});
+  const YoutubeMusicLibrary({
+    required this.liked,
+    required this.playlists,
+    required this.recent,
+    this.artists = const [],
+  });
 
   final List<Track> liked;
   final List<RemotePlaylist> playlists;
   final List<Track> recent;
+
+  /// Artists the account follows; each opens as its songs ([RemotePlaylist.browseId]).
+  final List<RemotePlaylist> artists;
 }
 
 class RemotePlaylist {
@@ -75,6 +83,39 @@ class RemoteShelf {
   final String title;
   final List<Track> tracks;
   final List<RemotePlaylist> collections;
+}
+
+/// A search hit: a song to play ([track]) or an artist / album / playlist to open ([collection]).
+class SearchHit {
+  const SearchHit({required this.kind, required this.title, required this.subtitle, this.track, this.collection});
+
+  final WebResultKind kind;
+  final String title;
+  final String subtitle;
+  final Track? track;
+  final RemotePlaylist? collection;
+
+  /// Cover for the row / card.
+  Track get cover =>
+      track ??
+      Track.youtube(videoId: 'cover-${collection!.id}', title: title, artist: '', artworkUrl: collection!.thumbnailUrl);
+}
+
+/// YouTube Music's "All" search, in app terms.
+class SearchResults {
+  const SearchResults({
+    this.top,
+    this.songs = const [],
+    this.artists = const [],
+    this.albums = const [],
+    this.playlists = const [],
+  });
+
+  final SearchHit? top;
+  final List<Track> songs;
+  final List<RemotePlaylist> artists;
+  final List<RemotePlaylist> albums;
+  final List<RemotePlaylist> playlists;
 }
 
 /// Reads the user's YouTube Music library through one of three sessions, in
@@ -305,6 +346,46 @@ class YoutubeMusicAccount extends ChangeNotifier {
   /// Song search on YouTube Music itself (better matches than plain YouTube).
   Future<List<Track>> searchSongs(String query) async => _webTracks(await _browseClient.searchSongs(query));
 
+  /// Everything matching [query] (top result, songs, artists, albums, playlists).
+  Future<SearchResults> search(String query) async {
+    final r = await _browseClient.search(query);
+    return SearchResults(
+      top: r.top == null ? null : hitOf(r.top!),
+      songs: _webTracks(r.songs),
+      artists: [for (final a in r.artists) _collectionOf(a)],
+      albums: [for (final a in r.albums) _collectionOf(a)],
+      playlists: [for (final a in r.playlists) _collectionOf(a)],
+    );
+  }
+
+  /// Only artists, albums or playlists matching [query].
+  Future<List<RemotePlaylist>> searchOnly(String query, WebResultKind kind) async => [
+    for (final r in await _browseClient.searchOnly(query, kind)) _collectionOf(r),
+  ];
+
+  /// Completions and direct hits for the search box.
+  Future<({List<String> queries, List<SearchHit> hits})> suggestions(String input) async {
+    final s = await _browseClient.suggestions(input);
+    return (queries: s.queries, hits: [for (final i in s.items) hitOf(i)]);
+  }
+
+  static SearchHit hitOf(WebResult r) => SearchHit(
+    kind: r.kind,
+    title: r.title,
+    subtitle: r.subtitle,
+    track: r.track == null ? null : _webTracks([r.track!]).single,
+    collection: r.track == null ? _collectionOf(r) : null,
+  );
+
+  static RemotePlaylist _collectionOf(WebResult r) => RemotePlaylist(
+    id: r.browseId!,
+    browseId: r.browseId,
+    title: r.title,
+    count: 0,
+    subtitle: r.subtitle,
+    thumbnailUrl: r.thumbnailUrl,
+  );
+
   /// Google sign-in in an app window: the WebKitGTK helper on Linux, the
   /// in-app WebView page everywhere else.
   static bool get canSignInInWindow => DesktopLogin.supported || !Platform.isLinux;
@@ -350,6 +431,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
         artist: t.artist.isEmpty ? Track.unknownArtist : t.artist,
         duration: t.duration,
         artworkUrl: t.artworkUrl,
+        artistId: t.artistId,
       ),
   ];
 
@@ -542,11 +624,37 @@ class YoutubeMusicAccount extends ChangeNotifier {
   }
 
   Future<YoutubeMusicLibrary> _loadLibrary() async {
-    final (liked, lists, recent) = await (likedMusic(), playlists(), history()).wait;
+    final (liked, lists, recent, artists) = await (likedMusic(), playlists(), history(), followedArtists()).wait;
     _likedIds
       ..clear()
       ..addAll(liked.map((t) => t.id));
-    return YoutubeMusicLibrary(liked: liked, playlists: lists, recent: recent);
+    _followedIds
+      ..clear()
+      ..addAll(artists.map((a) => a.id));
+    notifyListeners();
+    return YoutubeMusicLibrary(liked: liked, playlists: lists, recent: recent, artists: artists);
+  }
+
+  /// Followed artists. Only YouTube Music's own API (the in-app sign-in) lists them.
+  Future<List<RemotePlaylist>> followedArtists() async {
+    if (!usesWebSession) return const [];
+    try {
+      return [
+        for (final a in await _webClient.followedArtists())
+          RemotePlaylist(
+            id: a.browseId,
+            browseId: a.browseId,
+            title: a.name,
+            count: 0,
+            subtitle: a.subtitle ?? 'Artist',
+            thumbnailUrl: a.thumbnailUrl,
+          ),
+      ];
+    } catch (e) {
+      // The rest of the library is still worth showing.
+      debugPrint('Followed artists failed: $e');
+      return const [];
+    }
   }
 
   // ── Editing the library (signed in through Google's page) ───────────────
@@ -582,6 +690,24 @@ class YoutubeMusicAccount extends ChangeNotifier {
     }
   }
 
+  final Set<String> _followedIds = {};
+  bool isFollowing(String artistId) => _followedIds.contains(artistId);
+
+  /// Follows or unfollows an artist in YouTube Music. Shown right away;
+  /// undone if YouTube Music refuses.
+  Future<void> setFollowing(String artistId, bool following) async {
+    following ? _followedIds.add(artistId) : _followedIds.remove(artistId);
+    notifyListeners();
+    try {
+      await _editing((web) => web.setFollowing(artistId, following: following));
+      library(refresh: true).ignore();
+    } catch (_) {
+      following ? _followedIds.remove(artistId) : _followedIds.add(artistId);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   Future<RemotePlaylistDetails> playlistDetails(String playlistId) async {
     if (!usesWebSession) return RemotePlaylistDetails(tracks: await playlistTracks(playlistId), owned: false);
     final page = await _webClient.playlistPage(playlistId, limit: _maxItems);
@@ -590,10 +716,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
       tracks: tracks,
       owned: page.owned,
       privacy: page.privacy,
-      rowIds: {
-        for (var i = 0; i < page.tracks.length; i++)
-          tracks[i].id: ?page.tracks[i].setVideoId,
-      },
+      rowIds: {for (var i = 0; i < page.tracks.length; i++) tracks[i].id: ?page.tracks[i].setVideoId},
     );
   }
 
@@ -679,8 +802,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
     if (usesWebSession) {
       final lists = await _webClient.libraryPlaylists();
       return [
-        for (final p in lists)
-          RemotePlaylist(id: p.id, title: p.title, count: p.count, thumbnailUrl: p.thumbnailUrl),
+        for (final p in lists) RemotePlaylist(id: p.id, title: p.title, count: p.count, thumbnailUrl: p.thumbnailUrl),
       ];
     }
     if (usesBrowser) {

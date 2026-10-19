@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../services/player_controller.dart';
 import 'shell_scope.dart';
@@ -177,29 +179,47 @@ class DesktopPlayerBar extends StatelessWidget {
             ),
             Expanded(
               flex: 3,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  if (onToggleSidePanel != null)
+              // Scales down on the narrowest wide layouts instead of overflowing.
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (onToggleSidePanel != null)
+                      IconButton(
+                        tooltip: 'Now playing view',
+                        color: sidePanelOpen ? AppColors.accent : null,
+                        onPressed: onToggleSidePanel,
+                        icon: const Icon(Icons.view_sidebar_outlined, size: 20),
+                      ),
                     IconButton(
-                      tooltip: 'Now playing view',
-                      color: sidePanelOpen ? AppColors.accent : null,
-                      onPressed: onToggleSidePanel,
-                      icon: const Icon(Icons.view_sidebar_outlined, size: 20),
+                      tooltip: 'Lyrics',
+                      onPressed: track == null ? null : shell.openLyrics,
+                      icon: const Icon(Icons.lyrics_outlined, size: 20),
                     ),
-                  IconButton(
-                    tooltip: 'Lyrics',
-                    onPressed: track == null ? null : shell.openLyrics,
-                    icon: const Icon(Icons.lyrics_outlined, size: 20),
-                  ),
-                  IconButton(
-                    tooltip: 'Queue',
-                    onPressed: shell.openQueue,
-                    icon: const Icon(Icons.queue_music_rounded, size: 20),
-                  ),
-                  // The bar spans the whole window, so its own width decides (not the content area's).
-                  if (MediaQuery.sizeOf(context).width > 860) const VolumeSlider(),
-                ],
+                    IconButton(
+                      tooltip: 'Queue',
+                      onPressed: shell.openQueue,
+                      icon: const Icon(Icons.queue_music_rounded, size: 20),
+                    ),
+                    // The bar spans the whole window, so its own width decides (not the content area's).
+                    if (MediaQuery.sizeOf(context).width > 860) const VolumeSlider(),
+                    IconButton(
+                      tooltip: 'Mini player',
+                      onPressed: () => setMiniPlayer(true),
+                      icon: const Icon(Icons.picture_in_picture_alt_rounded, size: 20),
+                    ),
+                    ValueListenableBuilder(
+                      valueListenable: fullScreenPlayer,
+                      builder: (context, on, _) => IconButton(
+                        tooltip: on ? 'Exit full screen' : 'Full screen',
+                        onPressed: track == null && !on ? null : () => setFullScreenPlayer(!on),
+                        icon: Icon(on ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: 22),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -538,4 +558,309 @@ class _MiniProgressState extends State<_MiniProgress> {
 
   @override
   Widget build(BuildContext context) => StreamBuilder<Duration>(stream: _position, builder: widget.builder);
+}
+
+/// Desktop full-screen player: the window goes full screen and the cover art
+/// fills the space above the player bar (Esc, F11 or the bar's button leave).
+final fullScreenPlayer = ValueNotifier<bool>(false);
+
+Future<void> setFullScreenPlayer(bool on) async {
+  if (fullScreenPlayer.value == on) return;
+  fullScreenPlayer.value = on;
+  try {
+    await windowManager.setFullScreen(on);
+  } catch (e) {
+    debugPrint('Full screen: $e'); // the view still works inside the window
+  }
+}
+
+class FullScreenPlayer extends StatefulWidget {
+  const FullScreenPlayer({super.key});
+
+  @override
+  State<FullScreenPlayer> createState() => _FullScreenPlayerState();
+}
+
+class _FullScreenPlayerState extends State<FullScreenPlayer> {
+  bool _hint = true;
+  Timer? _hintTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _hintTimer = Timer(const Duration(seconds: 3), () => setState(() => _hint = false));
+  }
+
+  @override
+  void dispose() {
+    _hintTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = PlayerScope.of(context);
+    final text = Theme.of(context).textTheme;
+    final track = c.currentTrack;
+    final next = c.upNext.firstOrNull;
+    return AccentBuilder(
+      track: track,
+      builder: (context, accent) => AnimatedContainer(
+        duration: const Duration(milliseconds: 500),
+        color: Color.lerp(accent, Colors.black, 0.2),
+        child: Stack(
+          children: [
+            Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(32, 20, 20, 0),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          c.playingFrom ?? track?.album ?? 'Now playing',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      // Lyrics, queue etc. are in the player bar right below.
+                      IconButton(
+                        tooltip: 'Exit full screen',
+                        onPressed: () => setFullScreenPlayer(false),
+                        icon: const Icon(Icons.fullscreen_exit_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                Expanded(
+                  child: track == null
+                      ? Center(child: Text('Nothing is playing', style: text.titleMedium))
+                      : LayoutBuilder(
+                          builder: (context, box) {
+                            // Room for the title lines and "Next" under the cover.
+                            final art = math.min(box.maxHeight - 150, box.maxWidth * 0.5).clamp(120.0, 900.0);
+                            return Center(
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  SizedBox.square(
+                                    dimension: art,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(12),
+                                        boxShadow: const [
+                                          BoxShadow(color: Color(0x73000000), blurRadius: 40, offset: Offset(0, 16)),
+                                        ],
+                                      ),
+                                      child: _TrackSwitcher(
+                                        trackId: track.id,
+                                        slide: false,
+                                        child: Artwork(key: ValueKey(track.id), track: track, radius: 12),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 24),
+                                  SizedBox(
+                                    width: math.max(art, 420),
+                                    child: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                track.title,
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: text.headlineSmall?.copyWith(
+                                                  fontWeight: FontWeight.w800,
+                                                  letterSpacing: -0.5,
+                                                ),
+                                              ),
+                                              const SizedBox(height: 4),
+                                              Text(
+                                                next == null
+                                                    ? track.artist
+                                                    : '${track.artist}   ·   Next: ${next.title}',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: text.bodyLarge?.copyWith(color: AppColors.textSecondary),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        LikeButton(track: track, size: 26),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ),
+            // Tells first-timers how to get out, then fades away.
+            Positioned(
+              top: 20,
+              left: 0,
+              right: 0,
+              child: IgnorePointer(
+                child: Center(
+                  child: AnimatedOpacity(
+                    opacity: _hint ? 1 : 0,
+                    duration: const Duration(milliseconds: 400),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(color: const Color(0xE6202020), borderRadius: BorderRadius.circular(8)),
+                      child: Text('Press Esc to exit full screen', style: text.bodyMedium),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Desktop mini player: the window shrinks to the cover with controls and
+/// stays on top of other windows, like Spotify's. The full player comes back
+/// at its old size and place.
+final miniPlayer = ValueNotifier<bool>(false);
+Rect? _boundsBeforeMini;
+
+Future<void> setMiniPlayer(bool on) async {
+  if (miniPlayer.value == on) return;
+  if (on) await setFullScreenPlayer(false);
+  try {
+    if (on) {
+      _boundsBeforeMini = await windowManager.getBounds();
+      await windowManager.setMinimumSize(const Size(220, 220));
+      miniPlayer.value = true;
+      await windowManager.setSize(const Size(340, 340));
+      await windowManager.setAlwaysOnTop(true);
+    } else {
+      miniPlayer.value = false;
+      await windowManager.setAlwaysOnTop(false);
+      await windowManager.setMinimumSize(const Size(320, 420));
+      if (_boundsBeforeMini case final b?) await windowManager.setBounds(b);
+    }
+  } catch (e) {
+    // Tiling compositors may refuse to resize; the view switches anyway.
+    debugPrint('Mini player window: $e');
+    miniPlayer.value = on;
+  }
+}
+
+class MiniPlayerWindow extends StatefulWidget {
+  const MiniPlayerWindow({super.key});
+
+  @override
+  State<MiniPlayerWindow> createState() => _MiniPlayerWindowState();
+}
+
+class _MiniPlayerWindowState extends State<MiniPlayerWindow> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = PlayerScope.of(context);
+    final text = Theme.of(context).textTheme;
+    final track = c.currentTrack;
+    // No Tooltips in here: this sits outside the app's Navigator (no Overlay).
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: ColoredBox(
+        color: AppColors.background,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Dragging anywhere on the cover moves the window.
+            DragToMoveArea(
+              child: track == null
+                  ? const SizedBox.expand()
+                  : _TrackSwitcher(
+                      trackId: track.id,
+                      slide: false,
+                      child: Artwork(key: ValueKey(track.id), track: track, radius: 0),
+                    ),
+            ),
+            Positioned(
+              top: 6,
+              right: 6,
+              child: AnimatedOpacity(
+                opacity: _hover ? 1 : 0,
+                duration: const Duration(milliseconds: 160),
+                child: IconButton.filled(
+                  style: IconButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
+                  onPressed: () => setMiniPlayer(false),
+                  icon: const Icon(Icons.open_in_full_rounded, size: 18),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                color: const Color(0xCC000000),
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      track?.title ?? 'Nothing playing',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                    ),
+                    if (track != null)
+                      Text(
+                        track.artist,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 160),
+                      child: !_hover
+                          ? const SizedBox(width: double.infinity, height: 6)
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                IconButton(onPressed: c.previous, icon: const Icon(Icons.skip_previous_rounded)),
+                                PlayButton(size: 36, playing: c.isPlaying, onPressed: c.canPlay ? c.togglePlay : null),
+                                IconButton(onPressed: c.next, icon: const Icon(Icons.skip_next_rounded)),
+                              ],
+                            ),
+                    ),
+                    _MiniProgress(
+                      builder: (context, snap) {
+                        final total = c.player.duration?.inMilliseconds ?? 0;
+                        final pos = snap.data?.inMilliseconds ?? 0;
+                        return LinearProgressIndicator(
+                          value: total == 0 ? 0 : (pos / total).clamp(0, 1),
+                          minHeight: 2,
+                          color: Colors.white,
+                          backgroundColor: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        );
+                      },
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }

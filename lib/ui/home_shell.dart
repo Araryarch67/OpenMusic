@@ -172,7 +172,7 @@ class _HomeShellState extends State<HomeShell> {
     messenger.showSnackBar(
       SnackBar(
         content: const Text('Downloading audio…'),
-        action: SnackBarAction(label: 'View', textColor: Colors.black, onPressed: () => _open(const DownloadsPage())),
+        action: SnackBarAction(label: 'View', onPressed: () => _open(const DownloadsPage())),
       ),
     );
   }
@@ -268,6 +268,10 @@ class _HomeShellState extends State<HomeShell> {
       const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): _history.forward,
       const SingleActivator(LogicalKeyboardKey.keyV, control: true): _pasteLink,
       const SingleActivator(LogicalKeyboardKey.keyV, meta: true): _pasteLink,
+      if (!compact) ...{
+        const SingleActivator(LogicalKeyboardKey.f11): () => setFullScreenPlayer(!fullScreenPlayer.value),
+        const SingleActivator(LogicalKeyboardKey.escape): () => setFullScreenPlayer(false),
+      },
     };
 
     // Phone only: one stack per bottom tab, fading between tabs.
@@ -318,32 +322,44 @@ class _HomeShellState extends State<HomeShell> {
             child: Column(
               children: [
                 Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
-                    child: Row(
+                  // Full-screen player on top; the pages stay alive (and their history) underneath.
+                  child: ValueListenableBuilder(
+                    valueListenable: fullScreenPlayer,
+                    builder: (context, full, pages) => Stack(
                       children: [
-                        SizedBox(
-                          width: sidebarWidth,
-                          child: ListenableBuilder(
-                            listenable: _history,
-                            builder: (context, _) => _Sidebar(
-                              collapsed: !expanded,
-                              location: _history.location,
-                              onHome: _goHome,
-                              onSearch: _goSearch,
-                            ),
-                          ),
+                        Positioned.fill(
+                          child: Offstage(offstage: full, child: pages),
                         ),
-                        const SizedBox(width: 8),
-                        Expanded(child: _Panel(child: _desktopNavigator())),
-                        if (expanded)
-                          _SlidingPanel(
-                            open: sideOpen,
-                            child: _Panel(
-                              child: NowPlayingSidePanel(onClose: () => setState(() => _sidePanel = false)),
+                        if (full) const Positioned.fill(child: FullScreenPlayer()),
+                      ],
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                      child: Row(
+                        children: [
+                          SizedBox(
+                            width: sidebarWidth,
+                            child: ListenableBuilder(
+                              listenable: _history,
+                              builder: (context, _) => _Sidebar(
+                                collapsed: !expanded,
+                                location: _history.location,
+                                onHome: _goHome,
+                                onSearch: _goSearch,
+                              ),
                             ),
                           ),
-                      ],
+                          const SizedBox(width: 8),
+                          Expanded(child: _Panel(child: _desktopNavigator())),
+                          if (expanded)
+                            _SlidingPanel(
+                              open: sideOpen,
+                              child: _Panel(
+                                child: NowPlayingSidePanel(onClose: () => setState(() => _sidePanel = false)),
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
                   ),
                 ),

@@ -1,5 +1,7 @@
 package dev.openmusic.openmusic
 
-import io.flutter.embedding.android.FlutterActivity
+import com.ryanheise.audioservice.AudioServiceActivity
 
-class MainActivity : FlutterActivity()
+// audio_service's activity shares its Flutter engine with the playback service,
+// so music keeps playing (with its notification) after the app is closed.
+class MainActivity : AudioServiceActivity()

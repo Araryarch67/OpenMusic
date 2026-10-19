@@ -61,14 +61,16 @@ void openRemotePlaylist(BuildContext context, RemotePlaylist p) {
     ShellScope.of(context).open(location: Locations.remotePlaylist(p.id), LibraryPlaylistPage(playlist: p));
     return;
   }
+  final artistId = p.browseId?.startsWith('UC') ?? false ? p.browseId : null;
   ShellScope.of(context).open(
     location: Locations.remotePlaylist(p.id),
     RemoteCollectionPage(
       title: p.title,
+      actions: [if (artistId != null) FollowButton(artistId: artistId, name: p.title)],
       load: () async => Collection(
         kind: CollectionKind.remote,
         title: p.title,
-        subtitle: p.subtitle ?? 'YouTube Music',
+        subtitle: artistId != null ? 'Artist' : p.subtitle ?? 'YouTube Music',
         tracks: await account.collectionTracks(p),
       ),
     ),
@@ -439,6 +441,22 @@ class _LibraryHome extends StatelessWidget {
                     ],
                   ),
                 ),
+              if (lib.artists.isNotEmpty)
+                SliverToBoxAdapter(
+                  child: Shelf(
+                    title: 'Artists you follow',
+                    cards: [
+                      for (final a in lib.artists)
+                        MediaCard(
+                          track: playlistCover(a),
+                          title: a.title,
+                          subtitle: a.subtitle ?? 'Artist',
+                          circle: true,
+                          onTap: () => openRemotePlaylist(context, a),
+                        ),
+                    ],
+                  ),
+                ),
               const DiscoverShelves(),
             ],
           ],
@@ -450,10 +468,13 @@ class _LibraryHome extends StatelessWidget {
 
 /// Loads a remote playlist, then shows it like any other collection.
 class RemoteCollectionPage extends StatefulWidget {
-  const RemoteCollectionPage({super.key, required this.title, required this.load});
+  const RemoteCollectionPage({super.key, required this.title, required this.load, this.actions = const []});
 
   final String title;
   final Future<Collection> Function() load;
+
+  /// Extra buttons next to Play / Shuffle (Follow on artist pages).
+  final List<Widget> actions;
 
   @override
   State<RemoteCollectionPage> createState() => _RemoteCollectionPageState();
@@ -467,7 +488,7 @@ class _RemoteCollectionPageState extends State<RemoteCollectionPage> {
     return FutureBuilder(
       future: _future,
       builder: (context, snap) {
-        if (snap.hasData) return CollectionPage(collection: snap.data!);
+        if (snap.hasData) return CollectionPage(collection: snap.data!, actions: widget.actions);
         return PageScaffold(
           title: widget.title,
           slivers: [

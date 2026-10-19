@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:http/http.dart' as http;
 
 /// A song row as YouTube Music returns it.
@@ -12,6 +13,7 @@ class WebTrack {
     this.duration,
     this.artworkUrl,
     this.setVideoId,
+    this.artistId,
   });
 
   final String videoId;
@@ -19,6 +21,9 @@ class WebTrack {
   final String artist;
   final Duration? duration;
   final String? artworkUrl;
+
+  /// The first artist's channel (`UC…`), when the row links to it.
+  final String? artistId;
 
   /// This row's id inside a playlist (the same song can be in it twice);
   /// removing and moving songs refer to it.
@@ -55,6 +60,66 @@ class WebPlaylist {
   final String id;
   final String title;
   final int count;
+  final String? thumbnailUrl;
+}
+
+/// What a search hit opens.
+enum WebResultKind { song, artist, album, playlist }
+
+/// One search hit: a song (with [track]) or something to open ([browseId]).
+class WebResult {
+  const WebResult({
+    required this.kind,
+    required this.title,
+    this.subtitle = '',
+    this.thumbnailUrl,
+    this.browseId,
+    this.track,
+  });
+
+  final WebResultKind kind;
+  final String title;
+  final String subtitle;
+  final String? thumbnailUrl;
+
+  /// `UC…` artist, `MPRE…` album, `VL…` playlist; opens with [YtMusicWeb.browseTracks].
+  final String? browseId;
+  final WebTrack? track;
+}
+
+/// YouTube Music's unfiltered search: the top hit, then a few of each kind.
+class WebSearch {
+  const WebSearch({
+    this.top,
+    this.songs = const [],
+    this.artists = const [],
+    this.albums = const [],
+    this.playlists = const [],
+  });
+
+  final WebResult? top;
+  final List<WebTrack> songs;
+  final List<WebResult> artists;
+  final List<WebResult> albums;
+  final List<WebResult> playlists;
+}
+
+/// Suggestions while typing: completed searches, and direct hits.
+class WebSuggestions {
+  const WebSuggestions({this.queries = const [], this.items = const []});
+
+  final List<String> queries;
+  final List<WebResult> items;
+}
+
+/// An artist the signed-in account follows.
+class WebArtist {
+  const WebArtist({required this.browseId, required this.name, this.subtitle, this.thumbnailUrl});
+
+  /// The artist's channel (`UC…`); opens with [YtMusicWeb.browseTracks].
+  final String browseId;
+  final String name;
+  final String? subtitle;
   final String? thumbnailUrl;
 }
 
@@ -236,7 +301,8 @@ class YtMusicWeb {
       for (final item in _list(items)) {
         final row = _asMap(_asMap(item)?['musicTwoRowItemRenderer']);
         final playlist = row == null ? null : _playlistOf(row);
-        if (playlist != null && playlist.id != 'LM') out.add(playlist);
+        // Liked music has its own collection; "Episodes for later" (SE) can't hold songs.
+        if (playlist != null && playlist.id != 'LM' && playlist.id != 'SE') out.add(playlist);
       }
     }
 
@@ -336,6 +402,13 @@ class YtMusicWeb {
     await _send('playlist/delete', {'playlistId': playlistId.startsWith('VL') ? playlistId.substring(2) : playlistId});
   }
 
+  /// Follows (subscribes to) an artist's channel, or stops following it.
+  Future<void> setFollowing(String channelId, {required bool following}) async {
+    await _send(following ? 'subscription/subscribe' : 'subscription/unsubscribe', {
+      'channelIds': [channelId],
+    });
+  }
+
   /// Likes a song (it lands in "Liked music"), or clears the rating.
   Future<void> rate(String videoId, {required bool liked}) async {
     await _send(liked ? 'like/like' : 'like/removelike', {
@@ -381,8 +454,60 @@ class YtMusicWeb {
 
   /// Every song of a playlist (`VL…`) or album (`MPRE…`) page. Album rows carry
   /// neither artist nor artwork; both come from the page header instead.
-  Future<List<WebTrack>> browseTracks(String browseId, {int limit = 500}) async =>
-      _tracksOf(await _send('browse', {'browseId': browseId}), limit);
+  Future<List<WebTrack>> browseTracks(String browseId, {int limit = 500}) async {
+    final res = await _send('browse', {'browseId': browseId});
+    // An artist page shows a few top songs; "Show all" opens the full list.
+    if (browseId.startsWith('UC')) {
+      final all = _at(_deepFind(res, 'musicShelfRenderer'), const [
+        'bottomEndpoint', 'browseEndpoint', 'browseId', //
+      ]);
+      if (all is String) return browseTracks(all, limit: limit);
+    }
+    return _tracksOf(res, limit);
+  }
+
+  /// Artists the account follows (YouTube Music's library "Subscriptions").
+  Future<List<WebArtist>> followedArtists({int limit = 500}) async {
+    final res = await _send('browse', const {'browseId': 'FEmusic_library_corpus_artists'});
+    final shelf = _asMap(_deepFind(res, 'musicShelfRenderer'));
+    if (shelf == null) return const [];
+    final out = <WebArtist>[];
+    void take(Object? items) {
+      for (final item in _list(items)) {
+        final row = _asMap(_asMap(item)?['musicResponsiveListItemRenderer']);
+        final artist = row == null ? null : artistOf(row);
+        if (artist != null) out.add(artist);
+      }
+    }
+
+    take(shelf['contents']);
+    var token = _nextToken(shelf);
+    while (token != null && out.length < limit) {
+      final page = await _send('browse', {'continuation': token});
+      final items = _continuationItems(page);
+      if (items.isEmpty) break;
+      take(items);
+      token = _nextToken({'items': items});
+    }
+    return out;
+  }
+
+  /// One row of the subscriptions list: name, channel id, "N subscribers".
+  @visibleForTesting
+  static WebArtist? artistOf(Map<String, dynamic> row) {
+    final browseId = _at(row, const ['navigationEndpoint', 'browseEndpoint', 'browseId']);
+    final name = _firstRunText(_list(row['flexColumns']).firstOrNull);
+    if (browseId is! String || !browseId.startsWith('UC') || name == null) return null;
+    final columns = _list(row['flexColumns']);
+    return WebArtist(
+      browseId: browseId,
+      name: name,
+      subtitle: columns.length > 1
+          ? _text(_at(columns[1], const ['musicResponsiveListItemFlexColumnRenderer', 'text']))
+          : null,
+      thumbnailUrl: _lastThumb(_at(row, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
+    );
+  }
 
   Future<List<WebTrack>> _tracksOf(Map<String, dynamic> res, int limit) async {
     final shelf = _asMap(_deepFind(res, 'musicPlaylistShelfRenderer')) ?? _asMap(_deepFind(res, 'musicShelfRenderer'));
@@ -404,6 +529,7 @@ class YtMusicWeb {
             duration: track.duration,
             artworkUrl: track.artworkUrl ?? headerArt,
             setVideoId: _at(row, const ['playlistItemData', 'playlistSetVideoId']) as String?,
+            artistId: track.artistId,
           ),
         );
       }
@@ -453,6 +579,147 @@ class YtMusicWeb {
       if (tracks.isNotEmpty || cards.isNotEmpty) out.add(WebShelf(title: title, tracks: tracks, cards: cards));
     }
     return out;
+  }
+
+  /// Everything matching [query]: the top result and a few songs, artists,
+  /// albums and playlists (YouTube Music's "All" tab).
+  Future<WebSearch> search(String query) async {
+    final res = await _send('search', {'query': query});
+    WebResult? top;
+    final card = _asMap(_deepFind(res, 'musicCardShelfRenderer'));
+    if (card != null) top = _topResultOf(card);
+    final songs = <WebTrack>[], artists = <WebResult>[], albums = <WebResult>[], playlists = <WebResult>[];
+    // Rows sit in shelves or item sections depending on the layout YouTube
+    // serves; take every result row wherever it is, once.
+    final seen = <String>{};
+    for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer')) {
+      final hit = _asMap(node) == null ? null : resultOf(_asMap(node)!);
+      if (hit == null || !seen.add(hit.browseId ?? hit.track!.videoId)) continue;
+      switch (hit.kind) {
+        case WebResultKind.song:
+          songs.add(hit.track!);
+        case WebResultKind.artist:
+          artists.add(hit);
+        case WebResultKind.album:
+          albums.add(hit);
+        case WebResultKind.playlist:
+          playlists.add(hit);
+      }
+    }
+    return WebSearch(top: top, songs: songs, artists: artists, albums: albums, playlists: playlists);
+  }
+
+  /// Search params per filter chip, as ytmusicapi builds them.
+  static const _filterParams = {
+    WebResultKind.song: 'EgWKAQIIAWoKEAoQCRADEAQQBQ%3D%3D',
+    WebResultKind.artist: 'EgWKAQIgAWoKEAoQCRADEAQQBQ%3D%3D',
+    WebResultKind.album: 'EgWKAQIYAWoKEAoQCRADEAQQBQ%3D%3D',
+    WebResultKind.playlist: 'EgWKAQIoAWoKEAoQCRADEAQQBQ%3D%3D',
+  };
+
+  /// Only artists, albums or playlists matching [query] (one filter chip).
+  Future<List<WebResult>> searchOnly(String query, WebResultKind kind) async {
+    final res = await _send('search', {'query': query, 'params': _filterParams[kind]});
+    return [
+      for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer'))
+        if (_asMap(node) case final row?)
+          if (resultOf(row) case final hit? when hit.kind == kind) hit,
+    ];
+  }
+
+  /// What the search box offers while typing.
+  Future<WebSuggestions> suggestions(String input) async {
+    final res = await _send('music/get_search_suggestions', {'input': input});
+    final queries = <String>[];
+    for (final node in _deepFindAll(res, 'searchSuggestionRenderer')) {
+      final q =
+          _at(node, const ['navigationEndpoint', 'searchEndpoint', 'query']) ?? _text(_asMap(node)?['suggestion']);
+      if (q is String && q.isNotEmpty) queries.add(q);
+    }
+    final items = [
+      for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer'))
+        if (_asMap(node) case final row?) ?resultOf(row),
+    ];
+    return WebSuggestions(queries: queries, items: items);
+  }
+
+  /// One result row of any kind. Songs and videos play; the rest open.
+  @visibleForTesting
+  static WebResult? resultOf(Map<String, dynamic> row) {
+    final thumb = _lastThumb(_at(row, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']));
+    final endpoint = _asMap(_at(row, const ['navigationEndpoint', 'browseEndpoint']));
+    if (endpoint != null) {
+      final kind = _kindOf(endpoint);
+      final browseId = endpoint['browseId'];
+      final title = _firstRunText(_list(row['flexColumns']).firstOrNull);
+      if (kind == null || browseId is! String || title == null) return null;
+      final columns = _list(row['flexColumns']);
+      return WebResult(
+        kind: kind,
+        title: title,
+        subtitle: columns.length > 1
+            ? _text(_at(columns[1], const ['musicResponsiveListItemFlexColumnRenderer', 'text'])) ?? ''
+            : '',
+        thumbnailUrl: thumb,
+        browseId: browseId,
+      );
+    }
+    final song = _songOf(row);
+    if (song == null) return null;
+    final columns = _list(row['flexColumns']);
+    return WebResult(
+      kind: WebResultKind.song,
+      title: song.title,
+      subtitle: columns.length > 1
+          ? _text(_at(columns[1], const ['musicResponsiveListItemFlexColumnRenderer', 'text'])) ?? song.artist
+          : song.artist,
+      thumbnailUrl: thumb,
+      track: song,
+    );
+  }
+
+  static WebResultKind? _kindOf(Map<String, dynamic> browseEndpoint) => switch (_at(browseEndpoint, const [
+    'browseEndpointContextSupportedConfigs',
+    'browseEndpointContextMusicConfig',
+    'pageType',
+  ])) {
+    'MUSIC_PAGE_TYPE_ARTIST' => WebResultKind.artist,
+    'MUSIC_PAGE_TYPE_ALBUM' => WebResultKind.album,
+    'MUSIC_PAGE_TYPE_PLAYLIST' => WebResultKind.playlist,
+    _ => null,
+  };
+
+  /// The big "Top result" card.
+  static WebResult? _topResultOf(Map<String, dynamic> card) {
+    final title = _text(card['title']);
+    final run = _asMap(_list(_asMap(card['title'])?['runs']).firstOrNull);
+    if (title == null || run == null) return null;
+    final thumb = _lastThumb(_at(card, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']));
+    final subtitle = _text(card['subtitle']) ?? '';
+    final browse = _asMap(_at(run, const ['navigationEndpoint', 'browseEndpoint']));
+    if (browse != null) {
+      final kind = _kindOf(browse);
+      final id = browse['browseId'];
+      if (kind == null || id is! String) return null;
+      return WebResult(kind: kind, title: title, subtitle: subtitle, thumbnailUrl: thumb, browseId: id);
+    }
+    final videoId = _at(run, const ['navigationEndpoint', 'watchEndpoint', 'videoId']);
+    if (videoId is! String) return null;
+    final artistRun = _list(_asMap(card['subtitle'])?['runs']).whereType<Map<String, dynamic>>().where(_isArtistRun);
+    final artistId = _at(artistRun.firstOrNull, const ['navigationEndpoint', 'browseEndpoint', 'browseId']);
+    return WebResult(
+      kind: WebResultKind.song,
+      title: title,
+      subtitle: subtitle,
+      thumbnailUrl: thumb,
+      track: WebTrack(
+        videoId: videoId,
+        title: title,
+        artist: artistRun.map((r) => r['text'] as String).join(', '),
+        artworkUrl: thumb,
+        artistId: artistId is String ? artistId : null,
+      ),
+    );
   }
 
   /// Songs matching [query], using YouTube Music's own "Songs" filter.
@@ -530,6 +797,7 @@ class YtMusicWeb {
     videoId ??= _at(data, const ['navigationEndpoint', 'watchEndpoint', 'videoId']);
 
     String? title;
+    String? artistId;
     final artists = <String>[];
     for (final column in _list(data['flexColumns'])) {
       final runs = _list(_at(column, const ['musicResponsiveListItemFlexColumnRenderer', 'text', 'runs']))
@@ -546,6 +814,13 @@ class YtMusicWeb {
           for (final run in runs)
             if (_isArtistRun(run)) run['text'] as String,
         ]);
+        for (final run in runs.where(_isArtistRun)) {
+          final id = _at(run, const ['navigationEndpoint', 'browseEndpoint', 'browseId']);
+          if (id is String && id.startsWith('UC')) {
+            artistId ??= id;
+            break;
+          }
+        }
       }
     }
     title ??= _firstRunText(_list(data['flexColumns']).firstOrNull);
@@ -560,6 +835,7 @@ class YtMusicWeb {
           ) ??
           _flexDuration(data),
       artworkUrl: _lastThumb(_at(data, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
+      artistId: artistId,
     );
   }
 

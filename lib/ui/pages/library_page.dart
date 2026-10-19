@@ -87,6 +87,17 @@ class _LibraryListState extends State<LibraryList> {
         if (c.youtubeDownloads case final d?) _LibraryRow(collection: d, collapsed: widget.collapsed),
       ],
       for (final col in local) _LibraryRow(collection: col, collapsed: widget.collapsed),
+      if (online != null && show(LibraryFilter.artists))
+        for (final a in online.artists)
+          _SimpleRow(
+            collapsed: widget.collapsed,
+            art: Artwork(track: playlistCover(a), size: 48, circle: true),
+            title: a.title,
+            subtitle: 'Artist • YouTube Music',
+            online: true,
+            location: Locations.remotePlaylist(a.id),
+            onTap: () => openRemotePlaylist(context, a),
+          ),
       if (!widget.collapsed && !account.isSignedIn && show(LibraryFilter.playlists))
         Padding(
           padding: const EdgeInsets.fromLTRB(8, 16, 8, 0),

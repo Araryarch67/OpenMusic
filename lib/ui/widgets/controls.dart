@@ -38,7 +38,6 @@ class Artwork extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = track;
-    final shape = circle ? const CircleBorder() : RoundedRectangleBorder(borderRadius: BorderRadius.circular(radius));
     Widget child;
     if (t == null) {
       child = _placeholder(null);
@@ -54,10 +53,12 @@ class Artwork extends StatelessWidget {
     return SizedBox(
       width: size,
       height: size,
-      child: ClipPath(
-        clipper: ShapeBorderClipper(shape: shape),
-        child: child,
-      ),
+      // ClipRRect / ClipOval have fast paths; a generic ClipPath per cover made scrolling heavy.
+      child: circle
+          ? ClipOval(child: child)
+          : radius == 0
+          ? child
+          : ClipRRect(borderRadius: BorderRadius.circular(radius), child: child),
     );
   }
 
@@ -365,7 +366,7 @@ class TransportControls extends StatelessWidget {
       mainAxisSize: large ? MainAxisSize.max : MainAxisSize.min,
       mainAxisAlignment: large ? MainAxisAlignment.spaceBetween : MainAxisAlignment.center,
       children: [
-        _ModeButton(
+        ModeButton(
           tooltip: c.shuffle ? 'Disable shuffle' : 'Enable shuffle',
           active: c.shuffle,
           size: modeSize,
@@ -396,7 +397,7 @@ class TransportControls extends StatelessWidget {
           icon: const Icon(Icons.skip_next_rounded),
         ),
         if (!large) const SizedBox(width: 8),
-        _ModeButton(
+        ModeButton(
           tooltip: switch (c.loopMode) {
             LoopMode.off => 'Enable repeat',
             LoopMode.all => 'Enable repeat one',
@@ -423,8 +424,10 @@ class TransportControls extends StatelessWidget {
 }
 
 /// Toggle icon with the little active dot underneath.
-class _ModeButton extends StatelessWidget {
-  const _ModeButton({
+/// A toggle (shuffle, repeat): accent-coloured with a dot underneath while on.
+class ModeButton extends StatelessWidget {
+  const ModeButton({
+    super.key,
     required this.tooltip,
     required this.active,
     required this.icon,

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,12 +23,23 @@ import 'ytdlp.dart';
 class PlayerController extends ChangeNotifier {
   PlayerController() {
     _subs.add(
-      player.sequenceStateStream.listen((_) {
-        _maybeAutoplay();
-        _recordRecent();
-        _updatePresence();
-        notifyListeners();
-      }),
+      // just_audio re-emits the sequence state with every position update
+      // (several times a second); only a real queue / song change matters here.
+      player.sequenceStateStream
+          .distinct(
+            (a, b) =>
+                a.currentIndex == b.currentIndex &&
+                a.loopMode == b.loopMode &&
+                a.shuffleModeEnabled == b.shuffleModeEnabled &&
+                listEquals(a.sequence, b.sequence),
+          )
+          .listen((_) {
+            _maybeAutoplay();
+            _prefetchNext();
+            _recordRecent();
+            _updatePresence();
+            notifyListeners();
+          }),
     );
     _subs.add(
       player.playerStateStream.listen((_) {
@@ -177,6 +189,19 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// Looks up the stream of the next two songs ahead of time, so skipping
+  /// to a YouTube song doesn't wait on yt-dlp. Cached, so repeats are free.
+  void _prefetchNext() {
+    if (!YtDlp.supported) return;
+    final seq = player.sequenceState;
+    final at = seq.currentIndex;
+    if (at == null) return;
+    for (final s in seq.sequence.skip(at + 1).take(2)) {
+      final t = s.tag as Track;
+      if (t.isRemote && downloadedCopy(t) == null) YtDlp.resolve(t.videoId!).ignore();
+    }
+  }
+
   /// Whether the play button has something to start: the queue, or the local library.
   bool get canPlay => player.audioSources.isNotEmpty || _library.isNotEmpty;
 
@@ -250,8 +275,7 @@ class PlayerController extends ChangeNotifier {
     tracks: p.tracks,
   );
 
-  Collection? playlistById(String? id) =>
-      _playlists.where((p) => p.id == id).map(playlistCollection).firstOrNull;
+  Collection? playlistById(String? id) => _playlists.where((p) => p.id == id).map(playlistCollection).firstOrNull;
 
   Future<void> _savePlaylists() async => (await SharedPreferences.getInstance()).setString(
     _playlistsKey,
@@ -292,8 +316,15 @@ class PlayerController extends ChangeNotifier {
     return added;
   }
 
-  void removeFromPlaylist(String id, Track track) =>
-      _updatePlaylist(id, (p) => p.copyWith(tracks: [for (final t in p.tracks) if (t.id != track.id) t]));
+  void removeFromPlaylist(String id, Track track) => _updatePlaylist(
+    id,
+    (p) => p.copyWith(
+      tracks: [
+        for (final t in p.tracks)
+          if (t.id != track.id) t,
+      ],
+    ),
+  );
 
   void movePlaylistItem(String id, int from, int to) => _updatePlaylist(id, (p) {
     final list = [...p.tracks];
@@ -304,7 +335,10 @@ class PlayerController extends ChangeNotifier {
 
   static List<Track> _unique(List<Track> tracks) {
     final seen = <String>{};
-    return [for (final t in tracks) if (seen.add(t.id)) t];
+    return [
+      for (final t in tracks)
+        if (seen.add(t.id)) t,
+    ];
   }
 
   // ── Offline copies ───────────────────────────────────────────────────────
@@ -680,6 +714,25 @@ class PlayerController extends ChangeNotifier {
     if (index < 0) return;
     await player.seek(Duration.zero, index: index);
     unawaited(player.play());
+  }
+
+  /// Puts [tracks] right after the current song ("Play next").
+  Future<void> playNext(List<Track> tracks) async {
+    final current = currentTrack;
+    final at = player.sequenceState.currentIndex;
+    if (current == null || at == null) return playList(tracks, 0);
+    final inOrder = _ordered.indexWhere((t) => t.id == current.id);
+    _ordered = [..._ordered]..insertAll(inOrder < 0 ? _ordered.length : inOrder + 1, tracks);
+    await player.insertAudioSources(at + 1, [for (final t in tracks) _sourceFor(t)]);
+    notifyListeners();
+  }
+
+  /// Puts [tracks] at the end of the queue ("Add to queue").
+  Future<void> addToQueue(List<Track> tracks) async {
+    if (currentTrack == null) return playList(tracks, 0);
+    _ordered = [..._ordered, ...tracks];
+    await player.addAudioSources([for (final t in tracks) _sourceFor(t)]);
+    notifyListeners();
   }
 
   Future<void> togglePlay() async {

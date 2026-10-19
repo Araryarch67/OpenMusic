@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:openmusic/models/track.dart';
@@ -132,6 +134,8 @@ FILE "album.wav" WAVE
         ('b.flac', ['-sample_fmt', 's16'], 16),
         ('c.wav', ['-c:a', 'pcm_s24le'], 24),
         ('d.aiff', ['-c:a', 'pcm_s16be'], 16),
+        ('e.wv', ['-c:a', 'wavpack', '-sample_fmt', 's16p'], 16),
+        ('f.m4a', ['-c:a', 'alac', '-sample_fmt', 's32p'], 24),
       ]) {
         final r = await Process.run('ffmpeg', [
           '-loglevel', 'error', '-f', 'lavfi', '-i', 'anullsrc=r=96000', '-t', '0.2', ...args, '${dir.path}/$name', //
@@ -141,6 +145,13 @@ FILE "album.wav" WAVE
         expect(AudioEngine.parseSourceBits(head), bits, reason: name);
       }
       expect(SignalPath.describe('s32', 96000, stored: 24), '24-bit / 96 kHz');
+      // Monkey's Audio 3.99: "MAC ", version 3990, descriptor 52 bytes, header with 24 bits at +16.
+      final ape = Uint8List(128)
+        ..setAll(0, 'MAC '.codeUnits)
+        ..buffer.asByteData().setUint16(4, 3990, Endian.little)
+        ..buffer.asByteData().setUint32(8, 52, Endian.little)
+        ..buffer.asByteData().setUint16(52 + 16, 24, Endian.little);
+      expect(AudioEngine.parseSourceBits(ape), 24);
     });
 
     test('reads what the DAC receives and judges it', () {
@@ -205,6 +216,70 @@ FILE "album.wav" WAVE
       await a.setBitPerfect(true);
       expect(a.filterChain, isEmpty);
       expect(a.effectiveLeveling, VolumeLeveling.off);
+    });
+
+    test('the filter chain really changes the sound (measured through mpv)', () async {
+      final dir = Directory.systemTemp.createTempSync('dsp');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final sine = '${dir.path}/sine.wav';
+      final ok = await Process.run('ffmpeg', [
+        '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=f=1000:d=2:r=48000', '-ac', '2', sine, //
+      ]);
+      if (ok.exitCode != 0) return markTestSkipped('ffmpeg not available');
+      // 48 equal taps at 48 kHz: a moving average whose first null is exactly 1 kHz.
+      final ir = '${dir.path}/boxcar.wav';
+      await Process.run('ffmpeg', [
+        '-loglevel', 'error', '-f', 'lavfi', '-i', "aevalsrc='if(lt(n,48),1/48,0)':s=48000:d=0.01", '-ac', '2', ir, //
+      ]);
+
+      Future<double> peakDb(String chain) async {
+        final out = '${dir.path}/out.wav';
+        final r = await Process.run('mpv', [
+          '--no-config', '--ao=pcm', '--ao-pcm-file=$out', '--audio-format=s16', //
+          if (chain.isNotEmpty) '--af=$chain', sine,
+        ]);
+        expect(r.exitCode, 0, reason: '${r.stderr}');
+        final bytes = File(out).readAsBytesSync();
+        final pcm = ByteData.sublistView(bytes, 44);
+        var peak = 0;
+        // Skip the first half second (filter start-up), measure the steady tone.
+        for (var i = 48000 * 2 * 2; i + 1 < pcm.lengthInBytes; i += 2) {
+          final v = pcm.getInt16(i, Endian.little).abs();
+          if (v > peak) peak = v;
+        }
+        return 20 * math.log(peak / 32768) / math.ln10;
+      }
+
+      final dry = await peakDb('');
+      final a = AudioEngine()..debugVolume = 0.25;
+      final quieter = await peakDb(a.filterChain);
+      printOnFailure('dry $dry dB, 25% volume $quieter dB');
+      expect(quieter - dry, closeTo(-12.04, 0.2), reason: '25% volume is -12 dB');
+
+      final b = AudioEngine()
+        ..impulsePath = ir
+        ..convolution = true;
+      expect(b.filterChain, contains('afir'));
+      final corrected = await peakDb(b.filterChain);
+      // ignore: avoid_print
+      print('measured: dry ${dry.toStringAsFixed(2)} dB, volume 25% ${(quieter - dry).toStringAsFixed(2)} dB, room correction ${(corrected - dry).toStringAsFixed(1)} dB');
+      expect(corrected - dry, lessThan(-30), reason: 'the 1 kHz tone sits in the impulse response\'s null');
+
+      // Positive control: a single unit impulse must leave the tone as it is.
+      final dirac = '${dir.path}/dirac.wav';
+      await Process.run('ffmpeg', [
+        '-loglevel', 'error', '-f', 'lavfi', '-i', "aevalsrc='if(eq(n,0),1,0)':s=48000:d=0.01", '-ac', '2', dirac, //
+      ]);
+      final c = AudioEngine()
+        ..impulsePath = dirac
+        ..convolution = true;
+      final passed = await peakDb(c.filterChain);
+      // ignore: avoid_print
+      print('dirac: ${(passed - dry).toStringAsFixed(2)} dB');
+      expect((passed - dry).abs(), lessThan(1), reason: 'a unit impulse changes nothing');
+
+      b.bitPerfect = true;
+      expect(b.filterChain, isEmpty, reason: 'bit-perfect bypasses room correction');
     });
 
     test('settings persist', () async {

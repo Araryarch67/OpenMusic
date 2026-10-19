@@ -96,6 +96,11 @@ test/                          Unit and widget tests
    `integration_test/zz_audio_test.dart` (read it back with `signalPath()`).
 7. Update [Features.md](Features.md): move the row to *Working* or *Partial*.
 
+- An output device that isn't plugged in (a USB DAC) falls back to the
+  system default with a note under Output device; the choice stays saved.
+- `services/media_session.dart` (audio_service) mirrors the player to the
+  Android notification / lock screen, Control Center and Linux MPRIS.
+
 ## YouTube Music
 
 - InnerTube `WEB_REMIX`, **no API key** (it isn't needed, and a key-shaped
@@ -150,6 +155,25 @@ env -u DISPLAY WAYLAND_DISPLAY=om-test GDK_BACKEND=wayland \
 - `zz_responsive_test` sweeps every screen across 90 window sizes; it needs a
   folder of tagged MP3s (see `s` at the top of the file).
 - Add `--dart-define=SHOTS=<dir>` to save screenshots, then look at them.
+- `flutter test -d linux` rebuilds `build/linux/x64/debug/bundle`. If someone
+  has `flutter run` open on the project, that breaks their running app; run
+  integration tests from a copy of the project instead.
+
+### Performance budget
+
+`tool/perf.sh` runs `integration_test/performance_test.dart` in **profile
+mode** (debug-mode speed means nothing) in its own headless Weston. It plays
+a generated 120-song library and wheel-scrolls Home and All Songs, then
+prints `PERF …` lines and saves `build/perf/<date>.json` to compare runs.
+It fails when:
+
+- the whole app is told to rebuild more than twice a second while a song just
+  plays (`PlayerController.notifyListeners`; just_audio re-emits its sequence
+  state on every position tick, so only real changes may pass through), or
+- a frame's build takes over 8 ms at the 90th percentile, or 40 ms at worst.
+
+Raster (GPU) time can't be measured headless; check that on real hardware
+with `flutter run --profile` and DevTools.
 
 ## Conventions
 

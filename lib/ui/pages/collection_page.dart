@@ -71,11 +71,17 @@ class CollectionPage extends StatelessWidget {
                           : () => c.playCollection(live),
                     ),
                     const SizedBox(width: 16),
-                    IconButton(
-                      tooltip: 'Shuffle play',
-                      iconSize: 30,
-                      onPressed: tracks.isEmpty ? null : () => c.playCollection(live, shuffled: true),
-                      icon: const Icon(Icons.shuffle_rounded),
+                    // Lit while this collection plays shuffled; there it toggles shuffle.
+                    ModeButton(
+                      tooltip: playingHere ? (c.shuffle ? 'Disable shuffle' : 'Enable shuffle') : 'Shuffle play',
+                      active: playingHere && c.shuffle,
+                      size: 30,
+                      icon: Icons.shuffle_rounded,
+                      onPressed: tracks.isEmpty
+                          ? null
+                          : playingHere
+                          ? c.toggleShuffle
+                          : () => c.playCollection(live, shuffled: true),
                     ),
                     ...actions,
                     if (isAll) ...[

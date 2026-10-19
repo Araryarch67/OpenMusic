@@ -209,6 +209,7 @@ class AudioEngine extends ChangeNotifier {
   AudioEngine() {
     // Pitch control makes media_kit own the `af` property (scaletempo); the app needs it for EQ.
     JustAudioMediaKit.pitch = false;
+    JustAudioMediaKit.volumeOverride = _setVolume;
     JustAudioMediaKit.onPlayerCreated = (p) => unawaited(_applyAll(p));
   }
 
@@ -230,6 +231,12 @@ class AudioEngine extends ChangeNotifier {
 
   /// Headphone crossfeed strength 0..1 (0 = off).
   double crossfeed = 0;
+
+  /// Room correction: an impulse response (WAV/FLAC, e.g. from REW) convolved
+  /// with everything played. Kept as a copy in the app's folder, see [setImpulse].
+  String? impulsePath;
+  String? impulseName;
+  bool convolution = false;
 
   String device = 'auto';
   bool exclusive = false;
@@ -277,6 +284,9 @@ class AudioEngine extends ChangeNotifier {
       outputRate = j['outputRate'] as int?;
       hqResampler = j['hqResampler'] as bool? ?? hqResampler;
       bitPerfect = j['bitPerfect'] as bool? ?? bitPerfect;
+      impulsePath = j['impulsePath'] as String?;
+      impulseName = j['impulseName'] as String?;
+      convolution = (j['convolution'] as bool? ?? false) && impulsePath != null && File(impulsePath!).existsSync();
     } catch (e) {
       debugPrint('Ignoring bad audio settings: $e');
     }
@@ -297,6 +307,9 @@ class AudioEngine extends ChangeNotifier {
       'outputRate': outputRate,
       'hqResampler': hqResampler,
       'bitPerfect': bitPerfect,
+      'impulsePath': impulsePath,
+      'impulseName': impulseName,
+      'convolution': convolution,
     }),
   );
 
@@ -347,6 +360,25 @@ class AudioEngine extends ChangeNotifier {
 
   Future<void> setEqEnabled(bool v) => _set(() => eqEnabled = v);
 
+  Future<void> setConvolution(bool v) => _set(() => convolution = v && impulsePath != null);
+
+  /// Uses [file] as the room-correction impulse response. It's copied under
+  /// a plain name: the path goes inside an FFmpeg filter graph, where commas,
+  /// colons and brackets in a user's file name would need escaping.
+  Future<void> setImpulse(File file, {required String name, required Directory into}) async {
+    await into.create(recursive: true);
+    final ext = file.path.split('.').last.toLowerCase();
+    final copy = File('${into.path}${Platform.pathSeparator}impulse-${DateTime.now().millisecondsSinceEpoch}.$ext');
+    await file.copy(copy.path);
+    final old = impulsePath;
+    await _set(() {
+      impulsePath = copy.path;
+      impulseName = name;
+      convolution = true;
+    });
+    if (old != null && old != copy.path) File(old).delete().ignore();
+  }
+
   Future<void> setBand(int i, EqBand band) => _set(() {
     bands = [...bands]..[i] = band;
     eqPreset = 'Custom';
@@ -367,9 +399,31 @@ class AudioEngine extends ChangeNotifier {
 
   // ── mpv ─────────────────────────────────────────────────────────────────
 
+  /// The player's volume, applied by [filterChain] in 64-bit float (mpv stays at 100%).
+  double _volume = 1;
+
+  bool get _volumeActive => _volume < 0.99999 && !bitPerfect;
+
+  @visibleForTesting
+  set debugVolume(double v) => _volume = v;
+
+  Future<void> _setVolume(Player player, double v) async {
+    final was = _volumeActive;
+    _volume = v.clamp(0, 1);
+    if (player.platform case final NativePlayer p) {
+      if (was && _volumeActive) {
+        // Just a new level: tell the running filter instead of rebuilding the chain (no click).
+        await p.command(['af-command', 'volume', 'volume', _volume.toStringAsFixed(6), 'volume']);
+      } else if (was != _volumeActive) {
+        await p.setProperty('af', filterChain);
+      }
+    }
+  }
+
   /// Equalizer curve active right now (bit-perfect mode bypasses everything).
   bool get eqActive => eqEnabled && !bitPerfect && bands.any((b) => b.gain.abs() > 0.05);
   bool get crossfeedActive => crossfeed > 0 && !bitPerfect;
+  bool get convolutionActive => convolution && impulsePath != null && !bitPerfect;
   VolumeLeveling get effectiveLeveling => bitPerfect ? VolumeLeveling.off : leveling;
 
   /// Lowered so boosted bands can't clip: the loudest band ends at 0 dB.
@@ -383,11 +437,16 @@ class AudioEngine extends ChangeNotifier {
   String get filterChain {
     String n(double v) => v.toStringAsFixed(2);
     return [
+      // First: room correction applies to the signal as a whole.
+      if (convolutionActive)
+        '@convolution:lavfi=[amovie=filename=${impulsePath!.replaceAll('\\', '/').replaceAll(':', '\\:')}[ir];[in][ir]afir[out]]',
       if (eqActive) ...[
         if (preamp < 0) '@preamp:lavfi=[volume=volume=${n(preamp)}dB]',
         '@eq:lavfi=[${bands.where((b) => b.gain.abs() > 0.05).map((b) => 'equalizer=f=${n(b.frequency)}:t=q:w=${n(b.q)}:g=${n(b.gain)}').join(',')}]',
       ],
       if (crossfeedActive) '@crossfeed:lavfi=[crossfeed=strength=${n(0.1 + crossfeed * 0.6)}:range=0.5]',
+      // Last, so nothing after it can clip what it lowered.
+      if (_volumeActive) '@volume:lavfi=[volume=volume=${_volume.toStringAsFixed(6)}:precision=double]',
     ].join(',');
   }
 
@@ -417,8 +476,8 @@ class AudioEngine extends ChangeNotifier {
       'audio-samplerate': bitPerfect ? '0' : '${outputRate ?? 0}',
       // Only used when the rate has to change; keeps the default otherwise.
       'audio-swresample-o': hqResampler && !bitPerfect ? await _hqResampler() : '',
-      // Volume and leveling bypassed: mpv must not scale samples at all.
-      if (bitPerfect) 'volume': '100',
+      // Volume is applied in the filter chain (64-bit float); mpv must not scale samples too.
+      'volume': '100',
     };
     for (final e in props.entries) {
       await p.setProperty(e.key, e.value);
@@ -429,6 +488,15 @@ class AudioEngine extends ChangeNotifier {
   /// sound card behind the chosen output (the system mixer would resample),
   /// and a direct card is first taken over from PipeWire.
   Future<String> _outputDevice() async {
+    // The chosen output is unplugged (e.g. a USB DAC): forcing it gives no sound
+    // at all, so play through the system default until it's back. The choice is
+    // kept; [refreshDevices] runs for every new player, so it returns by itself.
+    final listed = devices.length > 1; // the list failed to load otherwise
+    if (device != 'auto' && listed && !devices.any((d) => d.name == device)) {
+      _releaseCard();
+      _setDeviceError('The chosen output isn\'t connected, so it plays through the system default for now.');
+      return 'auto';
+    }
     if (!LinuxAlsa.supported) return device;
     var target = device;
     if (bitPerfect && LinuxAlsa.byMpvName(device) == null) {
@@ -571,7 +639,14 @@ class AudioEngine extends ChangeNotifier {
     try {
       final f = await File(path).open();
       try {
-        return parseSourceBits(await f.read(64 * 1024));
+        final head = await f.read(64 * 1024);
+        final bits = parseSourceBits(head);
+        if (bits != null) return bits;
+        // MP4 files often keep their index (with ALAC's bit depth) at the end.
+        final length = await f.length();
+        if (length <= head.length) return null;
+        await f.setPosition((length - 512 * 1024).clamp(0, length));
+        return parseSourceBits(await f.read(512 * 1024));
       } finally {
         await f.close();
       }
@@ -595,6 +670,34 @@ class AudioEngine extends ChangeNotifier {
         if (tag(at) == 'fmt ' && at + 24 <= b.length) return b[at + 22] | b[at + 23] << 8;
         at += 8 + size + (size & 1);
       }
+    }
+    int le16(int at) => b[at] | b[at + 1] << 8;
+    if (tag(0) == 'wvpk' && b.length >= 32) {
+      // WavPack block header: flags at 24, bytes per sample − 1 in the low two bits.
+      final flags = le32(24);
+      return flags & 0x80 != 0 ? 32 : ((flags & 3) + 1) * 8;
+    }
+    if (tag(0) == 'MAC ' && b.length >= 64) {
+      // Monkey's Audio ≥ 3.98: descriptor, then the header with the bit depth at +16.
+      final version = le16(4);
+      if (version >= 3980) {
+        final header = le32(8);
+        if (header + 18 <= b.length) return le16(header + 16);
+      } else {
+        // Older files: flags at 6 (8-bit / 24-bit), 16-bit otherwise.
+        final flags = le16(6);
+        return flags & 0x1 != 0
+            ? 8
+            : flags & 0x8 != 0
+            ? 24
+            : 16;
+      }
+    }
+    // ALAC in MP4: the "alac" magic cookie inside the sample description.
+    for (var at = b.indexOfAlac(); at >= 0 && at + 21 < b.length; at = b.indexOfAlac(at + 4)) {
+      // The sample entry is named "alac" too; the cookie is the nested one: size, "alac", version/flags,
+      // frameLength(4), compatibleVersion(1), bitDepth(1).
+      if (tag(at + 4) == 'alac' && be32(at) == 36) return b[at + 4 + 4 + 4 + 4 + 1];
     }
     if (tag(0) == 'FORM' && (tag(8) == 'AIFF' || tag(8) == 'AIFC')) {
       for (var at = 12; at + 8 <= b.length;) {
@@ -643,17 +746,29 @@ class AudioEngine extends ChangeNotifier {
       output: output,
       device: device,
       filters: [
-        for (final m in RegExp(r'@(\w+):').allMatches(af))
+        // Volume has its own stage; the rest are listed in order.
+        for (final m in RegExp(r'@(\w+):').allMatches(af).where((m) => m[1] != 'volume'))
           switch (m[1]) {
             'eq' => 'Equalizer',
             'preamp' => 'Equalizer headroom',
             'crossfeed' => 'Headphone crossfeed',
+            'convolution' => 'Room correction (${impulseName ?? 'convolution'})',
             final other => other!,
           },
       ],
-      volume: double.tryParse(await g('volume')) ?? 100,
+      volume: (double.tryParse(await g('volume')) ?? 100) * _volume,
       leveling: effectiveLeveling != VolumeLeveling.off,
       bitrate: int.tryParse(await g('audio-bitrate')),
     );
+  }
+}
+
+extension on Uint8List {
+  /// Offset of the 4-byte box size before an "alac" atom name, or -1.
+  int indexOfAlac([int from = 0]) {
+    for (var i = from + 4; i + 4 <= length; i++) {
+      if (this[i] == 0x61 && this[i + 1] == 0x6c && this[i + 2] == 0x61 && this[i + 3] == 0x63) return i - 4;
+    }
+    return -1;
   }
 }

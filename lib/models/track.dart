@@ -18,6 +18,7 @@ class Track {
     this.sourceUrl,
     this.videoId,
     this.artworkUrl,
+    this.artistId,
   });
 
   /// A YouTube / YouTube Music song that streams instead of playing from disk.
@@ -27,6 +28,7 @@ class Track {
     required String artist,
     Duration? duration,
     String? artworkUrl,
+    String? artistId,
   }) => Track(
     id: 'yt:$videoId',
     uri: Uri.parse('https://music.youtube.com/watch?v=$videoId'),
@@ -37,6 +39,7 @@ class Track {
     sourceUrl: 'https://music.youtube.com/watch?v=$videoId',
     videoId: videoId,
     artworkUrl: artworkUrl ?? 'https://i.ytimg.com/vi/$videoId/hqdefault.jpg',
+    artistId: artistId,
   );
 
   /// Builds a track from a file URI, guessing title/artist from the
@@ -72,6 +75,7 @@ class Track {
     sourceUrl: json['sourceUrl'] as String?,
     videoId: json['videoId'] as String?,
     artworkUrl: json['artworkUrl'] as String?,
+    artistId: json['artistId'] as String?,
   );
 
   static const unknownArtist = 'Unknown artist';
@@ -101,6 +105,9 @@ class Track {
 
   /// Cover art fetched over the network (streamed songs have no file to read it from).
   final String? artworkUrl;
+
+  /// The YouTube Music artist channel (`UC…`) of a streamed song, when known.
+  final String? artistId;
 
   bool get isRemote => videoId != null;
 
@@ -138,6 +145,7 @@ class Track {
     sourceUrl: sourceUrl,
     videoId: videoId,
     artworkUrl: artworkUrl,
+    artistId: artistId,
   );
 
   Map<String, dynamic> toJson() => {
@@ -156,6 +164,7 @@ class Track {
     'sourceUrl': sourceUrl,
     'videoId': videoId,
     'artworkUrl': artworkUrl,
+    if (artistId != null) 'artistId': artistId,
   };
 
   /// Everything libmpv / FFmpeg decodes. DSD (dsf/dff) plays as high-rate PCM.

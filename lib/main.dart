@@ -8,8 +8,10 @@ import 'package:path_provider/path_provider.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'services/media_session.dart';
 import 'services/player_controller.dart';
 import 'ui/home_shell.dart';
+import 'ui/player_panels.dart' show MiniPlayerWindow, fullScreenPlayer, miniPlayer;
 import 'ui/theme.dart';
 import 'ui/widgets/title_bar.dart';
 
@@ -37,6 +39,7 @@ Future<void> main() async {
 
   final controller = PlayerController();
   await controller.load();
+  await MediaSession.start(controller);
   runApp(OpenMusicApp(controller: controller));
 }
 
@@ -93,13 +96,30 @@ class _DesktopFrame extends StatelessWidget {
       color: AppColors.background,
       child: Column(
         children: [
-          const AppTitleBar(),
+          // Hidden while the player fills the screen.
+          ValueListenableBuilder(
+            valueListenable: fullScreenPlayer,
+            builder: (context, full, bar) => full ? const SizedBox.shrink() : bar!,
+            child: const AppTitleBar(),
+          ),
           Expanded(
             child: MediaQuery.removePadding(context: context, removeTop: true, child: child),
           ),
         ],
       ),
     );
-    return Platform.isLinux ? DragToResizeArea(resizeEdgeSize: 6, child: frame) : frame;
+    // Mini player: the app stays alive (hidden) under it, so leaving it returns to the same page.
+    final withMini = ValueListenableBuilder(
+      valueListenable: miniPlayer,
+      builder: (context, mini, app) => Stack(
+        fit: StackFit.expand,
+        children: [
+          Offstage(offstage: mini, child: app),
+          if (mini) const Material(type: MaterialType.transparency, child: MiniPlayerWindow()),
+        ],
+      ),
+      child: frame,
+    );
+    return Platform.isLinux ? DragToResizeArea(resizeEdgeSize: 6, child: withMini) : withMini;
   }
 }

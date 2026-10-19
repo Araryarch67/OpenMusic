@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -14,6 +16,8 @@ abstract final class AppColors {
   static const accent = Color(0xFF2EE6C5);
   static const onAccent = Color(0xFF00201B);
 }
+
+bool get _desktop => Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
 ThemeData buildAppTheme({String? fontFamily}) {
   final base = ThemeData(
@@ -51,8 +55,13 @@ ThemeData buildAppTheme({String? fontFamily}) {
     chipTheme: ChipThemeData(
       backgroundColor: AppColors.hover,
       selectedColor: AppColors.textPrimary,
-      labelStyle: text.labelLarge,
-      secondaryLabelStyle: text.labelLarge?.copyWith(color: Colors.black),
+      // Material 3 ignores secondaryLabelStyle: the selected (white) chip needs
+      // its dark label from a state colour, or the text vanishes.
+      labelStyle: text.labelLarge?.copyWith(
+        color: WidgetStateColor.resolveWith(
+          (states) => states.contains(WidgetState.selected) ? Colors.black : AppColors.textPrimary,
+        ),
+      ),
       side: BorderSide.none,
       shape: const StadiumBorder(),
       showCheckmark: false,
@@ -61,11 +70,21 @@ ThemeData buildAppTheme({String? fontFamily}) {
       color: AppColors.hover,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
     ),
+    // A small dark card floating over the bottom of the page: centred and
+    // narrow on desktop, inset from the edges on phones.
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
-      backgroundColor: AppColors.textPrimary,
-      contentTextStyle: text.bodyMedium?.copyWith(color: Colors.black, fontWeight: FontWeight.w600),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      width: _desktop ? 440 : null,
+      insetPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      backgroundColor: AppColors.hover,
+      elevation: 8,
+      contentTextStyle: text.bodyMedium?.copyWith(color: AppColors.textPrimary, fontWeight: FontWeight.w500),
+      actionTextColor: AppColors.accent,
+      closeIconColor: AppColors.textSecondary,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: Color(0x1FFFFFFF)),
+      ),
     ),
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(color: AppColors.hover, borderRadius: BorderRadius.circular(4)),
