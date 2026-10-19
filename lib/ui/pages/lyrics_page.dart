@@ -70,9 +70,19 @@ class LyricsPage extends StatelessWidget {
                 ),
               ),
               Expanded(
-                child: track == null
-                    ? const _Message('Play a song to see its lyrics here.')
-                    : _LyricsLoader(key: ValueKey(track.id), track: track),
+                // Lines fade out under the header instead of being cut off.
+                child: ShaderMask(
+                  blendMode: BlendMode.dstIn,
+                  shaderCallback: (rect) => const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+                    stops: [0, 0.08, 0.92, 1],
+                  ).createShader(rect),
+                  child: track == null
+                      ? const _Message('Play a song to see its lyrics here.')
+                      : _LyricsLoader(key: ValueKey(track.id), track: track),
+                ),
               ),
               if (fullScreen && track != null) ...[
                 const Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: SeekBar()),
