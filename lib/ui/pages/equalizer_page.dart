@@ -78,7 +78,9 @@ class EqualizerPage extends StatelessWidget {
                   child: Row(
                     children: [
                       for (var i = 0; i < audio.bands.length; i++)
-                        Expanded(child: _BandSlider(index: i, band: audio.bands[i], audio: audio)),
+                        Expanded(
+                          child: _BandSlider(index: i, band: audio.bands[i], audio: audio),
+                        ),
                     ],
                   ),
                 ),
@@ -151,10 +153,7 @@ class _BandSlider extends StatelessWidget {
             onTap: enabled ? () => _editBand(context) : null,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 6),
-              child: Text(
-                _freq(band.frequency),
-                style: text.labelMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
+              child: Text(_freq(band.frequency), style: text.labelMedium?.copyWith(fontWeight: FontWeight.w700)),
             ),
           ),
         ),
@@ -176,13 +175,14 @@ class _BandSlider extends StatelessWidget {
             children: [
               Text('Frequency: ${_freq(f)}Hz'),
               // Log scale: equal slider travel per octave.
-              Slider(
-                value: _log(f),
-                min: _log(20),
-                max: _log(20000),
-                onChanged: (v) => setState(() => f = _exp(v)),
+              Slider(value: _log(f), min: _log(20), max: _log(20000), onChanged: (v) => setState(() => f = _exp(v))),
+              Text(
+                'Width: ${q < 1
+                    ? 'wide'
+                    : q > 3
+                    ? 'narrow'
+                    : 'medium'} (Q ${q.toStringAsFixed(2)})',
               ),
-              Text('Width: ${q < 1 ? 'wide' : q > 3 ? 'narrow' : 'medium'} (Q ${q.toStringAsFixed(2)})'),
               Slider(value: q, min: 0.3, max: 8, onChanged: (v) => setState(() => q = v)),
             ],
           ),

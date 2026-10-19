@@ -95,12 +95,14 @@ class QualityBadge extends StatelessWidget {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (p.bitPerfect) ...[Icon(Icons.verified_rounded, size: 14, color: color), const SizedBox(width: 4)],
+                    if (p.bitPerfect) ...[
+                      Icon(Icons.verified_rounded, size: 14, color: color),
+                      const SizedBox(width: 4),
+                    ],
                     Text(
                       p.bitPerfect ? 'Bit-perfect · $label' : label,
-                      style: Theme.of(
-                        context,
-                      ).textTheme.labelSmall?.copyWith(color: color, fontWeight: FontWeight.w700, letterSpacing: 0.3),
+                      style: Theme.of(context).textTheme.labelSmall
+                          ?.copyWith(color: color, fontWeight: FontWeight.w700, letterSpacing: 0.3),
                     ),
                   ],
                 ),
@@ -146,8 +148,16 @@ class _SignalPathSheet extends StatelessWidget {
                     'For bit-perfect, turn on Bit-perfect mode in Settings › Advanced audio.',
               )
             : p.isDsd
-            ? ('DSD converted to PCM', Colors.white, 'DSD is decoded to high-rate PCM; native DSD / DoP output is not supported.')
-            : ('Processed', AppColors.textSecondary, 'Something below changes the samples. That is fine if it is what you want.');
+            ? (
+                'DSD converted to PCM',
+                Colors.white,
+                'DSD is decoded to high-rate PCM; native DSD / DoP output is not supported.',
+              )
+            : (
+                'Processed',
+                AppColors.textSecondary,
+                'Something below changes the samples. That is fine if it is what you want.',
+              );
         return SafeArea(
           child: SingleChildScrollView(
             padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
@@ -164,7 +174,10 @@ class _SignalPathSheet extends StatelessWidget {
                       size: 20,
                     ),
                     const SizedBox(width: 8),
-                    Text(verdict, style: text.titleMedium?.copyWith(color: verdictColor, fontWeight: FontWeight.w700)),
+                    Text(
+                      verdict,
+                      style: text.titleMedium?.copyWith(color: verdictColor, fontWeight: FontWeight.w700),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 4),
@@ -193,7 +206,8 @@ class _SignalPathSheet extends StatelessWidget {
                 if (p.inRate != p.outRate)
                   _Stage(
                     title: 'Resampled',
-                    value: '${SignalPath.formatRate(p.inRate)} → ${SignalPath.formatRate(p.outRate)} · ${AudioEngine.resamplerName}',
+                    value:
+                        '${SignalPath.formatRate(p.inRate)} → ${SignalPath.formatRate(p.outRate)} · ${AudioEngine.resamplerName}',
                     changes: true,
                   ),
                 _Stage(

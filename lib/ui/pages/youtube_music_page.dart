@@ -9,11 +9,13 @@ import '../theme.dart';
 import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
-import '../widgets/source_switch.dart';
 import 'collection_page.dart';
 import 'home_page.dart';
 import 'youtube_music_login_page.dart';
 import '../widgets/smooth_scroll.dart';
+import '../navigation.dart';
+import '../ytmusic_edit.dart';
+import '../../services/ytmusic_web.dart';
 
 /// Home when the source is YouTube Music: public home, explore and charts
 /// shelves for everyone; liked music, recent plays and playlists on top once
@@ -54,7 +56,13 @@ Collection likedCollection(List<Track> liked) =>
 /// Opens a library playlist or a public album / playlist in the current tab.
 void openRemotePlaylist(BuildContext context, RemotePlaylist p) {
   final account = PlayerScope.read(context).ytMusic;
+  // Library playlists open editable when they're the user's own.
+  if (p.browseId == null && account.canEdit) {
+    ShellScope.of(context).open(location: Locations.remotePlaylist(p.id), LibraryPlaylistPage(playlist: p));
+    return;
+  }
   ShellScope.of(context).open(
+    location: Locations.remotePlaylist(p.id),
     RemoteCollectionPage(
       title: p.title,
       load: () async => Collection(
@@ -85,10 +93,7 @@ class _Header extends StatelessWidget {
       padding: EdgeInsets.fromLTRB(pad, 0, pad, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (shell.compact) ...[const SourceSwitch(), const SizedBox(height: 16)],
-          Text(title, style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.8)),
-        ],
+        children: [Text(title, style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.8))],
       ),
     );
   }
@@ -165,15 +170,52 @@ class _DiscoverHome extends StatelessWidget {
             ),
           ),
         ),
-        const _DiscoverShelves(),
+        const DiscoverShelves(),
       ],
     );
   }
 }
 
+/// "Sign in with Google" strip for people not signed in to YouTube Music yet.
+class SignInBanner extends StatelessWidget {
+  const SignInBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final account = PlayerScope.of(context).ytMusic;
+    final text = Theme.of(context).textTheme;
+    final pad = ShellScope.of(context).compact ? 16.0 : 24.0;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(pad, 16, pad, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+        decoration: BoxDecoration(color: AppColors.elevated, borderRadius: BorderRadius.circular(8)),
+        child: Wrap(
+          alignment: WrapAlignment.spaceBetween,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            Text(
+              'Sign in to YouTube Music to add your liked songs, playlists and history.',
+              style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            ),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+              onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
+              icon: const Icon(Icons.login_rounded),
+              label: Text(account.connecting ? 'Signing in…' : 'Sign in with Google'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Home, Explore and Charts shelves, as one sliver.
-class _DiscoverShelves extends StatelessWidget {
-  const _DiscoverShelves();
+class DiscoverShelves extends StatelessWidget {
+  const DiscoverShelves({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -223,6 +265,7 @@ class _DiscoverShelves extends StatelessWidget {
                         track: t,
                         title: t.title,
                         subtitle: t.artist,
+                        online: !PlayerScope.read(context).isOffline(t),
                         onTap: () => c.playList(shelf.tracks, i, from: shelf.title),
                         onPlay: () => c.playList(shelf.tracks, i, from: shelf.title),
                       ),
@@ -231,6 +274,7 @@ class _DiscoverShelves extends StatelessWidget {
                         track: playlistCover(p),
                         title: p.title,
                         subtitle: p.subtitle ?? 'Playlist',
+                        online: true,
                         onTap: () => openRemotePlaylist(context, p),
                       ),
                   ],
@@ -274,6 +318,8 @@ class _LibraryHome extends StatelessWidget {
               icon: const Icon(Icons.refresh_rounded),
             ),
             PopupMenuButton<VoidCallback>(
+              // Over the whole window, so a click anywhere (sidebar included) closes it.
+              useRootNavigator: true,
               tooltip: 'Account',
               icon: const Icon(Icons.account_circle_outlined),
               onSelected: (action) => action(),
@@ -353,6 +399,7 @@ class _LibraryHome extends StatelessWidget {
                           track: t,
                           title: t.title,
                           subtitle: t.artist,
+                          online: !PlayerScope.read(context).isOffline(t),
                           onTap: () => c.playList(lib.recent, i, from: 'Recently played'),
                           onPlay: () => c.playList(lib.recent, i, from: 'Recently played'),
                         ),
@@ -370,6 +417,7 @@ class _LibraryHome extends StatelessWidget {
                           track: t,
                           title: t.title,
                           subtitle: t.artist,
+                          online: !PlayerScope.read(context).isOffline(t),
                           onTap: () => c.playCollection(likedCol, index: i),
                           onPlay: () => c.playCollection(likedCol, index: i),
                         ),
@@ -391,7 +439,7 @@ class _LibraryHome extends StatelessWidget {
                     ],
                   ),
                 ),
-              const _DiscoverShelves(),
+              const DiscoverShelves(),
             ],
           ],
         );
@@ -435,6 +483,185 @@ class _RemoteCollectionPageState extends State<RemoteCollectionPage> {
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+/// One of the library's playlists. If the account owns it, it can be renamed,
+/// made public or private, deleted, and songs can be removed from it.
+class LibraryPlaylistPage extends StatefulWidget {
+  const LibraryPlaylistPage({super.key, required this.playlist});
+
+  final RemotePlaylist playlist;
+
+  @override
+  State<LibraryPlaylistPage> createState() => _LibraryPlaylistPageState();
+}
+
+class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
+  late String _title = widget.playlist.title;
+  late Future<RemotePlaylistDetails> _details = _load();
+  RemotePlaylistDetails? _shown;
+
+  Future<RemotePlaylistDetails> _load() => PlayerScope.read(context).ytMusic.playlistDetails(widget.playlist.id);
+
+  void _reload() => setState(() => _details = _load());
+
+  void _removed(Track t) {
+    final d = _shown;
+    if (d == null) return;
+    setState(() {
+      _shown = RemotePlaylistDetails(
+        tracks: [
+          for (final x in d.tracks)
+            if (x.id != t.id) x,
+        ],
+        owned: d.owned,
+        privacy: d.privacy,
+        rowIds: {...d.rowIds}..remove(t.id),
+      );
+      _details = Future.value(_shown!);
+    });
+  }
+
+  Future<void> _rename() async {
+    final account = PlayerScope.read(context).ytMusic;
+    final messenger = ScaffoldMessenger.of(context);
+    final answer = await askPlaylistName(context, initialTitle: _title, askPrivacy: false);
+    if (answer == null) return;
+    try {
+      await account.renamePlaylist(widget.playlist.id, answer.title);
+      setState(() => _title = answer.title);
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _setPrivacy(PlaylistPrivacy privacy) async {
+    final account = PlayerScope.read(context).ytMusic;
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await account.setPlaylistPrivacy(widget.playlist.id, privacy);
+      messenger.showSnackBar(SnackBar(content: Text('Playlist is now ${privacy.label.toLowerCase()}')));
+      _reload();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  Future<void> _delete() async {
+    final account = PlayerScope.read(context).ytMusic;
+    final messenger = ScaffoldMessenger.of(context);
+    final history = ShellScope.of(context).history;
+    final navigator = Navigator.of(context);
+    final sure = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete playlist?'),
+        content: Text('"$_title" will be deleted from your YouTube Music library. This can\'t be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (sure != true) return;
+    try {
+      await account.deletePlaylist(widget.playlist.id);
+      messenger.showSnackBar(SnackBar(content: Text('Deleted "$_title"')));
+      history != null ? history.back() : navigator.maybePop();
+    } catch (e) {
+      messenger.showSnackBar(SnackBar(content: Text('$e')));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<RemotePlaylistDetails>(
+      future: _details,
+      builder: (context, snap) {
+        final d = snap.data;
+        if (d == null) {
+          return PageScaffold(
+            title: _title,
+            slivers: [
+              SliverToBoxAdapter(child: _Header(_title)),
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(48),
+                  child: Center(
+                    child: snap.hasError
+                        ? Column(
+                            children: [
+                              Text('Couldn\'t load this playlist: ${snap.error}'),
+                              TextButton(onPressed: _reload, child: const Text('Try again')),
+                            ],
+                          )
+                        : const CircularProgressIndicator(strokeWidth: 2.5),
+                  ),
+                ),
+              ),
+            ],
+          );
+        }
+        _shown = d;
+        final collection = Collection(
+          kind: CollectionKind.remote,
+          title: _title,
+          subtitle: [if (d.privacy != null) d.privacy!.label, 'YouTube Music'].join(' · '),
+          tracks: d.tracks,
+        );
+        return PlaylistEditScope(
+          canRemove: (t) => d.owned && d.rowIds.containsKey(t.id),
+          remove: (context, t) async {
+            final row = d.rowIds[t.id];
+            if (row != null && await removeFromRemotePlaylist(context, widget.playlist.id, t, row)) _removed(t);
+          },
+          child: CollectionPage(
+            collection: collection,
+            actions: [
+              if (d.owned)
+                PopupMenuButton<VoidCallback>(
+                  // Over the whole window, so a click anywhere (sidebar included) closes it.
+                  useRootNavigator: true,
+                  tooltip: 'Edit playlist',
+                  icon: const Icon(Icons.more_horiz_rounded, size: 30),
+                  onSelected: (action) => action(),
+                  itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: _rename,
+                      child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
+                    ),
+                    for (final p in PlaylistPrivacy.values)
+                      if (p != d.privacy)
+                        PopupMenuItem(
+                          value: () => _setPrivacy(p),
+                          child: ListTile(
+                            leading: Icon(switch (p) {
+                              PlaylistPrivacy.public => Icons.public_rounded,
+                              PlaylistPrivacy.unlisted => Icons.link_rounded,
+                              PlaylistPrivacy.private => Icons.lock_outline_rounded,
+                            }),
+                            title: Text('Make ${p.label.toLowerCase()}'),
+                          ),
+                        ),
+                    PopupMenuItem(
+                      value: _delete,
+                      child: const ListTile(
+                        leading: Icon(Icons.delete_outline_rounded),
+                        title: Text('Delete playlist'),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
         );
       },
     );
@@ -490,6 +717,7 @@ class YoutubeMusicLibraryList extends StatelessWidget {
           required Widget art,
           required String title,
           required String subtitle,
+          required String location,
           required VoidCallback onTap,
         }) {
           final tile = InkWell(
@@ -527,7 +755,8 @@ class YoutubeMusicLibraryList extends StatelessWidget {
                     ),
             ),
           );
-          return collapsed ? Tooltip(message: title, child: tile) : tile;
+          final highlighted = SelectedHighlight(history: shell.history, location: location, child: tile);
+          return collapsed ? Tooltip(message: title, child: highlighted) : highlighted;
         }
 
         return SmoothScroll(
@@ -535,10 +764,25 @@ class YoutubeMusicLibraryList extends StatelessWidget {
             controller: scroll,
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
             children: [
+              if (account.canEdit)
+                row(
+                  art: const SizedBox.square(
+                    dimension: 48,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(color: AppColors.hover),
+                      child: Icon(Icons.add_rounded, color: AppColors.textPrimary),
+                    ),
+                  ),
+                  title: 'New playlist',
+                  subtitle: 'Create one in YouTube Music',
+                  location: '',
+                  onTap: () => createPlaylist(context),
+                ),
               row(
                 art: CoverMosaic(tracks: lib.liked, size: 48),
                 title: 'Liked music',
                 subtitle: 'Playlist • ${lib.liked.length} songs',
+                location: Locations.collection(liked),
                 onTap: () => shell.openCollection(liked),
               ),
               for (final p in lib.playlists)
@@ -546,6 +790,7 @@ class YoutubeMusicLibraryList extends StatelessWidget {
                   art: Artwork(track: playlistCover(p), size: 48),
                   title: p.title,
                   subtitle: p.count == 0 ? 'Playlist' : 'Playlist • ${p.count} songs',
+                  location: Locations.remotePlaylist(p.id),
                   onTap: () => openRemotePlaylist(context, p),
                 ),
             ],

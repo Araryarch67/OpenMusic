@@ -16,21 +16,14 @@ import 'metadata.dart';
 import 'youtube_audio_source.dart';
 import 'youtube_music_account.dart';
 import 'youtube_importer.dart';
-
-/// Where Home, Search and Library get their music from.
-enum MusicSource {
-  local('Local'),
-  youtubeMusic('YouTube Music');
-
-  const MusicSource(this.label);
-  final String label;
-}
+import 'ytdlp.dart';
 
 /// Owns the audio player, the library and the play queue.
 class PlayerController extends ChangeNotifier {
   PlayerController() {
     _subs.add(
       player.sequenceStateStream.listen((_) {
+        _maybeAutoplay();
         _recordRecent();
         _updatePresence();
         notifyListeners();
@@ -49,16 +42,61 @@ class PlayerController extends ChangeNotifier {
     _subs.add(player.positionDiscontinuityStream.listen((_) => _updatePresence(force: true)));
   }
 
-  static const _sourceKey = 'source.v1';
+  static const _autoplayKey = 'autoplay.v1';
 
-  MusicSource _source = MusicSource.local;
-  MusicSource get source => _source;
+  bool _autoplay = true;
 
-  Future<void> setSource(MusicSource value) async {
-    if (value == _source) return;
-    _source = value;
+  /// Like YouTube Music: when the queue runs out, keep going with similar songs.
+  bool get autoplay => _autoplay;
+
+  Future<void> setAutoplay(bool value) async {
+    _autoplay = value;
     notifyListeners();
-    await (await SharedPreferences.getInstance()).setString(_sourceKey, value.name);
+    _maybeAutoplay();
+    await (await SharedPreferences.getInstance()).setBool(_autoplayKey, value);
+  }
+
+  /// Songs the queue gained from autoplay (the queue page labels them).
+  final Set<String> _autoplayed = {};
+  bool isAutoplayed(Track t) => _autoplayed.contains(t.id);
+
+  String? _autoplaySeed;
+  bool _extending = false;
+
+  /// Near the end of the queue (last two songs), appends YouTube Music's
+  /// "Up next" for the current song. Streamed songs only: radio needs a video id.
+  void _maybeAutoplay() {
+    if (!_autoplay || _extending || player.loopMode != LoopMode.off) return;
+    final current = currentTrack;
+    if (current == null || !current.isRemote || _autoplaySeed == current.id) return;
+    final q = queue;
+    final at = q.indexWhere((t) => t.id == current.id);
+    if (at < 0 || at < q.length - 2) return;
+    _autoplaySeed = current.id;
+    _extending = true;
+    ytMusic
+        .upNext(current)
+        .then((similar) async {
+          final have = {for (final t in queue) t.id, ..._recentIds.take(30)};
+          final fresh = similar.where((t) => have.add(t.id)).take(25).toList();
+          if (fresh.isEmpty || !_autoplay) return;
+          _autoplayed.addAll(fresh.map((t) => t.id));
+          _ordered = [..._ordered, ...fresh];
+          await player.addAudioSources([for (final t in fresh) _sourceFor(t)]);
+          notifyListeners();
+        })
+        .catchError((Object e) {
+          debugPrint('Autoplay failed: $e');
+          _autoplaySeed = null; // try again on the next song change
+        })
+        .whenComplete(() => _extending = false);
+  }
+
+  /// Plays [seed] followed by its radio, like "Start radio" in YouTube Music.
+  Future<void> startRadio(Track seed) async {
+    await playList([seed], 0, from: '${seed.title} radio');
+    _autoplaySeed = null;
+    _maybeAutoplay();
   }
 
   static const _discordAppId = '1561368591297941655';
@@ -87,6 +125,8 @@ class PlayerController extends ChangeNotifier {
   }
 
   static const _libraryKey = 'library.v1';
+  static const _playlistsKey = 'playlists.v1';
+  static const _recentRemoteKey = 'recent.remote.v1';
   static const _recentKey = 'recent.v1';
   static const _maxRecent = 24;
 
@@ -138,7 +178,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Whether the play button has something to start: the queue, or the local library.
-  bool get canPlay => player.audioSources.isNotEmpty || (_source == MusicSource.local && _library.isNotEmpty);
+  bool get canPlay => player.audioSources.isNotEmpty || _library.isNotEmpty;
 
   bool get isPlaying => player.playing;
   bool get isBuffering =>
@@ -153,8 +193,12 @@ class PlayerController extends ChangeNotifier {
 
   List<Track> get recentlyAdded => [..._library]..sort((a, b) => b.addedAt.compareTo(a.addedAt));
 
+  /// Streamed songs played recently (they aren't in the library, so they're remembered here).
+  Map<String, Track> _recentRemote = {};
+
+  /// Library and YouTube Music songs together, most recent first.
   List<Track> get recentlyPlayed {
-    final byId = {for (final t in _library) t.id: t};
+    final byId = {for (final t in _library) t.id: t, ..._recentRemote};
     return [for (final id in _recentIds) ?byId[id]];
   }
 
@@ -177,7 +221,122 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  /// Bumped on in-place library edits; replacing [_library] invalidates by identity.
+  int _libraryEdits = 0;
+  (List<Track>, int)? _groupedFor;
+  List<Collection> _albums = const [];
+  List<Collection> _artists = const [];
+
+  /// Albums and artists are regrouped only when the library changed, not on
+  /// every rebuild (search runs this on each keystroke).
+  void _regroup() {
+    final g = _groupedFor;
+    if (g != null && identical(g.$1, _library) && g.$2 == _libraryEdits) return;
+    _groupedFor = (_library, _libraryEdits);
+    _albums = _groupAlbums();
+    _artists = _groupArtists();
+  }
+
+  // ── OpenMusic playlists ──────────────────────────────────────────────────
+
+  List<UserPlaylist> _playlists = [];
+  List<UserPlaylist> get playlists => List.unmodifiable(_playlists);
+
+  Collection playlistCollection(UserPlaylist p) => Collection(
+    kind: CollectionKind.playlist,
+    id: p.id,
+    title: p.name,
+    subtitle: '${p.tracks.length} ${p.tracks.length == 1 ? 'song' : 'songs'}',
+    tracks: p.tracks,
+  );
+
+  Collection? playlistById(String? id) =>
+      _playlists.where((p) => p.id == id).map(playlistCollection).firstOrNull;
+
+  Future<void> _savePlaylists() async => (await SharedPreferences.getInstance()).setString(
+    _playlistsKey,
+    jsonEncode([for (final p in _playlists) p.toJson()]),
+  );
+
+  void _updatePlaylist(String id, UserPlaylist Function(UserPlaylist p) change) {
+    _playlists = [for (final p in _playlists) p.id == id ? change(p) : p];
+    notifyListeners();
+    unawaited(_savePlaylists());
+  }
+
+  UserPlaylist createPlaylist(String name, {List<Track> tracks = const []}) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final p = UserPlaylist(id: 'pl$now', name: name, tracks: _unique(tracks), createdAt: now);
+    _playlists = [p, ..._playlists];
+    notifyListeners();
+    unawaited(_savePlaylists());
+    return p;
+  }
+
+  void renamePlaylist(String id, String name) => _updatePlaylist(id, (p) => p.copyWith(name: name));
+
+  void deletePlaylist(String id) {
+    _playlists = _playlists.where((p) => p.id != id).toList();
+    notifyListeners();
+    unawaited(_savePlaylists());
+  }
+
+  /// Adds songs to the end, skipping ones already in it. Returns how many were added.
+  int addToPlaylist(String id, List<Track> tracks) {
+    var added = 0;
+    _updatePlaylist(id, (p) {
+      final next = _unique([...p.tracks, ...tracks]);
+      added = next.length - p.tracks.length;
+      return p.copyWith(tracks: next);
+    });
+    return added;
+  }
+
+  void removeFromPlaylist(String id, Track track) =>
+      _updatePlaylist(id, (p) => p.copyWith(tracks: [for (final t in p.tracks) if (t.id != track.id) t]));
+
+  void movePlaylistItem(String id, int from, int to) => _updatePlaylist(id, (p) {
+    final list = [...p.tracks];
+    final t = list.removeAt(from);
+    list.insert(to.clamp(0, list.length), t);
+    return p.copyWith(tracks: list);
+  });
+
+  static List<Track> _unique(List<Track> tracks) {
+    final seen = <String>{};
+    return [for (final t in tracks) if (seen.add(t.id)) t];
+  }
+
+  // ── Offline copies ───────────────────────────────────────────────────────
+
+  /// A YouTube song that was also downloaded plays from the file: no network, no buffering.
+  Track? downloadedCopy(Track t) {
+    final id = t.videoId;
+    if (id == null) return null;
+    return _library.where((l) => _videoIdOf(l.sourceUrl) == id).firstOrNull;
+  }
+
+  /// `watch?v=<id>` or `youtu.be/<id>`.
+  static String? _videoIdOf(String? url) {
+    final u = url == null ? null : Uri.tryParse(url);
+    if (u == null) return null;
+    return u.queryParameters['v'] ?? (u.host.endsWith('youtu.be') ? u.pathSegments.firstOrNull : null);
+  }
+
+  /// Whether [t] can play without internet.
+  bool isOffline(Track t) => !t.isRemote || downloadedCopy(t) != null;
+
   List<Collection> get albums {
+    _regroup();
+    return _albums;
+  }
+
+  List<Collection> get artists {
+    _regroup();
+    return _artists;
+  }
+
+  List<Collection> _groupAlbums() {
     final groups = <String, List<Track>>{};
     for (final t in _library) {
       final key = t.albumKey;
@@ -194,7 +353,7 @@ class PlayerController extends ChangeNotifier {
     ]..sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
   }
 
-  List<Collection> get artists {
+  List<Collection> _groupArtists() {
     final groups = <String, List<Track>>{};
     for (final t in _library) {
       if (t.artist != Track.unknownArtist) (groups[t.artist] ??= []).add(t);
@@ -231,9 +390,32 @@ class PlayerController extends ChangeNotifier {
         .toList();
   }
 
+  final _searches = <String, Future<List<Track>>>{};
+
   /// Songs on YouTube matching [query]; they stream when played. No sign-in needed.
+  /// Recent queries are answered from memory, and the top hit's stream is
+  /// looked up ahead of time so it starts the moment it's clicked.
+  Future<List<Track>> searchYoutube(String query) {
+    final key = query.trim().toLowerCase();
+    final cached = _searches.remove(key);
+    if (cached != null) return _searches[key] = cached; // most recent last
+    final future = _searchYoutube(query);
+    _searches[key] = future;
+    if (_searches.length > 40) _searches.remove(_searches.keys.first);
+    future.then<void>(
+      (tracks) {
+        final top = tracks.firstOrNull?.videoId;
+        if (top != null && YtDlp.supported) YtDlp.resolve(top).ignore();
+      },
+      onError: (Object _) {
+        _searches.remove(key);
+      },
+    );
+    return future;
+  }
+
   /// YouTube Music's own song search first; plain YouTube search if that fails.
-  Future<List<Track>> searchYoutube(String query) async {
+  Future<List<Track>> _searchYoutube(String query) async {
     try {
       final songs = await ytMusic.searchSongs(query);
       if (songs.isNotEmpty) return songs;
@@ -272,8 +454,20 @@ class PlayerController extends ChangeNotifier {
       _library = await Future.wait(list.map(Track.fromJson).map(YoutubeImporter.relocate));
     }
     _recentIds = prefs.getStringList(_recentKey) ?? [];
+    try {
+      _playlists = [
+        for (final j in jsonDecode(prefs.getString(_playlistsKey) ?? '[]') as List)
+          UserPlaylist.fromJson((j as Map).cast()),
+      ];
+      _recentRemote = {
+        for (final j in jsonDecode(prefs.getString(_recentRemoteKey) ?? '[]') as List)
+          Track.fromJson((j as Map).cast()).id: Track.fromJson(j.cast()),
+      };
+    } catch (e) {
+      debugPrint('Ignoring unreadable playlists: $e');
+    }
     discord.enabled = prefs.getBool(_discordKey) ?? true;
-    _source = MusicSource.values.asNameMap()[prefs.getString(_sourceKey)] ?? MusicSource.local;
+    _autoplay = prefs.getBool(_autoplayKey) ?? true;
     await ytMusic.load();
     await audio.load();
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
@@ -293,7 +487,18 @@ class PlayerController extends ChangeNotifier {
     final id = currentTrack?.id;
     if (id == null || !player.playing || (_recentIds.isNotEmpty && _recentIds.first == id)) return;
     _recentIds = [id, ..._recentIds.where((r) => r != id)].take(_maxRecent).toList();
-    SharedPreferences.getInstance().then((p) => p.setStringList(_recentKey, _recentIds));
+    final current = currentTrack;
+    if (current != null && current.isRemote) {
+      _recentRemote = {
+        for (final e in _recentRemote.entries)
+          if (_recentIds.contains(e.key)) e.key: e.value,
+        current.id: current,
+      };
+    }
+    SharedPreferences.getInstance().then((p) {
+      p.setStringList(_recentKey, _recentIds);
+      p.setString(_recentRemoteKey, jsonEncode([for (final t in _recentRemote.values) t.toJson()]));
+    });
   }
 
   /// Tag-based durations are estimates (e.g. CBR MP3s without a Xing header);
@@ -306,6 +511,7 @@ class PlayerController extends ChangeNotifier {
     final i = _library.indexWhere((t) => t.id == track.id);
     if (i < 0) return;
     _library[i] = _library[i].copyWith(duration: actual);
+    _libraryEdits++;
     notifyListeners();
     _save();
   }
@@ -383,6 +589,7 @@ class PlayerController extends ChangeNotifier {
           final enriched = await Metadata.enrich(track);
           final i = _library.indexWhere((t) => t.id == track.id);
           if (i >= 0) _library[i] = enriched;
+          _libraryEdits++;
           if (++sinceNotify == 25) {
             sinceNotify = 0;
             notifyListeners();
@@ -403,6 +610,7 @@ class PlayerController extends ChangeNotifier {
     final updated = await Metadata.writeTags(track, edit);
     final i = _library.indexWhere((t) => t.id == track.id);
     if (i >= 0) _library[i] = updated;
+    _libraryEdits++;
     notifyListeners();
     await _save();
   }
@@ -423,15 +631,22 @@ class PlayerController extends ChangeNotifier {
   bool _shuffled = false;
   final _random = math.Random();
 
-  AudioSource _sourceFor(Track t) => t.isRemote
-      ? YoutubeAudioSource(t.videoId!, yt: youtube.client, tag: t)
-      : t.isCueTrack
-      ? ClippingAudioSource(child: AudioSource.uri(t.uri), start: t.start, end: t.end, tag: t)
-      : AudioSource.uri(t.uri, tag: t);
+  AudioSource _sourceFor(Track t) {
+    if (t.isRemote) {
+      final local = downloadedCopy(t);
+      if (local != null) return AudioSource.uri(local.uri, tag: t);
+      return YoutubeAudioSource(t.videoId!, yt: youtube.client, tag: t);
+    }
+    return t.isCueTrack
+        ? ClippingAudioSource(child: AudioSource.uri(t.uri), start: t.start, end: t.end, tag: t)
+        : AudioSource.uri(t.uri, tag: t);
+  }
 
   /// [first] followed by everything else in random order.
-  List<Track> _shuffledFrom(List<Track> tracks, int first) =>
-      [tracks[first], ...([...tracks]..removeAt(first))..shuffle(_random)];
+  List<Track> _shuffledFrom(List<Track> tracks, int first) => [
+    tracks[first],
+    ...([...tracks]..removeAt(first))..shuffle(_random),
+  ];
 
   Future<void> _load(List<Track> order, int index, {Duration? position}) =>
       player.setAudioSources([for (final t in order) _sourceFor(t)], initialIndex: index, initialPosition: position);
@@ -440,6 +655,8 @@ class PlayerController extends ChangeNotifier {
   Future<void> playList(List<Track> tracks, int index, {String? from, bool shuffled = false}) async {
     if (tracks.isEmpty) return;
     playingFrom = from;
+    _autoplayed.clear();
+    _autoplaySeed = null;
     _ordered = List.of(tracks);
     _shuffled = shuffled;
     try {
@@ -452,12 +669,8 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> playCollection(Collection c, {int index = 0, bool shuffled = false}) => playList(
-    c.tracks,
-    shuffled ? _random.nextInt(c.tracks.length) : index,
-    from: c.title,
-    shuffled: shuffled,
-  );
+  Future<void> playCollection(Collection c, {int index = 0, bool shuffled = false}) =>
+      playList(c.tracks, shuffled ? _random.nextInt(c.tracks.length) : index, from: c.title, shuffled: shuffled);
 
   /// True when [c] is what the queue was started from.
   bool isPlayingFrom(Collection c) => playingFrom == c.title && c.tracks.any((t) => t.id == currentTrack?.id);

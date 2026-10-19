@@ -16,6 +16,8 @@ class QueuePage extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     final current = c.currentTrack;
     final upNext = c.upNext;
+    final queued = upNext.where((t) => !c.isAutoplayed(t)).toList();
+    final autoplayed = upNext.where(c.isAutoplayed).toList();
     final pad = shell.compact ? 16.0 : 24.0;
     final hPad = EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16);
 
@@ -46,14 +48,42 @@ class QueuePage extends StatelessWidget {
               child: TrackRow(track: current, index: 1, onTap: c.togglePlay),
             ),
           ),
-          if (upNext.isNotEmpty) ...[
+          if (queued.isNotEmpty) ...[
             SectionTitleSliver(title: c.playingFrom == null ? 'Next up' : 'Next from: ${c.playingFrom}'),
             SliverPadding(
               padding: hPad,
               sliver: SliverList.builder(
-                itemCount: upNext.length,
+                itemCount: queued.length,
                 itemBuilder: (context, i) =>
-                    TrackRow(track: upNext[i], index: i + 2, onTap: () => c.playQueueItem(upNext[i])),
+                    TrackRow(track: queued[i], index: i + 2, onTap: () => c.playQueueItem(queued[i])),
+              ),
+            ),
+          ],
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(pad - 16, 16, pad - 16, 0),
+              child: SwitchListTile(
+                title: const Text('Autoplay'),
+                subtitle: Text(
+                  'When the queue ends, keep playing similar songs from YouTube Music',
+                  style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                ),
+                value: c.autoplay,
+                onChanged: c.setAutoplay,
+              ),
+            ),
+          ),
+          if (autoplayed.isNotEmpty) ...[
+            const SectionTitleSliver(title: 'Autoplay: similar to what you\'re playing'),
+            SliverPadding(
+              padding: hPad,
+              sliver: SliverList.builder(
+                itemCount: autoplayed.length,
+                itemBuilder: (context, i) => TrackRow(
+                  track: autoplayed[i],
+                  index: queued.length + i + 2,
+                  onTap: () => c.playQueueItem(autoplayed[i]),
+                ),
               ),
             ),
           ],

@@ -61,9 +61,14 @@ JSON.stringify((() => {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Sign in to YouTube Music', style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
                         Text(
-                          _checking ? 'Checking the session…' : 'Google handles the sign-in. OpenMusic only keeps the session.',
+                          'Sign in to YouTube Music',
+                          style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          _checking
+                              ? 'Checking the session…'
+                              : 'Google handles the sign-in. OpenMusic only keeps the session.',
                           style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -71,8 +76,7 @@ JSON.stringify((() => {
                       ],
                     ),
                   ),
-                  if (_checking)
-                    const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                  if (_checking) const SizedBox.square(dimension: 16, child: CircularProgressIndicator(strokeWidth: 2)),
                 ],
               ),
             ),
@@ -88,10 +92,7 @@ JSON.stringify((() => {
                   Expanded(
                     child: Text(_error!, style: text.bodySmall?.copyWith(color: Theme.of(context).colorScheme.error)),
                   ),
-                  TextButton(
-                    onPressed: _checking ? null : () => _capture(_lastUrl),
-                    child: const Text('Try again'),
-                  ),
+                  TextButton(onPressed: _checking ? null : () => _capture(_lastUrl), child: const Text('Try again')),
                 ],
               ),
             ),

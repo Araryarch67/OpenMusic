@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -13,10 +14,10 @@ import 'pages/lyrics_page.dart';
 import 'pages/queue_page.dart';
 import 'pages/search_page.dart';
 import 'pages/settings_page.dart';
+import 'navigation.dart';
 import 'player_panels.dart';
 import 'shell_scope.dart';
 import 'theme.dart';
-import 'widgets/source_switch.dart';
 import 'youtube_import.dart';
 import '../services/youtube_importer.dart';
 import 'widgets/smooth_scroll.dart';
@@ -38,9 +39,15 @@ class _HomeShellState extends State<HomeShell> {
   _Tab _tab = _Tab.home;
   bool _sidePanel = true;
   final _searchFocus = FocusNode();
+
+  /// The desktop history's search box (the phone tab has its own; both stay mounted).
+  final _desktopSearchFocus = FocusNode();
   final _navigators = {for (final t in _Tab.values) t: GlobalKey<NavigatorState>()};
 
   NavigatorState? get _nav => _navigators[_tab]!.currentState;
+
+  /// Desktop: one browser-style history for the content area.
+  late final _history = DesktopHistory(routeBuilder: (page, location) => _route(page, location: location));
 
   StreamSubscription<String>? _errors;
 
@@ -56,16 +63,46 @@ class _HomeShellState extends State<HomeShell> {
   void dispose() {
     _errors?.cancel();
     _searchFocus.dispose();
+    _desktopSearchFocus.dispose();
     super.dispose();
   }
 
-  void _open(Widget page) {
-    // The library tab has no page stack of its own on wide layouts; reuse Home's.
-    if (_tab == _Tab.library && MediaQuery.sizeOf(context).width >= 700) setState(() => _tab = _Tab.home);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _nav?.push(_route(page)));
+  /// Desktop: a new step in the one history. Phone: a page on the current tab.
+  void _open(Widget page, {String? location}) {
+    final where = location ?? _locationOf(page);
+    if (!_compact) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _history.open(page, where));
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _nav?.push(_route(page, location: where)));
   }
 
-  static Route<void> _route(Widget page) => PageRouteBuilder(
+  static String _locationOf(Widget page) => switch (page) {
+    HomePage() => Locations.home,
+    SearchPage() => Locations.search,
+    SettingsPage() => Locations.settings,
+    DownloadsPage() => Locations.downloads,
+    LibraryPage() => Locations.library,
+    CollectionPage(:final collection) => Locations.collection(collection),
+    _ => page.runtimeType.toString(),
+  };
+
+  void _goHome() {
+    if (_compact) return _selectTab(_Tab.home);
+    if (_history.location != Locations.home) _history.open(const HomePage(), Locations.home);
+  }
+
+  void _goSearch() {
+    if (_compact) return _selectTab(_Tab.search);
+    if (_history.location != Locations.search) {
+      _history.open(SearchPage(focusNode: _desktopSearchFocus), Locations.search);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => _desktopSearchFocus.requestFocus());
+  }
+
+  static Route<void> _route(Widget page, {String? location}) => PageRouteBuilder(
+    // The page rides along so Forward can rebuild it after Back.
+    settings: RouteSettings(name: location, arguments: page),
     transitionDuration: const Duration(milliseconds: 220),
     reverseTransitionDuration: const Duration(milliseconds: 180),
     pageBuilder: (_, _, _) => page,
@@ -114,8 +151,9 @@ class _HomeShellState extends State<HomeShell> {
     return ShellScope(
       compact: _compact,
       width: _contentWidth,
+      history: _compact ? null : _history,
       open: _open,
-      openCollection: (Collection col) => _open(CollectionPage(collection: col)),
+      openCollection: (Collection col) => _open(CollectionPage(collection: col), location: Locations.collection(col)),
       openQueue: _openQueue,
       openNowPlaying: _openNowPlaying,
       openLyrics: _openLyrics,
@@ -190,6 +228,12 @@ class _HomeShellState extends State<HomeShell> {
     );
   }
 
+  Widget _desktopNavigator() => Navigator(
+    key: _history.navigatorKey,
+    observers: [_history.observer],
+    onGenerateRoute: (_) => _route(const HomePage(), location: Locations.home),
+  );
+
   Widget _tabNavigator(_Tab tab) => Navigator(
     key: _navigators[tab],
     onGenerateRoute: (_) => _route(switch (tab) {
@@ -219,12 +263,15 @@ class _HomeShellState extends State<HomeShell> {
       const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious): c.previous,
       const SingleActivator(LogicalKeyboardKey.arrowRight, control: true): c.next,
       const SingleActivator(LogicalKeyboardKey.arrowLeft, control: true): c.previous,
-      const SingleActivator(LogicalKeyboardKey.keyK, control: true): () => _selectTab(_Tab.search),
+      const SingleActivator(LogicalKeyboardKey.keyK, control: true): _goSearch,
+      const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): _history.back,
+      const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): _history.forward,
       const SingleActivator(LogicalKeyboardKey.keyV, control: true): _pasteLink,
       const SingleActivator(LogicalKeyboardKey.keyV, meta: true): _pasteLink,
     };
 
-    final pages = _FadeOnChange(
+    // Phone only: one stack per bottom tab, fading between tabs.
+    Widget tabs() => _FadeOnChange(
       index: _tab.index,
       child: IndexedStack(index: _tab.index, children: [for (final t in _Tab.values) _tabNavigator(t)]),
     );
@@ -234,7 +281,14 @@ class _HomeShellState extends State<HomeShell> {
       _contentWidth = width;
       body = _scoped(
         Scaffold(
-          body: pages,
+          // The desktop history stays alive (hidden) while the window is narrow,
+          // so widening it again returns to the same page.
+          body: Stack(
+            children: [
+              Positioned.fill(child: tabs()),
+              Offstage(child: TickerMode(enabled: false, child: _desktopNavigator())),
+            ],
+          ),
           bottomNavigationBar: _BottomBar(
             mini: MiniPlayer(onOpen: _openNowPlaying),
             tab: _tab,
@@ -246,8 +300,6 @@ class _HomeShellState extends State<HomeShell> {
       final sidebarWidth = expanded ? 300.0 : 84.0;
       final sideOpen = expanded && _sidePanel && c.currentTrack != null;
       _contentWidth = width - sidebarWidth - (sideOpen ? 340 : 0) - 24;
-      // Library tab lives in the sidebar on wide layouts.
-      if (_tab == _Tab.library) _tab = _Tab.home;
       body = _scoped(
         Scaffold(
           // In the bottom slot so floating snackbars stack above the player instead of covering it.
@@ -269,10 +321,18 @@ class _HomeShellState extends State<HomeShell> {
                       children: [
                         SizedBox(
                           width: sidebarWidth,
-                          child: _Sidebar(collapsed: !expanded, tab: _tab, onSelect: _selectTab),
+                          child: ListenableBuilder(
+                            listenable: _history,
+                            builder: (context, _) => _Sidebar(
+                              collapsed: !expanded,
+                              location: _history.location,
+                              onHome: _goHome,
+                              onSearch: _goSearch,
+                            ),
+                          ),
                         ),
                         const SizedBox(width: 8),
-                        Expanded(child: _Panel(child: pages)),
+                        Expanded(child: _Panel(child: _desktopNavigator())),
                         if (expanded)
                           _SlidingPanel(
                             open: sideOpen,
@@ -291,7 +351,15 @@ class _HomeShellState extends State<HomeShell> {
       );
     }
 
-    return Focus(autofocus: true, onKeyEvent: (node, event) => _handleShortcut(event, shortcuts), child: body);
+    return Listener(
+      // Mouse side buttons step through the history, as in a browser.
+      onPointerDown: (e) {
+        if (_compact) return;
+        if (e.buttons & kBackMouseButton != 0) _history.back();
+        if (e.buttons & kForwardMouseButton != 0) _history.forward();
+      },
+      child: Focus(autofocus: true, onKeyEvent: (node, event) => _handleShortcut(event, shortcuts), child: body),
+    );
   }
 
   /// App-wide shortcuts, except while typing: Space, Ctrl+V etc. must reach text fields.
@@ -375,7 +443,10 @@ class _SlidingPanel extends StatelessWidget {
               ),
             ),
           ),
-    child: Padding(padding: const EdgeInsets.only(left: gap), child: child),
+    child: Padding(
+      padding: const EdgeInsets.only(left: gap),
+      child: child,
+    ),
   );
 }
 
@@ -393,22 +464,25 @@ class _Panel extends StatelessWidget {
 }
 
 class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.collapsed, required this.tab, required this.onSelect});
+  const _Sidebar({required this.collapsed, required this.location, required this.onHome, required this.onSearch});
 
   final bool collapsed;
-  final _Tab tab;
-  final ValueChanged<_Tab> onSelect;
+
+  /// What's on screen, so its entry can be highlighted.
+  final String location;
+  final VoidCallback onHome;
+  final VoidCallback onSearch;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    Widget item(_Tab t, IconData icon, IconData selectedIcon, String label) {
-      final selected = tab == t;
+    Widget item(String where, IconData icon, IconData selectedIcon, String label, VoidCallback onTap) {
+      final selected = location == where;
       final color = selected ? AppColors.textPrimary : AppColors.textSecondary;
       final row = InkWell(
         borderRadius: BorderRadius.circular(6),
         hoverColor: Colors.transparent,
-        onTap: () => onSelect(t),
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -430,22 +504,12 @@ class _Sidebar extends StatelessWidget {
     }
 
     final navItems = [
-      Padding(
-        padding: EdgeInsets.fromLTRB(collapsed ? 0 : 8, 4, 8, 8),
-        child: Align(
-          alignment: collapsed ? Alignment.center : Alignment.centerLeft,
-          child: SourceSwitch(collapsed: collapsed),
-        ),
-      ),
-      item(_Tab.home, Icons.home_outlined, Icons.home_rounded, 'Home'),
-      item(_Tab.search, Icons.search_rounded, Icons.manage_search_rounded, 'Search'),
-      _DownloadsLink(collapsed: collapsed),
-      _NavLink(
-        collapsed: collapsed,
-        icon: Icons.settings_outlined,
-        label: 'Settings',
-        onTap: () => ShellScope.of(context).open(const SettingsPage()),
-      ),
+      item(Locations.home, Icons.home_outlined, Icons.home_rounded, 'Home', onHome),
+      item(Locations.search, Icons.search_rounded, Icons.manage_search_rounded, 'Search', onSearch),
+      _DownloadsLink(collapsed: collapsed, selected: location == Locations.downloads),
+      item(Locations.settings, Icons.settings_outlined, Icons.settings_rounded, 'Settings', () {
+        if (location != Locations.settings) ShellScope.of(context).open(const SettingsPage());
+      }),
     ];
 
     return LayoutBuilder(
@@ -533,9 +597,10 @@ class _NavLink extends StatelessWidget {
 
 /// Sidebar entry for YouTube downloads, with a progress ring while busy.
 class _DownloadsLink extends StatelessWidget {
-  const _DownloadsLink({required this.collapsed});
+  const _DownloadsLink({required this.collapsed, required this.selected});
 
   final bool collapsed;
+  final bool selected;
 
   @override
   Widget build(BuildContext context) {
@@ -549,7 +614,7 @@ class _DownloadsLink extends StatelessWidget {
         final row = InkWell(
           borderRadius: BorderRadius.circular(6),
           hoverColor: Colors.transparent,
-          onTap: shell.openDownloads,
+          onTap: selected ? null : shell.openDownloads,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Row(
@@ -558,7 +623,11 @@ class _DownloadsLink extends StatelessWidget {
                 SizedBox.square(
                   dimension: 26,
                   child: progress == null
-                      ? const Icon(Icons.download_rounded, color: AppColors.textSecondary, size: 26)
+                      ? Icon(
+                          Icons.download_rounded,
+                          color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+                          size: 26,
+                        )
                       : Padding(
                           padding: const EdgeInsets.all(3),
                           child: CircularProgressIndicator(
@@ -574,7 +643,10 @@ class _DownloadsLink extends StatelessWidget {
                   Expanded(
                     child: Text(
                       'Downloads',
-                      style: text.titleMedium?.copyWith(color: AppColors.textSecondary, fontWeight: FontWeight.w700),
+                      style: text.titleMedium?.copyWith(
+                        color: selected ? AppColors.textPrimary : AppColors.textSecondary,
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                   ),
                   if (progress != null)

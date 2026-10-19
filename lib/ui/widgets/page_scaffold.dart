@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../navigation.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import 'smooth_scroll.dart';
@@ -42,6 +43,9 @@ class _PageScaffoldState extends State<PageScaffold> {
     final color = widget.gradientColor ?? AppColors.elevated;
     // Pages below this one, not above: Navigator.canPop() goes stale on a root page rebuilt while covered.
     final canPop = ModalRoute.of(context)?.canPop ?? false;
+    // Desktop: Back / Forward always sit in the same spot, greyed out when there's nowhere to go.
+    final history = shell.history;
+    final showBar = history != null || canPop || widget.actions.isNotEmpty;
     final barOpacity = ((_offset - 180) / 80).clamp(0.0, 1.0);
     const barHeight = 56.0;
     final topInset = shell.compact ? MediaQuery.paddingOf(context).top : 0.0;
@@ -71,9 +75,7 @@ class _PageScaffoldState extends State<PageScaffold> {
           CustomScrollView(
             controller: _scroll,
             slivers: [
-              SliverToBoxAdapter(
-                child: SizedBox(height: topInset + (canPop || widget.actions.isNotEmpty ? barHeight : 8)),
-              ),
+              SliverToBoxAdapter(child: SizedBox(height: topInset + (showBar ? barHeight : 8))),
               ...widget.slivers,
               const SliverToBoxAdapter(child: SizedBox(height: 32)),
             ],
@@ -83,34 +85,48 @@ class _PageScaffoldState extends State<PageScaffold> {
             top: 0,
             left: 0,
             right: 0,
-            child: Container(
-              height: barHeight + topInset,
-              padding: EdgeInsets.only(top: topInset, left: 8, right: 8),
-              color: Color.lerp(color, Colors.black, 0.45)!.withValues(alpha: barOpacity),
-              child: Row(
-                children: [
-                  if (canPop)
-                    IconButton.filled(
-                      tooltip: 'Back',
-                      style: IconButton.styleFrom(backgroundColor: Colors.black45, foregroundColor: Colors.white),
-                      onPressed: () => Navigator.of(context).maybePop(),
-                      icon: const Icon(Icons.chevron_left_rounded),
-                    ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Opacity(
-                      opacity: barOpacity,
-                      child: Text(
-                        widget.title ?? '',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                      ),
-                    ),
+            // Only the buttons take clicks: the bar's empty area must not swallow
+            // taps meant for what scrolls under it (e.g. the search box).
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ColoredBox(color: Color.lerp(color, Colors.black, 0.45)!.withValues(alpha: barOpacity)),
                   ),
-                  ...widget.actions,
-                ],
-              ),
+                ),
+                Container(
+                  height: (showBar ? barHeight : 8) + topInset,
+                  padding: EdgeInsets.only(top: topInset, left: 8, right: 8),
+                  child: Row(
+                    children: [
+                      if (history != null)
+                        HistoryButtons(history: history)
+                      else if (canPop)
+                        IconButton.filled(
+                          tooltip: 'Back',
+                          style: IconButton.styleFrom(backgroundColor: Colors.black45, foregroundColor: Colors.white),
+                          onPressed: () => Navigator.of(context).maybePop(),
+                          icon: const Icon(Icons.chevron_left_rounded),
+                        ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: IgnorePointer(
+                          child: Opacity(
+                            opacity: barOpacity,
+                            child: Text(
+                              widget.title ?? '',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                        ),
+                      ),
+                      ...widget.actions,
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         ],

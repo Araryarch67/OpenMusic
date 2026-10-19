@@ -5,13 +5,47 @@ import 'package:http/http.dart' as http;
 
 /// A song row as YouTube Music returns it.
 class WebTrack {
-  const WebTrack({required this.videoId, required this.title, required this.artist, this.duration, this.artworkUrl});
+  const WebTrack({
+    required this.videoId,
+    required this.title,
+    required this.artist,
+    this.duration,
+    this.artworkUrl,
+    this.setVideoId,
+  });
 
   final String videoId;
   final String title;
   final String artist;
   final Duration? duration;
   final String? artworkUrl;
+
+  /// This row's id inside a playlist (the same song can be in it twice);
+  /// removing and moving songs refer to it.
+  final String? setVideoId;
+}
+
+/// Who can see a playlist.
+enum PlaylistPrivacy {
+  public('PUBLIC', 'Public'),
+  unlisted('UNLISTED', 'Unlisted'),
+  private('PRIVATE', 'Private');
+
+  const PlaylistPrivacy(this.api, this.label);
+  final String api;
+  final String label;
+
+  static PlaylistPrivacy? parse(Object? s) => values.where((v) => v.api == s).firstOrNull;
+}
+
+/// A playlist page: its songs, and whether the signed-in account owns it.
+class WebPlaylistPage {
+  const WebPlaylistPage({required this.tracks, required this.owned, this.privacy, this.description});
+
+  final List<WebTrack> tracks;
+  final bool owned;
+  final PlaylistPrivacy? privacy;
+  final String? description;
 }
 
 /// A playlist from the signed-in library.
@@ -70,7 +104,8 @@ class YtMusicWebError implements Exception {
 /// authorization built from `__Secure-3PAPISID`, and browse ids such as
 /// `FEmusic_liked_playlists`, `VLLM` (Liked music) and `FEmusic_history`.
 class YtMusicWeb {
-  YtMusicWeb({required this.cookies, required this.visitorData, this.authUser = '0'});
+  YtMusicWeb({required this.cookies, required this.visitorData, this.authUser = '0', http.Client? client})
+    : _http = client ?? http.Client();
 
   /// Signed out: home, explore, albums, public playlists and search.
   YtMusicWeb.anonymous() : this(cookies: '', visitorData: '');
@@ -91,7 +126,7 @@ class YtMusicWeb {
 
   static const _ua = 'Mozilla/5.0 (X11; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0';
 
-  final http.Client _http = http.Client();
+  final http.Client _http;
   bool _closed = false;
 
   void close() {
@@ -179,8 +214,9 @@ class YtMusicWeb {
 
   /// YouTube's own `logged_in` flag from the response context.
   static bool _signedIn(Map<String, dynamic> response) {
-    for (final service in _list(_asMap(response['responseContext'])?['serviceTrackingParams'])
-        .whereType<Map<String, dynamic>>()) {
+    for (final service in _list(
+      _asMap(response['responseContext'])?['serviceTrackingParams'],
+    ).whereType<Map<String, dynamic>>()) {
       if (service['service'] != 'GFEEDBACK') continue;
       for (final param in _list(service['params']).whereType<Map<String, dynamic>>()) {
         if (param['key'] == 'logged_in') return param['value'] == '1';
@@ -220,10 +256,135 @@ class YtMusicWeb {
   Future<List<WebTrack>> playlistTracks(String playlistId, {int limit = 500}) =>
       browseTracks('VL$playlistId', limit: limit);
 
+  /// A playlist with what's needed to edit it (ownership, privacy, row ids).
+  Future<WebPlaylistPage> playlistPage(String playlistId, {int limit = 500}) async {
+    final res = await _send('browse', {'browseId': 'VL$playlistId'});
+    final editable = _asMap(_deepFind(res, 'musicEditablePlaylistDetailHeaderRenderer'));
+    final edit = _asMap(_deepFind(editable, 'musicPlaylistEditHeaderRenderer'));
+    return WebPlaylistPage(
+      tracks: await _tracksOf(res, limit),
+      owned: editable != null,
+      privacy: PlaylistPrivacy.parse(edit?['privacy']),
+      description: _text(edit?['description']),
+    );
+  }
+
+  // ── Library editing (signed in) ──────────────────────────────────────────
+  // Request shapes follow ytmusicapi's create_playlist / edit_playlist /
+  // add_playlist_items / remove_playlist_items / delete_playlist / rate_song.
+
+  /// Creates a playlist and returns its id.
+  Future<String> createPlaylist(
+    String title, {
+    String description = '',
+    PlaylistPrivacy privacy = PlaylistPrivacy.private,
+    List<String> videoIds = const [],
+  }) async {
+    final res = await _send('playlist/create', {
+      'title': title,
+      'description': description,
+      'privacyStatus': privacy.api,
+      if (videoIds.isNotEmpty) 'videoIds': videoIds,
+    });
+    final id = res['playlistId'];
+    if (id is! String) throw const YtMusicWebError('YouTube Music did not create the playlist.');
+    return id;
+  }
+
+  Future<void> _edit(String playlistId, List<Map<String, dynamic>> actions) async {
+    final res = await _send('browse/edit_playlist', {
+      'playlistId': playlistId.startsWith('VL') ? playlistId.substring(2) : playlistId,
+      'actions': actions,
+    });
+    final status = res['status'];
+    if (status is String && !status.contains('SUCCEEDED')) {
+      throw YtMusicWebError('YouTube Music refused the change ($status).');
+    }
+  }
+
+  Future<void> renamePlaylist(String playlistId, String title) => _edit(playlistId, [
+    {'action': 'ACTION_SET_PLAYLIST_NAME', 'playlistName': title},
+  ]);
+
+  Future<void> setPlaylistDescription(String playlistId, String description) => _edit(playlistId, [
+    {'action': 'ACTION_SET_PLAYLIST_DESCRIPTION', 'playlistDescription': description},
+  ]);
+
+  Future<void> setPlaylistPrivacy(String playlistId, PlaylistPrivacy privacy) => _edit(playlistId, [
+    {'action': 'ACTION_SET_PLAYLIST_PRIVACY', 'playlistPrivacy': privacy.api},
+  ]);
+
+  /// Adds songs to the end; ones already in the playlist are skipped.
+  Future<void> addToPlaylist(String playlistId, List<String> videoIds) => _edit(playlistId, [
+    for (final id in videoIds) {'action': 'ACTION_ADD_VIDEO', 'addedVideoId': id, 'dedupeOption': 'DEDUPE_OPTION_SKIP'},
+  ]);
+
+  /// Removes rows (see [WebTrack.setVideoId]).
+  Future<void> removeFromPlaylist(String playlistId, List<({String videoId, String setVideoId})> rows) => _edit(
+    playlistId,
+    [
+      for (final r in rows) {'action': 'ACTION_REMOVE_VIDEO', 'setVideoId': r.setVideoId, 'removedVideoId': r.videoId},
+    ],
+  );
+
+  /// Moves a row so it sits right before [beforeSetVideoId] (null: to the end).
+  Future<void> movePlaylistItem(String playlistId, String setVideoId, String? beforeSetVideoId) => _edit(playlistId, [
+    {'action': 'ACTION_MOVE_VIDEO_BEFORE', 'setVideoId': setVideoId, 'movedSetVideoIdSuccessor': ?beforeSetVideoId},
+  ]);
+
+  Future<void> deletePlaylist(String playlistId) async {
+    await _send('playlist/delete', {'playlistId': playlistId.startsWith('VL') ? playlistId.substring(2) : playlistId});
+  }
+
+  /// Likes a song (it lands in "Liked music"), or clears the rating.
+  Future<void> rate(String videoId, {required bool liked}) async {
+    await _send(liked ? 'like/like' : 'like/removelike', {
+      'target': {'videoId': videoId},
+    });
+  }
+
+  /// YouTube Music's "Up next" radio for a song: what the app itself queues
+  /// after it (personalised when signed in). `RDAMVM<id>` is the song's radio
+  /// playlist; the first entry is the seed song itself.
+  Future<List<WebTrack>> radio(String videoId) async {
+    final res = await _send('next', {
+      'videoId': videoId,
+      'playlistId': 'RDAMVM$videoId',
+      'isAudioOnly': true,
+      'enablePersistentPlaylistPanel': true,
+      'tunerSettingValue': 'AUTOMIX_SETTING_NORMAL',
+      'watchEndpointMusicSupportedConfigs': {
+        'watchEndpointMusicConfig': {'hasPersistentPlaylistPanel': true, 'musicVideoType': 'MUSIC_VIDEO_TYPE_ATV'},
+      },
+    });
+    final panel = _asMap(_deepFind(res, 'playlistPanelRenderer'));
+    return [
+      for (final item in _list(panel?['contents']))
+        if (_asMap(_deepFind(item, 'playlistPanelVideoRenderer')) case final row?) ?_panelSong(row),
+    ];
+  }
+
+  /// A queue row: "Artist • Album • Year" under the title.
+  static WebTrack? _panelSong(Map<String, dynamic> row) {
+    final id = row['videoId'];
+    final title = _text(row['title']);
+    if (id is! String || title == null) return null;
+    final byline = _text(row['longBylineText']) ?? _text(row['shortBylineText']) ?? '';
+    return WebTrack(
+      videoId: id,
+      title: title,
+      artist: byline.split(' • ').first.trim(),
+      duration: _duration(_text(row['lengthText'])),
+      artworkUrl: _lastThumb(_at(row, const ['thumbnail', 'thumbnails'])),
+    );
+  }
+
   /// Every song of a playlist (`VL…`) or album (`MPRE…`) page. Album rows carry
   /// neither artist nor artwork; both come from the page header instead.
-  Future<List<WebTrack>> browseTracks(String browseId, {int limit = 500}) async {
-    final res = await _send('browse', {'browseId': browseId});
+  Future<List<WebTrack>> browseTracks(String browseId, {int limit = 500}) async =>
+      _tracksOf(await _send('browse', {'browseId': browseId}), limit);
+
+  Future<List<WebTrack>> _tracksOf(Map<String, dynamic> res, int limit) async {
     final shelf = _asMap(_deepFind(res, 'musicPlaylistShelfRenderer')) ?? _asMap(_deepFind(res, 'musicShelfRenderer'));
     if (shelf == null) return const [];
     final header = _asMap(_deepFind(res, 'musicResponsiveHeaderRenderer'));
@@ -242,6 +403,7 @@ class YtMusicWeb {
             artist: track.artist.isEmpty ? headerArtist : track.artist,
             duration: track.duration,
             artworkUrl: track.artworkUrl ?? headerArt,
+            setVideoId: _at(row, const ['playlistItemData', 'playlistSetVideoId']) as String?,
           ),
         );
       }
@@ -314,7 +476,9 @@ class YtMusicWeb {
       videoId: videoId,
       title: title,
       artist: artists.join(', '),
-      artworkUrl: _lastThumb(_at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
+      artworkUrl: _lastThumb(
+        _at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']),
+      ),
     );
   }
 
@@ -333,7 +497,9 @@ class YtMusicWeb {
       browseId: browseId,
       title: title,
       subtitle: _text(data['subtitle']) ?? '',
-      thumbnailUrl: _lastThumb(_at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
+      thumbnailUrl: _lastThumb(
+        _at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']),
+      ),
     );
   }
 
@@ -376,7 +542,10 @@ class YtMusicWeb {
         videoId ??= _at(first, const ['navigationEndpoint', 'watchEndpoint', 'videoId']);
       }
       if (artists.isEmpty) {
-        artists.addAll([for (final run in runs) if (_isArtistRun(run)) run['text'] as String]);
+        artists.addAll([
+          for (final run in runs)
+            if (_isArtistRun(run)) run['text'] as String,
+        ]);
       }
     }
     title ??= _firstRunText(_list(data['flexColumns']).firstOrNull);
@@ -386,7 +555,9 @@ class YtMusicWeb {
       title: title.trim(),
       artist: artists.isEmpty ? _looseArtist(data) : artists.join(', '),
       duration:
-          _duration(_text(_at(data, const ['fixedColumns', 0, 'musicResponsiveListItemFixedColumnRenderer', 'text']))) ??
+          _duration(
+            _text(_at(data, const ['fixedColumns', 0, 'musicResponsiveListItemFixedColumnRenderer', 'text'])),
+          ) ??
           _flexDuration(data),
       artworkUrl: _lastThumb(_at(data, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
     );
@@ -438,7 +609,9 @@ class YtMusicWeb {
       id: browseId.startsWith('VL') ? browseId.substring(2) : browseId,
       title: title,
       count: count,
-      thumbnailUrl: _lastThumb(_at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
+      thumbnailUrl: _lastThumb(
+        _at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']),
+      ),
     );
   }
 
@@ -466,7 +639,9 @@ class YtMusicWeb {
       final items = _at(sub, const ['items']) ?? _at(sub, const ['contents']);
       if (items is List) return items;
     }
-    return _list(_at(response, const ['onResponseReceivedActions', 0, 'appendContinuationItemsAction', 'continuationItems']));
+    return _list(
+      _at(response, const ['onResponseReceivedActions', 0, 'appendContinuationItemsAction', 'continuationItems']),
+    );
   }
 
   static Duration? _duration(String? text) {

@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 
 import '../models/track.dart';
+import 'navigation.dart';
 
 /// Layout facts and navigation actions the pages need from the app shell.
 class ShellScope extends InheritedWidget {
@@ -8,6 +9,7 @@ class ShellScope extends InheritedWidget {
     super.key,
     required this.compact,
     required this.width,
+    this.history,
     required this.open,
     required this.openCollection,
     required this.openQueue,
@@ -26,7 +28,11 @@ class ShellScope extends InheritedWidget {
   /// Width of the content area, for column decisions inside pages.
   final double width;
 
-  final void Function(Widget page) open;
+  /// Desktop's browser-style history (null on phones, which use tab stacks).
+  final DesktopHistory? history;
+
+  /// Opens [page]; [location] tells the sidebar what to highlight.
+  final void Function(Widget page, {String? location}) open;
   final void Function(Collection collection) openCollection;
   final VoidCallback openQueue;
   final VoidCallback openNowPlaying;

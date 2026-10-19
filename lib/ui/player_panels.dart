@@ -7,6 +7,7 @@ import 'shell_scope.dart';
 import 'theme.dart';
 import 'widgets/controls.dart';
 import 'widgets/signal_path.dart';
+import 'ytmusic_edit.dart';
 import 'widgets/track_row.dart';
 import 'widgets/smooth_scroll.dart';
 
@@ -155,6 +156,7 @@ class DesktopPlayerBar extends StatelessWidget {
                               ],
                             ),
                           ),
+                          LikeButton(track: track),
                         ],
                       ),
               ),
@@ -441,27 +443,34 @@ class NowPlayingPage extends StatelessWidget {
                             ),
                           ),
                         const Spacer(),
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                track?.title ?? 'Nothing playing',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    track?.title ?? 'Nothing playing',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: text.headlineSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.5,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    track?.artist ?? '',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: text.titleMedium?.copyWith(color: Colors.white70),
+                                  ),
+                                  if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
+                                ],
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                track?.artist ?? '',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.titleMedium?.copyWith(color: Colors.white70),
-                              ),
-                              if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
-                            ],
-                          ),
+                            ),
+                            if (track != null) LikeButton(track: track, size: 28, color: Colors.white),
+                          ],
                         ),
                         const SizedBox(height: 16),
                         const SeekBar(),

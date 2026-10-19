@@ -54,6 +54,20 @@ class RemotePlaylist {
   final String? subtitle;
 }
 
+/// A library playlist opened for viewing, with what's needed to edit it.
+class RemotePlaylistDetails {
+  const RemotePlaylistDetails({required this.tracks, required this.owned, this.privacy, this.rowIds = const {}});
+
+  final List<Track> tracks;
+
+  /// The signed-in account made it, so it can be renamed, edited and deleted.
+  final bool owned;
+  final PlaylistPrivacy? privacy;
+
+  /// Track id → the row's id in the playlist (needed to remove it).
+  final Map<String, String> rowIds;
+}
+
 /// A titled row of the discover pages: songs, or albums and playlists.
 class RemoteShelf {
   const RemoteShelf({required this.title, this.tracks = const [], this.collections = const []});
@@ -529,8 +543,98 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   Future<YoutubeMusicLibrary> _loadLibrary() async {
     final (liked, lists, recent) = await (likedMusic(), playlists(), history()).wait;
+    _likedIds
+      ..clear()
+      ..addAll(liked.map((t) => t.id));
     return YoutubeMusicLibrary(liked: liked, playlists: lists, recent: recent);
   }
+
+  // ── Editing the library (signed in through Google's page) ───────────────
+
+  /// Likes and playlist edits go through YouTube Music's own API, so they show
+  /// up in the YouTube Music apps too.
+  bool get canEdit => usesWebSession;
+
+  final Set<String> _likedIds = {};
+  bool isLiked(Track t) => _likedIds.contains(t.id);
+
+  Future<T> _editing<T>(Future<T> Function(YtMusicWeb web) change) async {
+    if (!canEdit) throw const YtMusicWebError('Sign in with Google to change your YouTube Music library.');
+    try {
+      return await change(_webClient);
+    } catch (e) {
+      throw YtMusicWebError(_describe(e));
+    }
+  }
+
+  /// Puts a song in (or takes it out of) "Liked music". Shown right away;
+  /// undone if YouTube Music refuses.
+  Future<void> setLiked(Track t, bool liked) async {
+    liked ? _likedIds.add(t.id) : _likedIds.remove(t.id);
+    notifyListeners();
+    try {
+      await _editing((web) => web.rate(t.videoId!, liked: liked));
+      library(refresh: true).ignore();
+    } catch (_) {
+      liked ? _likedIds.remove(t.id) : _likedIds.add(t.id);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  Future<RemotePlaylistDetails> playlistDetails(String playlistId) async {
+    if (!usesWebSession) return RemotePlaylistDetails(tracks: await playlistTracks(playlistId), owned: false);
+    final page = await _webClient.playlistPage(playlistId, limit: _maxItems);
+    final tracks = _webTracks(page.tracks);
+    return RemotePlaylistDetails(
+      tracks: tracks,
+      owned: page.owned,
+      privacy: page.privacy,
+      rowIds: {
+        for (var i = 0; i < page.tracks.length; i++)
+          tracks[i].id: ?page.tracks[i].setVideoId,
+      },
+    );
+  }
+
+  /// Creates a playlist (optionally with songs) and returns its id.
+  Future<String> createPlaylist(
+    String title, {
+    PlaylistPrivacy privacy = PlaylistPrivacy.private,
+    List<Track> tracks = const [],
+  }) async {
+    final id = await _editing(
+      (web) => web.createPlaylist(title, privacy: privacy, videoIds: [for (final t in tracks) ?t.videoId]),
+    );
+    library(refresh: true).ignore();
+    return id;
+  }
+
+  Future<void> renamePlaylist(String id, String title) async {
+    await _editing((web) => web.renamePlaylist(id, title));
+    library(refresh: true).ignore();
+  }
+
+  Future<void> setPlaylistPrivacy(String id, PlaylistPrivacy privacy) =>
+      _editing((web) => web.setPlaylistPrivacy(id, privacy));
+
+  Future<void> deletePlaylist(String id) async {
+    await _editing((web) => web.deletePlaylist(id));
+    library(refresh: true).ignore();
+  }
+
+  Future<void> addToPlaylist(String id, List<Track> tracks) async {
+    await _editing((web) => web.addToPlaylist(id, [for (final t in tracks) ?t.videoId]));
+    library(refresh: true).ignore();
+  }
+
+  Future<void> removeFromPlaylist(String id, Track t, String rowId) async {
+    await _editing((web) => web.removeFromPlaylist(id, [(videoId: t.videoId!, setVideoId: rowId)]));
+    library(refresh: true).ignore();
+  }
+
+  Future<void> movePlaylistItem(String id, String rowId, String? beforeRowId) =>
+      _editing((web) => web.movePlaylistItem(id, rowId, beforeRowId));
 
   /// Recently played. Browser and web sessions have it; the Data API does not.
   Future<List<Track>> history() async {
@@ -613,6 +717,12 @@ class YoutubeMusicAccount extends ChangeNotifier {
       for (final i in items)
         if ((i['snippet'] as Map<String, dynamic>)['categoryId'] == '10') _videoToTrack(i),
     ];
+  }
+
+  /// Songs YouTube Music would play after [seed] (its radio), without the seed itself.
+  Future<List<Track>> upNext(Track seed) async {
+    final rows = await _browseClient.radio(seed.videoId!);
+    return _webTracks(rows.where((r) => r.videoId != seed.videoId).toList());
   }
 
   /// Songs of a playlist from the library or of a public album / playlist.

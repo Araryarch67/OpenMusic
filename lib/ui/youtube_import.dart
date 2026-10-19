@@ -187,16 +187,14 @@ class _ImportFormState extends State<_ImportForm> {
                 : _PreviewCard(preview: preview),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Saved in the best quality YouTube offers (up to ~160 kbps Opus/AAC), without re-encoding.',
-                  style: text.bodySmall?.copyWith(color: AppColors.textMuted),
-                ),
-              ),
-              const SizedBox(width: 16),
-              FilledButton(
+          LayoutBuilder(
+            // Narrow windows: the note goes above the button instead of squeezing it.
+            builder: (context, constraints) {
+              final note = Text(
+                'Saved in the best quality YouTube offers (up to ~160 kbps Opus/AAC), without re-encoding.',
+                style: text.bodySmall?.copyWith(color: AppColors.textMuted),
+              );
+              final button = FilledButton(
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.textPrimary,
                   foregroundColor: Colors.black,
@@ -208,8 +206,20 @@ class _ImportFormState extends State<_ImportForm> {
                   PlaylistPreview(:final videos) => 'Download ${videos.length}',
                   _ => 'Download',
                 }),
-              ),
-            ],
+              );
+              return constraints.maxWidth < 360
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [note, const SizedBox(height: 12), button],
+                    )
+                  : Row(
+                      children: [
+                        Expanded(child: note),
+                        const SizedBox(width: 16),
+                        button,
+                      ],
+                    );
+            },
           ),
         ],
       ),

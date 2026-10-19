@@ -180,9 +180,12 @@ int compareAlbumOrder(Track a, Track b) {
 
 /// A group of tracks shown as a card / page (album, artist or the whole library).
 class Collection {
-  const Collection({required this.kind, required this.title, required this.subtitle, required this.tracks});
+  const Collection({required this.kind, required this.title, required this.subtitle, required this.tracks, this.id});
 
   final CollectionKind kind;
+
+  /// The OpenMusic playlist's id (kind [CollectionKind.playlist]).
+  final String? id;
   final String title;
   final String subtitle;
   final List<Track> tracks;
@@ -192,6 +195,7 @@ class Collection {
 
 enum CollectionKind {
   allSongs('Playlist'),
+  playlist('Playlist'),
   album('Album'),
   youtube('Playlist'),
   remote('Playlist'),
@@ -199,4 +203,32 @@ enum CollectionKind {
 
   const CollectionKind(this.label);
   final String label;
+}
+
+/// A playlist made in OpenMusic, kept on this device. It can mix songs from
+/// the library (play offline) and YouTube Music songs (stream online).
+class UserPlaylist {
+  const UserPlaylist({required this.id, required this.name, required this.tracks, required this.createdAt});
+
+  factory UserPlaylist.fromJson(Map<String, dynamic> j) => UserPlaylist(
+    id: j['id'] as String,
+    name: j['name'] as String,
+    tracks: [for (final t in j['tracks'] as List) Track.fromJson((t as Map).cast())],
+    createdAt: j['createdAt'] as int? ?? 0,
+  );
+
+  final String id;
+  final String name;
+  final List<Track> tracks;
+  final int createdAt;
+
+  UserPlaylist copyWith({String? name, List<Track>? tracks}) =>
+      UserPlaylist(id: id, name: name ?? this.name, tracks: tracks ?? this.tracks, createdAt: createdAt);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'tracks': [for (final t in tracks) t.toJson()],
+    'createdAt': createdAt,
+  };
 }

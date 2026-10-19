@@ -5,6 +5,7 @@ import '../../services/metadata.dart';
 import '../../services/player_controller.dart';
 import '../shell_scope.dart';
 import '../tag_editor.dart';
+import '../ytmusic_edit.dart';
 import '../theme.dart';
 import 'controls.dart';
 
@@ -104,6 +105,8 @@ class _TrackRowState extends State<TrackRow> {
                             EqualizerIcon(playing: c.isPlaying, size: 10),
                             const SizedBox(width: 6),
                           ],
+                          // YouTube songs: cloud = streams, green pin = downloaded, plays offline.
+                          if (t.isRemote) ...[SourceMark(online: !c.isOffline(t), size: 14), const SizedBox(width: 4)],
                           Flexible(
                             child: Text(
                               t.artist,
@@ -166,39 +169,72 @@ class _TrackMenu extends StatelessWidget {
     return Opacity(
       opacity: visible ? 1 : 0,
       child: PopupMenuButton<void>(
+        // Over the whole window, so a click anywhere (sidebar included) closes it.
+        useRootNavigator: true,
         tooltip: 'More options for ${track.title}',
         icon: const Icon(Icons.more_horiz_rounded),
-        itemBuilder: (_) => [
-          if (artist != null)
-            PopupMenuItem(
-              onTap: () => shell.openCollection(artist),
-              child: const ListTile(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
-            ),
-          if (album != null)
-            PopupMenuItem(
-              onTap: () => shell.openCollection(album),
-              child: const ListTile(leading: Icon(Icons.album_outlined), title: Text('Go to album')),
-            ),
-          if (track.isRemote)
-            PopupMenuItem(
-              onTap: () => c.youtube.enqueueTracks([track]),
-              child: const ListTile(leading: Icon(Icons.download_rounded), title: Text('Download')),
-            )
-          else ...[
-            if (Metadata.canEditTags(track))
+        // The row can be rebuilt away while the menu is open (a list refreshing),
+        // so actions run against the navigator's context, which outlives it.
+        itemBuilder: (_) {
+          final host = Navigator.of(context).context;
+          final editScope = PlaylistEditScope.maybeOf(context);
+          return [
+            if (artist != null)
               PopupMenuItem(
-                onTap: () => showTagEditor(context, track),
-                child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit info')),
+                onTap: () => shell.openCollection(artist),
+                child: const ListTile(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
+              ),
+            if (album != null)
+              PopupMenuItem(
+                onTap: () => shell.openCollection(album),
+                child: const ListTile(leading: Icon(Icons.album_outlined), title: Text('Go to album')),
               ),
             PopupMenuItem(
-              onTap: () => c.removeTrack(track),
-              child: const ListTile(
-                leading: Icon(Icons.remove_circle_outline_rounded),
-                title: Text('Remove from library'),
-              ),
+              onTap: () => addToPlaylist(host, [track]),
+              child: const ListTile(leading: Icon(Icons.playlist_add_rounded), title: Text('Add to playlist')),
             ),
-          ],
-        ],
+            if (editScope?.canRemove(track) ?? false)
+              PopupMenuItem(
+                onTap: () => editScope!.remove(host, track),
+                child: const ListTile(
+                  leading: Icon(Icons.playlist_remove_rounded),
+                  title: Text('Remove from this playlist'),
+                ),
+              ),
+            if (track.isRemote) ...[
+              if (c.ytMusic.canEdit)
+                PopupMenuItem(
+                  onTap: () => toggleLike(host, track),
+                  child: ListTile(
+                    leading: Icon(c.ytMusic.isLiked(track) ? Icons.favorite_rounded : Icons.favorite_border_rounded),
+                    title: Text(c.ytMusic.isLiked(track) ? 'Remove from Liked music' : 'Add to Liked music'),
+                  ),
+                ),
+              PopupMenuItem(
+                onTap: () => c.startRadio(track),
+                child: const ListTile(leading: Icon(Icons.radio_rounded), title: Text('Start radio')),
+              ),
+              if (c.downloadedCopy(track) == null)
+                PopupMenuItem(
+                  onTap: () => c.youtube.enqueueTracks([track]),
+                  child: const ListTile(leading: Icon(Icons.download_rounded), title: Text('Download for offline')),
+                ),
+            ] else ...[
+              if (Metadata.canEditTags(track))
+                PopupMenuItem(
+                  onTap: () => showTagEditor(host, track),
+                  child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit info')),
+                ),
+              PopupMenuItem(
+                onTap: () => c.removeTrack(track),
+                child: const ListTile(
+                  leading: Icon(Icons.remove_circle_outline_rounded),
+                  title: Text('Remove from library'),
+                ),
+              ),
+            ],
+          ];
+        },
       ),
     );
   }

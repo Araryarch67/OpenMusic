@@ -1,16 +1,18 @@
 import 'package:flutter/material.dart';
 
 import '../../services/player_controller.dart';
+import '../../services/youtube_music_account.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
-import 'collection_page.dart';
 import 'downloads_page.dart';
 import 'youtube_music_page.dart';
-import '../widgets/source_switch.dart';
 
+/// One Home for everything: your files, your OpenMusic playlists and your
+/// YouTube Music library side by side, then YouTube Music's own shelves.
+/// Streamed songs carry a cloud mark; everything else plays offline.
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -28,34 +30,59 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
+    final account = c.ytMusic;
+    return ListenableBuilder(
+      listenable: account,
+      builder: (context, _) => FutureBuilder<YoutubeMusicLibrary?>(
+        future: account.isSignedIn
+            ? account.library().then<YoutubeMusicLibrary?>((l) => l, onError: (Object _) => null)
+            : Future.value(null),
+        builder: (context, snap) => _build(context, c, snap.data),
+      ),
+    );
+  }
+
+  Widget _build(BuildContext context, PlayerController c, YoutubeMusicLibrary? online) {
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
     final pad = shell.compact ? 16.0 : 24.0;
-
-    if (c.source == MusicSource.youtubeMusic) return const YoutubeMusicHome();
-
-    if (c.library.isEmpty) {
-      return PageScaffold(
-        slivers: [
-          if (shell.compact)
-            SliverToBoxAdapter(
-              child: Padding(padding: EdgeInsets.fromLTRB(pad, 0, pad, 0), child: const SourceSwitch()),
-            ),
-          SliverFillRemaining(hasScrollBody: false, child: EmptyLibrary(greeting: _greeting())),
-        ],
-      );
-    }
+    final account = c.ytMusic;
 
     final albums = c.albums;
     final artists = c.artists;
     final recent = c.recentlyPlayed;
+    final liked = online == null || online.liked.isEmpty ? null : likedCollection(online.liked);
+    final playlists = c.playlists;
+    final remotePlaylists = online?.playlists ?? const <RemotePlaylist>[];
+
     final quickPicks = <Widget>[
-      QuickTile(
-        title: 'All Songs',
-        leading: CoverMosaic(tracks: c.allSongs.tracks, radius: 0),
-        onTap: () => shell.openCollection(c.allSongs),
-        onPlay: () => c.playCollection(c.allSongs),
-      ),
+      if (c.library.isNotEmpty)
+        QuickTile(
+          title: 'All Songs',
+          leading: CoverMosaic(tracks: c.allSongs.tracks, radius: 0),
+          onTap: () => shell.openCollection(c.allSongs),
+          onPlay: () => c.playCollection(c.allSongs),
+        ),
+      if (liked != null)
+        QuickTile(
+          title: 'Liked music',
+          leading: CoverMosaic(tracks: liked.tracks, radius: 0),
+          onTap: () => shell.openCollection(liked),
+          onPlay: () => c.playCollection(liked),
+        ),
+      for (final p in playlists.take(3))
+        QuickTile(
+          title: p.name,
+          leading: CoverMosaic(tracks: p.tracks, radius: 0),
+          onTap: () => shell.openCollection(c.playlistCollection(p)),
+          onPlay: p.tracks.isEmpty ? null : () => c.playCollection(c.playlistCollection(p)),
+        ),
+      for (final p in remotePlaylists.take(3))
+        QuickTile(
+          title: p.title,
+          leading: Artwork(track: playlistCover(p), radius: 0),
+          onTap: () => openRemotePlaylist(context, p),
+        ),
       for (final a in albums.take(3))
         QuickTile(
           title: a.title,
@@ -63,16 +90,10 @@ class HomePage extends StatelessWidget {
           onTap: () => shell.openCollection(a),
           onPlay: () => c.playCollection(a),
         ),
-      for (final t in recent.where((t) => t.album == null || !albums.take(3).any((a) => a.title == t.album)).take(4))
-        QuickTile(
-          title: t.title,
-          leading: Artwork(track: t),
-          onTap: () => c.playList(recent, recent.indexOf(t), from: 'Recently played'),
-        ),
     ].take(shell.compact ? 6 : 8).toList();
 
     return AccentBuilder(
-      track: c.currentTrack ?? c.recentlyPlayed.firstOrNull,
+      track: c.currentTrack ?? recent.firstOrNull,
       builder: (context, accent) => PageScaffold(
         gradientColor: accent,
         actions: [
@@ -81,13 +102,17 @@ class HomePage extends StatelessWidget {
               padding: EdgeInsets.all(12),
               child: SizedBox.square(dimension: 18, child: CircularProgressIndicator(strokeWidth: 2)),
             ),
+          IconButton(
+            tooltip: 'Refresh',
+            onPressed: () {
+              account.discover(refresh: true);
+              if (account.isSignedIn) account.library(refresh: true);
+            },
+            icon: const Icon(Icons.refresh_rounded),
+          ),
           if (shell.compact) ...[const DownloadsButton(), _AddMenu(shell: shell)],
         ],
         slivers: [
-          if (shell.compact)
-            SliverToBoxAdapter(
-              child: Padding(padding: EdgeInsets.fromLTRB(pad, 0, pad, 16), child: const SourceSwitch()),
-            ),
           SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(pad, 0, pad, 16),
@@ -97,19 +122,21 @@ class HomePage extends StatelessWidget {
               ),
             ),
           ),
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: pad),
-            sliver: SliverGrid.builder(
-              gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: shell.compact ? 260 : 360,
-                mainAxisExtent: shell.compact ? 56 : 64,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
+          if (quickPicks.isNotEmpty)
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: pad),
+              sliver: SliverGrid.builder(
+                gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: shell.compact ? 260 : 360,
+                  mainAxisExtent: shell.compact ? 56 : 64,
+                  mainAxisSpacing: 8,
+                  crossAxisSpacing: 8,
+                ),
+                itemCount: quickPicks.length,
+                itemBuilder: (_, i) => quickPicks[i],
               ),
-              itemCount: quickPicks.length,
-              itemBuilder: (_, i) => quickPicks[i],
             ),
-          ),
+          if (!account.isSignedIn) const SliverToBoxAdapter(child: SignInBanner()),
           if (recent.isNotEmpty)
             ..._shelf(context, 'Recently played', [
               for (final (i, t) in recent.indexed)
@@ -117,8 +144,28 @@ class HomePage extends StatelessWidget {
                   track: t,
                   title: t.title,
                   subtitle: t.artist,
+                  online: !c.isOffline(t),
                   onTap: () => c.playList(recent, i, from: 'Recently played'),
                   onPlay: () => c.playList(recent, i, from: 'Recently played'),
+                ),
+            ]),
+          if (playlists.isNotEmpty || remotePlaylists.isNotEmpty)
+            ..._shelf(context, 'Your playlists', [
+              for (final p in playlists)
+                MediaCard(
+                  track: p.tracks.firstOrNull,
+                  title: p.name,
+                  subtitle: 'OpenMusic • ${p.tracks.length} songs',
+                  onTap: () => shell.openCollection(c.playlistCollection(p)),
+                  onPlay: p.tracks.isEmpty ? null : () => c.playCollection(c.playlistCollection(p)),
+                ),
+              for (final p in remotePlaylists)
+                MediaCard(
+                  track: playlistCover(p),
+                  title: p.title,
+                  subtitle: p.count == 0 ? 'YouTube Music' : 'YouTube Music • ${p.count} songs',
+                  online: true,
+                  onTap: () => openRemotePlaylist(context, p),
                 ),
             ]),
           if (albums.isNotEmpty)
@@ -144,16 +191,19 @@ class HomePage extends StatelessWidget {
                   onPlay: () => c.playCollection(a),
                 ),
             ]),
-          ..._shelf(context, 'Recently added', [
-            for (final t in c.recentlyAdded.take(20))
-              MediaCard(
-                track: t,
-                title: t.title,
-                subtitle: t.artist,
-                onTap: () => c.playList(c.recentlyAdded, c.recentlyAdded.indexOf(t), from: 'Recently added'),
-                onPlay: () => c.playList(c.recentlyAdded, c.recentlyAdded.indexOf(t), from: 'Recently added'),
-              ),
-          ], onShowAll: () => shell.open(CollectionPage(collection: c.allSongs))),
+          if (c.library.isEmpty) const SliverToBoxAdapter(child: _AddYourMusic()),
+          const DiscoverShelves(),
+          if (c.library.isNotEmpty)
+            ..._shelf(context, 'Recently added', [
+              for (final t in c.recentlyAdded.take(20))
+                MediaCard(
+                  track: t,
+                  title: t.title,
+                  subtitle: t.artist,
+                  onTap: () => c.playList(c.recentlyAdded, c.recentlyAdded.indexOf(t), from: 'Recently added'),
+                  onPlay: () => c.playList(c.recentlyAdded, c.recentlyAdded.indexOf(t), from: 'Recently added'),
+                ),
+            ], onShowAll: () => shell.openCollection(c.allSongs)),
         ],
       ),
     );
@@ -164,6 +214,47 @@ class HomePage extends StatelessWidget {
       child: Shelf(title: title, cards: cards, onShowAll: onShowAll),
     ),
   ];
+}
+
+/// Shown on Home while there are no files yet: a small invitation, not a wall.
+class _AddYourMusic extends StatelessWidget {
+  const _AddYourMusic();
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = ShellScope.of(context);
+    final text = Theme.of(context).textTheme;
+    final pad = shell.compact ? 16.0 : 24.0;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(pad, 16, pad, 0),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(color: AppColors.elevated, borderRadius: BorderRadius.circular(8)),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              'Add music from this device to play it offline.',
+              style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            ),
+            OutlinedButton.icon(
+              onPressed: shell.addFiles,
+              icon: const Icon(Icons.audio_file_outlined),
+              label: const Text('Add songs'),
+            ),
+            if (shell.addFolder != null)
+              OutlinedButton.icon(
+                onPressed: shell.addFolder,
+                icon: const Icon(Icons.folder_open_rounded),
+                label: const Text('Add a folder'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 /// Compact "jump back in" tile: artwork on the left, bold title, play button on hover.
@@ -237,6 +328,8 @@ class _AddMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<VoidCallback>(
+      // Over the whole window, so a click anywhere (sidebar included) closes it.
+      useRootNavigator: true,
       tooltip: 'Add music',
       icon: const Icon(Icons.add_rounded),
       onSelected: (action) => action(),

@@ -10,7 +10,6 @@ import '../theme.dart';
 import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
-import '../widgets/source_switch.dart';
 import '../widgets/track_row.dart';
 import '../widgets/smooth_scroll.dart';
 
@@ -28,7 +27,9 @@ class _SearchPageState extends State<SearchPage> {
   String _query = '';
   Timer? _debounce;
   Future<List<Track>>? _youtube;
-  String? _youtubeQuery;
+
+  /// The last results shown: they stay (dimmed) while the next query loads, instead of flashing a spinner.
+  List<Track> _shown = const [];
 
   @override
   void dispose() {
@@ -46,15 +47,12 @@ class _SearchPageState extends State<SearchPage> {
       return;
     }
     // Debounced: only hit YouTube once typing pauses.
-    _debounce = Timer(const Duration(milliseconds: 450), () {
-      if (mounted && PlayerScope.read(context).source == MusicSource.youtubeMusic) {
-        setState(() => _searchYoutube(q));
-      }
+    _debounce = Timer(const Duration(milliseconds: 280), () {
+      if (mounted) setState(() => _searchYoutube(q));
     });
   }
 
   void _searchYoutube(String q) {
-    _youtubeQuery = q;
     _youtube = PlayerScope.read(context).searchYoutube(q);
   }
 
@@ -68,11 +66,6 @@ class _SearchPageState extends State<SearchPage> {
     final q = _query.trim().toLowerCase();
     final artists = q.isEmpty ? c.artists : c.artists.where((a) => a.title.toLowerCase().contains(q)).toList();
     final albums = q.isEmpty ? const [] : c.albums.where((a) => a.title.toLowerCase().contains(q)).toList();
-    final onYoutube = c.source == MusicSource.youtubeMusic;
-    // Switching source with a query already typed: search right away.
-    if (onYoutube && q.length >= 2 && _youtubeQuery != _query.trim() && !(_debounce?.isActive ?? false)) {
-      _searchYoutube(_query.trim());
-    }
 
     return PageScaffold(
       slivers: [
@@ -83,8 +76,6 @@ class _SearchPageState extends State<SearchPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (shell.compact) ...[
-                  const SourceSwitch(),
-                  const SizedBox(height: 16),
                   Text('Search', style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 16),
                 ],
@@ -94,10 +85,17 @@ class _SearchPageState extends State<SearchPage> {
                     controller: _controller,
                     focusNode: widget.focusNode,
                     onChanged: _onQuery,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: (v) {
+                      // Enter: search now instead of waiting out the debounce.
+                      _debounce?.cancel();
+                      final q = v.trim();
+                      if (q.length >= 2) setState(() => _searchYoutube(q));
+                    },
                     style: text.bodyLarge?.copyWith(color: Colors.black, fontWeight: FontWeight.w500),
                     cursorColor: Colors.black,
                     decoration: InputDecoration(
-                      hintText: onYoutube ? 'Search YouTube Music' : 'Search your library',
+                      hintText: 'Search your music and YouTube Music',
                       hintStyle: text.bodyLarge?.copyWith(color: Colors.black54),
                       prefixIcon: const Icon(Icons.search_rounded, color: Colors.black87),
                       suffixIcon: _query.isEmpty
@@ -122,86 +120,78 @@ class _SearchPageState extends State<SearchPage> {
             ),
           ),
         ),
-        if (onYoutube) ...[
-          if (q.isEmpty)
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.fromLTRB(pad, 8, pad, 0),
-                child: Text(
-                  'Find any song on YouTube Music. It plays straight away, and you can download it for offline.',
-                  style: text.bodyLarge?.copyWith(color: AppColors.textSecondary),
-                ),
-              ),
-            )
-          else
-            ..._youtubeResults(context),
-        ] else if (q.isEmpty) ...[
-          SliverToBoxAdapter(child: SectionTitle(artists.isEmpty ? 'Nothing to browse yet' : 'Browse artists')),
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(pad, 8, pad, 0),
-            sliver: SliverGrid.builder(
-              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                maxCrossAxisExtent: 220,
-                childAspectRatio: 1.6,
-                mainAxisSpacing: 16,
-                crossAxisSpacing: 16,
-              ),
-              itemCount: artists.length,
-              itemBuilder: (context, i) => AccentBuilder(
-                track: artists[i].cover,
-                builder: (context, color) => _BrowseTile(
-                  title: artists[i].title,
-                  color: color,
-                  cover: Artwork(track: artists[i].cover, radius: 4),
-                  onTap: () => shell.openCollection(artists[i]),
-                ),
-              ),
-            ),
-          ),
-        ] else if (results.isEmpty)
+        if (q.isEmpty) ...[
           SliverToBoxAdapter(
             child: Padding(
               padding: EdgeInsets.fromLTRB(pad, 8, pad, 0),
               child: Text(
-                'Nothing in your library matches "${_query.trim()}".',
-                style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
-              ),
-            ),
-          )
-        else ...[
-          const SliverToBoxAdapter(child: SectionTitle('Songs')),
-          SliverPadding(
-            padding: EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16),
-            sliver: SliverList.builder(
-              itemCount: results.length.clamp(0, 50),
-              itemBuilder: (context, i) => TrackRow(
-                track: results[i],
-                onTap: () => c.playList(results, i, from: 'Search'),
+                'Searches your own music and all of YouTube Music together. Songs with a cloud stream online; '
+                'the rest play offline.',
+                style: text.bodyLarge?.copyWith(color: AppColors.textSecondary),
               ),
             ),
           ),
-          if (artists.isNotEmpty)
-            ..._row(context, 'Artists', [
-              for (final a in artists)
-                MediaCard(
-                  track: a.cover,
-                  title: a.title,
-                  subtitle: 'Artist',
-                  circle: true,
-                  onTap: () => shell.openCollection(a),
+          if (artists.isNotEmpty) ...[
+            SliverToBoxAdapter(child: SectionTitle(artists.isEmpty ? 'Nothing to browse yet' : 'Browse artists')),
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(pad, 8, pad, 0),
+              sliver: SliverGrid.builder(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 220,
+                  childAspectRatio: 1.6,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
                 ),
-            ]),
-          if (albums.isNotEmpty)
-            ..._row(context, 'Albums', [
-              for (final a in albums)
-                MediaCard(
-                  track: a.cover,
-                  title: a.title,
-                  subtitle: a.subtitle,
-                  onTap: () => shell.openCollection(a),
-                  onPlay: () => c.playCollection(a),
+                itemCount: artists.length,
+                itemBuilder: (context, i) => AccentBuilder(
+                  track: artists[i].cover,
+                  builder: (context, color) => _BrowseTile(
+                    title: artists[i].title,
+                    color: color,
+                    cover: Artwork(track: artists[i].cover, radius: 4),
+                    onTap: () => shell.openCollection(artists[i]),
+                  ),
                 ),
-            ]),
+              ),
+            ),
+          ],
+        ] else ...[
+          if (results.isNotEmpty) ...[
+            const SliverToBoxAdapter(child: SectionTitle('In your library')),
+            SliverPadding(
+              padding: EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16),
+              sliver: SliverList.builder(
+                itemCount: results.length.clamp(0, 50),
+                itemBuilder: (context, i) => TrackRow(
+                  track: results[i],
+                  onTap: () => c.playList(results, i, from: 'Search'),
+                ),
+              ),
+            ),
+            if (artists.isNotEmpty)
+              ..._row(context, 'Artists', [
+                for (final a in artists)
+                  MediaCard(
+                    track: a.cover,
+                    title: a.title,
+                    subtitle: 'Artist',
+                    circle: true,
+                    onTap: () => shell.openCollection(a),
+                  ),
+              ]),
+            if (albums.isNotEmpty)
+              ..._row(context, 'Albums', [
+                for (final a in albums)
+                  MediaCard(
+                    track: a.cover,
+                    title: a.title,
+                    subtitle: a.subtitle,
+                    onTap: () => shell.openCollection(a),
+                    onPlay: () => c.playCollection(a),
+                  ),
+              ]),
+          ],
+          ..._youtubeResults(context),
         ],
       ],
     );
@@ -213,11 +203,35 @@ class _SearchPageState extends State<SearchPage> {
     final text = Theme.of(context).textTheme;
     final pad = shell.compact ? 16.0 : 24.0;
     return [
-      const SliverToBoxAdapter(child: SectionTitle('Songs')),
+      const SliverToBoxAdapter(child: SectionTitle('YouTube Music')),
       FutureBuilder<List<Track>>(
         future: _youtube,
         builder: (context, snap) {
-          if (_youtube == null || snap.connectionState != ConnectionState.done) {
+          final loading = _youtube == null || snap.connectionState != ConnectionState.done;
+          if (!loading && snap.hasData) _shown = snap.data!;
+          if (loading && _shown.isNotEmpty) {
+            final previous = _shown;
+            return SliverMainAxisGroup(
+              slivers: [
+                const SliverToBoxAdapter(child: LinearProgressIndicator(minHeight: 2)),
+                SliverOpacity(
+                  opacity: 0.5,
+                  sliver: SliverPadding(
+                    padding: EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16),
+                    sliver: SliverList.builder(
+                      itemCount: previous.length,
+                      itemBuilder: (context, i) => TrackRow(
+                        track: previous[i],
+                        showAlbum: false,
+                        onTap: () => c.playList(previous, i, from: 'YouTube search'),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+          if (loading) {
             return SliverToBoxAdapter(
               child: Padding(
                 padding: EdgeInsets.symmetric(horizontal: pad, vertical: 16),

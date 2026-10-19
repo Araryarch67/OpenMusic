@@ -8,12 +8,16 @@ import '../widgets/controls.dart';
 import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
 import '../widgets/track_row.dart';
+import '../ytmusic_edit.dart';
 
 /// Album / artist / "All Songs" page with a colour-washed header.
 class CollectionPage extends StatelessWidget {
-  const CollectionPage({super.key, required this.collection});
+  const CollectionPage({super.key, required this.collection, this.actions = const []});
 
   final Collection collection;
+
+  /// Extra buttons next to Play / Shuffle (e.g. editing one of your playlists).
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +29,7 @@ class CollectionPage extends StatelessWidget {
           CollectionKind.allSongs => c.allSongs,
           CollectionKind.youtube => c.youtubeDownloads,
           CollectionKind.remote => null,
+          CollectionKind.playlist => c.playlistById(collection.id),
           CollectionKind.artist => c.artistNamed(collection.title),
           CollectionKind.album => c.albums.where((a) => a.title == collection.title).firstOrNull,
         } ??
@@ -35,8 +40,10 @@ class CollectionPage extends StatelessWidget {
     final isAll = live.kind == CollectionKind.allSongs;
     final multiDisc = live.kind == CollectionKind.album && tracks.map((t) => t.discNumber ?? 1).toSet().length > 1;
     final text = Theme.of(context).textTheme;
+    final playlistId = live.kind == CollectionKind.playlist ? live.id : null;
+    final actions = [...this.actions, if (playlistId != null) _PlaylistMenu(id: playlistId, name: live.title)];
 
-    return AccentBuilder(
+    final page = AccentBuilder(
       track: live.cover,
       builder: (context, accent) {
         final headerColor = accent;
@@ -70,6 +77,7 @@ class CollectionPage extends StatelessWidget {
                       onPressed: tracks.isEmpty ? null : () => c.playCollection(live, shuffled: true),
                       icon: const Icon(Icons.shuffle_rounded),
                     ),
+                    ...actions,
                     if (isAll) ...[
                       const Spacer(),
                       IconButton(
@@ -139,6 +147,21 @@ class CollectionPage extends StatelessWidget {
           ],
         );
       },
+    );
+    if (playlistId == null) return page;
+    // An OpenMusic playlist: every song in it can be taken out.
+    return PlaylistEditScope(
+      canRemove: (t) => tracks.any((x) => x.id == t.id),
+      remove: (context, t) async {
+        c.removeFromPlaylist(playlistId, t);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Removed from ${live.title}'),
+            action: SnackBarAction(label: 'Undo', onPressed: () => c.addToPlaylist(playlistId, [t])),
+          ),
+        );
+      },
+      child: page,
     );
   }
 
@@ -277,6 +300,60 @@ class _ColumnHeader extends StatelessWidget {
           const SizedBox(height: 8),
         ],
       ),
+    );
+  }
+}
+
+/// Rename / delete for an OpenMusic playlist.
+class _PlaylistMenu extends StatelessWidget {
+  const _PlaylistMenu({required this.id, required this.name});
+
+  final String id;
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = PlayerScope.read(context);
+    return PopupMenuButton<VoidCallback>(
+      // Over the whole window, so a click anywhere (sidebar included) closes it.
+      useRootNavigator: true,
+      tooltip: 'Edit playlist',
+      icon: const Icon(Icons.more_horiz_rounded, size: 30),
+      onSelected: (action) => action(),
+      itemBuilder: (_) => [
+        PopupMenuItem(
+          value: () async {
+            final answer = await askPlaylistName(context, initialTitle: name, askPrivacy: false);
+            if (answer != null) c.renamePlaylist(id, answer.title);
+          },
+          child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
+        ),
+        PopupMenuItem(
+          value: () async {
+            final history = ShellScope.of(context).history;
+            final navigator = Navigator.of(context);
+            final sure = await showDialog<bool>(
+              context: context,
+              builder: (context) => AlertDialog(
+                title: const Text('Delete playlist?'),
+                content: Text('"$name" will be deleted. The songs stay in your library.'),
+                actions: [
+                  TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error),
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Delete'),
+                  ),
+                ],
+              ),
+            );
+            if (sure != true) return;
+            c.deletePlaylist(id);
+            history != null ? history.back() : navigator.maybePop();
+          },
+          child: const ListTile(leading: Icon(Icons.delete_outline_rounded), title: Text('Delete playlist')),
+        ),
+      ],
     );
   }
 }

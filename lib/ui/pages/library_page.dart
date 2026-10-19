@@ -2,19 +2,21 @@ import 'package:flutter/material.dart';
 
 import '../../models/track.dart';
 import '../../services/player_controller.dart';
+import '../../services/youtube_music_account.dart';
+import '../ytmusic_edit.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/controls.dart';
-import 'home_page.dart';
 import 'settings_page.dart';
 import 'youtube_music_page.dart';
-import '../widgets/source_switch.dart';
 import '../widgets/smooth_scroll.dart';
+import '../navigation.dart';
 
-enum LibraryFilter { albums, artists }
+enum LibraryFilter { playlists, albums, artists }
 
-/// "Your Library": pinned All Songs plus albums / artists. Used both as the
-/// phone tab and (with [dense]) inside the desktop sidebar.
+/// "Your Library": OpenMusic playlists, YouTube Music (liked songs and
+/// playlists, marked with a cloud) and the files on this device, in one list.
+/// Used both as the phone tab and (with [dense]) inside the desktop sidebar.
 class LibraryList extends StatefulWidget {
   const LibraryList({super.key, this.dense = false, this.collapsed = false});
 
@@ -33,20 +35,88 @@ class _LibraryListState extends State<LibraryList> {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
+    final account = c.ytMusic;
+    return ListenableBuilder(
+      listenable: account,
+      builder: (context, _) => FutureBuilder<YoutubeMusicLibrary?>(
+        future: account.isSignedIn
+            ? account.library().then<YoutubeMusicLibrary?>((l) => l, onError: (Object _) => null)
+            : Future.value(null),
+        builder: (context, snap) => _build(context, c, snap.data),
+      ),
+    );
+  }
+
+  Widget _build(BuildContext context, PlayerController c, YoutubeMusicLibrary? online) {
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
-    final items = <Collection>[
-      if (_filter != LibraryFilter.artists) ...c.albums,
-      if (_filter != LibraryFilter.albums) ...c.artists,
+    final account = c.ytMusic;
+    bool show(LibraryFilter f) => _filter == null || _filter == f;
+
+    final local = <Collection>[
+      if (show(LibraryFilter.albums)) ...c.albums,
+      if (show(LibraryFilter.artists)) ...c.artists,
     ];
-    if (_filter == null) items.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
-    final all = c.allSongs;
-    final rows = [all, ?c.youtubeDownloads, ...items];
+    if (_filter == null) local.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+
+    final rows = <Widget>[
+      if (show(LibraryFilter.playlists)) ...[
+        _SimpleRow(
+          collapsed: widget.collapsed,
+          art: const _IconArt(Icons.add_rounded),
+          title: 'New playlist',
+          subtitle: 'Mix your own songs and YouTube Music',
+          onTap: () => createPlaylist(context),
+        ),
+        for (final p in c.playlists) _LibraryRow(collection: c.playlistCollection(p), collapsed: widget.collapsed),
+        if (online != null) ...[
+          if (online.liked.isNotEmpty)
+            _LibraryRow(collection: likedCollection(online.liked), collapsed: widget.collapsed, online: true),
+          for (final p in online.playlists)
+            _SimpleRow(
+              collapsed: widget.collapsed,
+              art: Artwork(track: playlistCover(p), size: 48),
+              title: p.title,
+              subtitle: p.count == 0 ? 'Playlist • YouTube Music' : 'Playlist • YouTube Music • ${p.count} songs',
+              online: true,
+              location: Locations.remotePlaylist(p.id),
+              onTap: () => openRemotePlaylist(context, p),
+            ),
+        ],
+        if (c.library.isNotEmpty) _LibraryRow(collection: c.allSongs, collapsed: widget.collapsed),
+        if (c.youtubeDownloads case final d?) _LibraryRow(collection: d, collapsed: widget.collapsed),
+      ],
+      for (final col in local) _LibraryRow(collection: col, collapsed: widget.collapsed),
+      if (!widget.collapsed && !account.isSignedIn && show(LibraryFilter.playlists))
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
+          child: _Prompt(
+            title: 'Your YouTube Music',
+            body: 'Sign in to see your liked songs and playlists here.',
+            button: 'Sign in with Google',
+            onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
+          ),
+        ),
+      if (!widget.collapsed && c.library.isEmpty)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
+          child: _Prompt(
+            title: 'Music on this device',
+            body: 'Add audio files to play them offline.',
+            button: 'Add songs',
+            onPressed: shell.addFiles,
+          ),
+        ),
+    ];
 
     final header = Padding(
       padding: EdgeInsets.fromLTRB(widget.collapsed ? 0 : 16, 12, widget.collapsed ? 0 : 8, 4),
       child: widget.collapsed
-          ? IconButton(tooltip: 'Add music', onPressed: shell.addFiles, icon: const Icon(Icons.add_rounded))
+          ? IconButton(
+              tooltip: 'New playlist',
+              onPressed: () => createPlaylist(context),
+              icon: const Icon(Icons.add_rounded),
+            )
           : Row(
               children: [
                 const Icon(Icons.library_music_rounded, color: AppColors.textSecondary),
@@ -67,10 +137,16 @@ class _LibraryListState extends State<LibraryList> {
                     icon: const Icon(Icons.settings_outlined),
                   ),
                 PopupMenuButton<VoidCallback>(
-                  tooltip: 'Add music',
+                  // Over the whole window, so a click anywhere (sidebar included) closes it.
+                  useRootNavigator: true,
+                  tooltip: 'Add',
                   icon: const Icon(Icons.add_rounded),
                   onSelected: (action) => action(),
                   itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: () => createPlaylist(context),
+                      child: const ListTile(leading: Icon(Icons.playlist_add_rounded), title: Text('New playlist')),
+                    ),
                     PopupMenuItem(
                       value: shell.addFiles,
                       child: const ListTile(leading: Icon(Icons.audio_file_outlined), title: Text('Add songs')),
@@ -90,72 +166,144 @@ class _LibraryListState extends State<LibraryList> {
             ),
     );
 
-    if (c.library.isEmpty && !widget.dense && c.source == MusicSource.local) {
-      return Column(
-        children: [
-          header,
-          const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 8), child: SourceSwitch()),
-          const Expanded(child: SingleChildScrollView(child: EmptyLibrary())),
-        ],
-      );
-    }
-
     // Very short windows: drop the filter chips so the list keeps some room.
     return LayoutBuilder(
       builder: (context, constraints) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           header,
-          if (!widget.collapsed &&
-              c.library.isNotEmpty &&
-              c.source == MusicSource.local &&
-              constraints.maxHeight >= 300)
+          if (!widget.collapsed && constraints.maxHeight >= 300)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
               child: Wrap(
                 spacing: 8,
+                runSpacing: 8,
                 children: [
                   for (final f in LibraryFilter.values)
                     FilterChip(
-                      label: Text(f == LibraryFilter.albums ? 'Albums' : 'Artists'),
+                      label: Text(switch (f) {
+                        LibraryFilter.playlists => 'Playlists',
+                        LibraryFilter.albums => 'Albums',
+                        LibraryFilter.artists => 'Artists',
+                      }),
                       selected: _filter == f,
                       onSelected: (on) => setState(() => _filter = on ? f : null),
                     ),
                 ],
               ),
             ),
-          if (!widget.dense) const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 8), child: SourceSwitch()),
-          if (c.source == MusicSource.youtubeMusic)
-            Expanded(child: YoutubeMusicLibraryList(collapsed: widget.collapsed))
-          else ...[
-            if (c.library.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: widget.collapsed ? const SizedBox.shrink() : _SidebarPrompt(onAdd: shell.addFiles),
-              )
-            else
-              Expanded(
-                child: SmoothScroll(
-                  builder: (context, scroll) => ListView.builder(
-                    controller: scroll,
-                    padding: EdgeInsets.fromLTRB(8, 0, 8, widget.dense ? 8 : 16),
-                    itemCount: rows.length,
-                    itemBuilder: (context, i) => _LibraryRow(collection: rows[i], collapsed: widget.collapsed),
-                  ),
-                ),
+          Expanded(
+            child: SmoothScroll(
+              builder: (context, scroll) => ListView(
+                controller: scroll,
+                padding: EdgeInsets.fromLTRB(8, 0, 8, widget.dense ? 8 : 16),
+                children: rows,
               ),
-          ],
+            ),
+          ),
         ],
       ),
     );
   }
 }
 
+class _IconArt extends StatelessWidget {
+  const _IconArt(this.icon);
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) => SizedBox.square(
+    dimension: 48,
+    child: DecoratedBox(
+      decoration: BoxDecoration(color: AppColors.hover, borderRadius: BorderRadius.circular(4)),
+      child: Icon(icon, color: AppColors.textPrimary),
+    ),
+  );
+}
+
+/// A library entry that isn't a [Collection] (YouTube Music playlists, "New playlist").
+class _SimpleRow extends StatelessWidget {
+  const _SimpleRow({
+    required this.collapsed,
+    required this.art,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.location,
+    this.online = false,
+  });
+
+  final bool collapsed;
+  final Widget art;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final String? location;
+  final bool online;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final shell = ShellScope.of(context);
+    final tile = InkWell(
+      borderRadius: BorderRadius.circular(6),
+      hoverColor: AppColors.tile,
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: collapsed
+            ? Center(child: art)
+            : Row(
+                children: [
+                  art,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          title,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 2),
+                        Row(
+                          children: [
+                            if (online) ...[const SourceMark(online: true, size: 13), const SizedBox(width: 4)],
+                            Expanded(
+                              child: Text(
+                                subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+      ),
+    );
+    final highlighted = location == null
+        ? tile
+        : SelectedHighlight(history: shell.history, location: location!, child: tile);
+    return collapsed ? Tooltip(message: title, child: highlighted) : highlighted;
+  }
+}
+
 class _LibraryRow extends StatelessWidget {
-  const _LibraryRow({required this.collection, required this.collapsed});
+  const _LibraryRow({required this.collection, required this.collapsed, this.online = false});
 
   final Collection collection;
   final bool collapsed;
+
+  /// A YouTube Music collection (Liked music): marked with a cloud.
+  final bool online;
 
   @override
   Widget build(BuildContext context) {
@@ -194,17 +342,25 @@ class _LibraryRow extends StatelessWidget {
                           ),
                         ),
                         const SizedBox(height: 2),
-                        Text(
-                          switch (collection.kind) {
-                            CollectionKind.allSongs ||
-                            CollectionKind.youtube ||
-                            CollectionKind.remote => 'Playlist • ${collection.subtitle}',
-                            CollectionKind.album => 'Album • ${collection.subtitle}',
-                            CollectionKind.artist => 'Artist',
-                          },
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                        Row(
+                          children: [
+                            if (online) ...[const SourceMark(online: true, size: 13), const SizedBox(width: 4)],
+                            Expanded(
+                              child: Text(
+                                switch (collection.kind) {
+                                  CollectionKind.allSongs ||
+                                  CollectionKind.youtube ||
+                                  CollectionKind.remote => 'Playlist • ${collection.subtitle}',
+                                  CollectionKind.playlist => 'Playlist • OpenMusic • ${collection.subtitle}',
+                                  CollectionKind.album => 'Album • ${collection.subtitle}',
+                                  CollectionKind.artist => 'Artist',
+                                },
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -219,14 +375,22 @@ class _LibraryRow extends StatelessWidget {
               ),
       ),
     );
-    return collapsed ? Tooltip(message: collection.title, child: tile) : tile;
+    final highlighted = SelectedHighlight(
+      history: shell.history,
+      location: Locations.collection(collection),
+      child: tile,
+    );
+    return collapsed ? Tooltip(message: collection.title, child: highlighted) : highlighted;
   }
 }
 
-class _SidebarPrompt extends StatelessWidget {
-  const _SidebarPrompt({required this.onAdd});
+class _Prompt extends StatelessWidget {
+  const _Prompt({required this.title, required this.body, required this.button, required this.onPressed});
 
-  final VoidCallback onAdd;
+  final String title;
+  final String body;
+  final String button;
+  final VoidCallback? onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -237,14 +401,14 @@ class _SidebarPrompt extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Add your first songs', style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+          Text(title, style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 6),
-          Text('Pick audio files from this device.', style: text.bodySmall),
+          Text(body, style: text.bodySmall),
           const SizedBox(height: 14),
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-            onPressed: onAdd,
-            child: const Text('Add songs'),
+            onPressed: onPressed,
+            child: Text(button),
           ),
         ],
       ),

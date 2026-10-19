@@ -374,6 +374,9 @@ class AudioEngine extends ChangeNotifier {
   Future<void> _applyProps(NativePlayer p) async {
     final exclusiveOut = exclusive || bitPerfect;
     final props = <String, String>{
+      // media_kit turns on mpv's disk cache, which fails ("Failed to create file
+      // cache") without a writable cache dir. Audio needs no more than the RAM cache.
+      'cache-on-disk': 'no',
       'gapless-audio': gapless ? 'weak' : 'no',
       'prefetch-playlist': gapless ? 'yes' : 'no',
       'replaygain': effectiveLeveling.mpv,

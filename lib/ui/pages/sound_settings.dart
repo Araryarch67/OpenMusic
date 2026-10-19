@@ -34,10 +34,7 @@ class SoundSettings extends StatelessWidget {
             ),
             ListTile(
               title: const Text('Equalizer'),
-              subtitle: Text(
-                lockedNote(audio.eqActive ? audio.eqPreset : 'Off')!,
-                style: muted,
-              ),
+              subtitle: Text(lockedNote(audio.eqActive ? audio.eqPreset : 'Off')!, style: muted),
               trailing: const Icon(Icons.chevron_right_rounded),
               onTap: () => shell.open(const EqualizerPage()),
             ),
@@ -62,10 +59,7 @@ class SoundSettings extends StatelessWidget {
             ),
             SettingTile(
               title: const Text('Headphone crossfeed'),
-              subtitle: Text(
-                lockedNote('Makes headphones sound more like speakers in a room')!,
-                style: muted,
-              ),
+              subtitle: Text(lockedNote('Makes headphones sound more like speakers in a room')!, style: muted),
               control: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 200),
                 child: Row(
@@ -79,10 +73,7 @@ class SoundSettings extends StatelessWidget {
                     ),
                     SizedBox(
                       width: 40,
-                      child: Text(
-                        audio.crossfeed == 0 ? 'Off' : '${(audio.crossfeed * 100).round()}%',
-                        style: muted,
-                      ),
+                      child: Text(audio.crossfeed == 0 ? 'Off' : '${(audio.crossfeed * 100).round()}%', style: muted),
                     ),
                   ],
                 ),
@@ -147,7 +138,9 @@ class SoundSettings extends StatelessWidget {
                   SettingTile(
                     title: const Text('Output sample rate'),
                     subtitle: Text(
-                      locked ? 'Follows each song while bit-perfect mode is on' : 'Follow the song, or convert everything to one rate',
+                      locked
+                          ? 'Follows each song while bit-perfect mode is on'
+                          : 'Follow the song, or convert everything to one rate',
                       style: muted,
                     ),
                     control: DropdownButton<int>(
@@ -215,7 +208,10 @@ class SettingTile extends StatelessWidget {
             title: title,
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [?subtitle, Align(alignment: Alignment.centerLeft, child: control)],
+              children: [
+                ?subtitle,
+                Align(alignment: Alignment.centerLeft, child: control),
+              ],
             ),
           ),
   );

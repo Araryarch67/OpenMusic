@@ -532,6 +532,7 @@ class MediaCard extends StatefulWidget {
     required this.onTap,
     this.onPlay,
     this.circle = false,
+    this.online = false,
   });
 
   final Track? track;
@@ -540,6 +541,9 @@ class MediaCard extends StatefulWidget {
   final VoidCallback onTap;
   final VoidCallback? onPlay;
   final bool circle;
+
+  /// Streams from YouTube Music (needs internet): a small cloud before the subtitle.
+  final bool online;
 
   @override
   State<MediaCard> createState() => _MediaCardState();
@@ -620,12 +624,20 @@ class _MediaCardState extends State<MediaCard> {
                     style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    widget.subtitle,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: widget.circle ? TextAlign.center : TextAlign.start,
-                    style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                  Row(
+                    mainAxisAlignment: widget.circle ? MainAxisAlignment.center : MainAxisAlignment.start,
+                    children: [
+                      if (widget.online) ...[const SourceMark(online: true, size: 13), const SizedBox(width: 4)],
+                      Flexible(
+                        child: Text(
+                          widget.subtitle,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: widget.circle ? TextAlign.center : TextAlign.start,
+                          style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -678,3 +690,22 @@ String formatBytes(num bytes) {
 
 String formatEta(Duration d) =>
     d.inMinutes >= 1 ? '${d.inMinutes}m ${d.inSeconds.remainder(60)}s left' : '${d.inSeconds}s left';
+
+/// Where a song plays from: a cloud for YouTube Music (online), a check for
+/// songs on this device (offline).
+class SourceMark extends StatelessWidget {
+  const SourceMark({super.key, required this.online, this.size = 14});
+
+  final bool online;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+    message: online ? 'YouTube Music: needs internet' : 'On this device: plays offline',
+    child: Icon(
+      online ? Icons.cloud_outlined : Icons.offline_pin_rounded,
+      size: size,
+      color: online ? AppColors.textSecondary : AppColors.accent,
+    ),
+  );
+}
