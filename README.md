@@ -1,50 +1,135 @@
+<div align="center">
+
 # OpenMusic
 
-A cross-platform music player built with Flutter: Android, iOS, Linux, Windows and macOS.
+**Your own music and YouTube Music in one player, with hi-fi audio.**
+
+A free, open-source music player for Linux, Windows, macOS, Android and iOS, built with Flutter.
+
+[![License: AGPL v3](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+[![Flutter](https://img.shields.io/badge/Flutter-3-02569B?logo=flutter&logoColor=white)](https://flutter.dev)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20%7C%20Windows%20%7C%20macOS%20%7C%20Android%20%7C%20iOS-555)
+[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+![OpenMusic home](docs/screenshots/home.webp)
+
+</div>
+
+## Table of contents
+
+- [Features](#features)
+- [Screenshots](#screenshots)
+- [Install](#install)
+- [Build from source](#build-from-source)
+- [YouTube Music](#youtube-music)
+- [Audio](#audio)
+- [Platform notes](#platform-notes)
+- [Contributing](#contributing)
+- [Acknowledgements](#acknowledgements)
+- [License](#license)
 
 ## Features
 
-- **Your music and YouTube Music in one place.** Home, Search and Library show both together. YouTube Music songs carry a small cloud (they stream, so they need internet); everything else, including downloaded YouTube songs, plays offline.
-  - **Files on this device:** reads tags and cover art (FLAC, ALAC, WAV, AIFF, MP3, M4A, Ogg, Opus, WavPack, APE, DSD…), groups by album and artist, splits cue sheets, shows multi-disc albums.
-  - **YouTube Music:** home, charts, search and radio without an account; liked songs, playlists and history once signed in. Like songs and create, rename, delete and edit YouTube Music playlists from the app.
-- **OpenMusic playlists:** kept on this device, and they can mix your own files with YouTube Music songs.
-- **Autoplay:** when the queue ends, similar songs keep coming (YouTube Music's own "Up next" radio). *Start radio* from any YouTube song.
-- **Lyrics:** synced, line by line (a `.lrc` next to the file, lyrics in the tags, or LRCLIB).
-- **Sound:** equalizer, volume leveling (ReplayGain), gapless, headphone crossfeed; under *Advanced audio* bit-perfect mode, output device, sample rate, resampler and buffer. See [Features.md](Features.md).
-- **YouTube import:** paste a video or playlist link (or press Ctrl+V anywhere outside a text field). Audio is saved byte-for-byte in the best quality YouTube serves (Opus ~130–160 kbps or AAC 128 kbps, AAC 256 kbps with Premium). YouTube has no lossless audio.
-- **Fast downloads:** several songs at once and parallel range requests; the Downloads page shows size, speed and time left.
-- **Discord Rich Presence:** "Listening to" with progress bar, cover art and a YouTube Music button (toggle in Settings).
-- **Responsive layout:** bottom tabs and a mini player on phones, a library sidebar on tablets, plus a now-playing panel on wide screens. Tested from 240×320 up to 3840×2160, including live resizing.
-- **Custom title bar** on desktop (the window is undecorated; works with tiling WMs).
-- **Keyboard:** `Space` play/pause, `Ctrl+←/→` previous/next, `Ctrl+K` search, `Ctrl+V` import a copied YouTube link, plus media keys.
+- **One library.** Files on your device, your playlists and YouTube Music show up together in Home, Search and Library. YouTube Music songs carry a small cloud (they stream). Everything else plays offline, including YouTube songs you've downloaded.
+- **Your music.** Reads tags and cover art from FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD (DSF/DFF) and more. Groups albums and artists, splits cue sheets and shows multi-disc albums. Includes a tag editor that keeps ReplayGain and custom tags.
+- **YouTube Music, no account needed.** Home, charts, search and radio work signed out. Press **Sign in with Google** to add your liked songs, playlists and history. You can like songs and create, rename and delete playlists, and add or remove their songs, right from the app.
+- **Playlists.** OpenMusic playlists live on your device and can mix your own files with YouTube Music songs.
+- **Autoplay.** When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song.
+- **Synced lyrics** that follow the song line by line, from a `.lrc` file, the file's tags or [LRCLIB](https://lrclib.net). Click a line to jump to it.
+- **Hi-fi audio** with a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio).
+- **Downloads.** Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves.
+- **Made for every screen.** Bottom tabs and a mini player on phones, a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward, mouse side buttons, `Alt+←/→`.
+- **Discord Rich Presence**, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+V` to import a copied YouTube link).
 
-## Run
+## Screenshots
+
+| Search: your music and YouTube Music | A playlist mixing artists |
+|---|---|
+| ![Search](docs/screenshots/search.webp) | ![Playlist](docs/screenshots/playlist.webp) |
+| **Synced lyrics** | **Equalizer** |
+| ![Lyrics](docs/screenshots/lyrics.webp) | ![Equalizer](docs/screenshots/equalizer.webp) |
+| **Signal path** | **On a phone** |
+| ![Signal path](docs/screenshots/signal-path.webp) | <img src="docs/screenshots/phone.webp" alt="Phone" width="280"> |
+
+## Install
+
+There are no prebuilt packages yet. [Build from source](#build-from-source) for now (it takes a few minutes).
+
+### Linux runtime requirements
+
+| Package (Arch) | Debian / Ubuntu | What for |
+|---|---|---|
+| `mpv` | `libmpv2` | Audio playback |
+| `webkit2gtk-4.1` | `libwebkit2gtk-4.1-0` | The *Sign in with Google* window (optional) |
+| `yt-dlp` | `yt-dlp` | YouTube streaming (optional: downloaded automatically if missing) |
+| `ffmpeg` | `ffmpeg` | Editing tags of non-FLAC files (optional) |
+
+## Build from source
+
+You need the [Flutter SDK](https://docs.flutter.dev/get-started/install) (stable channel), plus the usual desktop toolchain (Linux: `clang`, `cmake`, `ninja`, `pkg-config`, GTK 3 and `libmpv` headers).
 
 ```sh
+git clone https://github.com/Araryarch67/OpenMusic.git
+cd OpenMusic
 flutter pub get
-flutter run -d linux     # or: windows, macos, android, ios
+flutter run -d linux          # or: windows, macos, android, ios
+flutter build linux --release # build/linux/x64/release/bundle/
 ```
 
-After pulling new code that adds packages, quit and `flutter run` again; hot reload doesn't load new plugins.
+After pulling changes that add packages, quit and run `flutter run` again; hot reload doesn't load new plugins.
 
 ## YouTube Music
 
-Home, Explore, charts, search and radio work straight away, no account needed. To add your liked music, playlists and history, press **Sign in with Google**. Google's own sign-in page opens (in its own window on Linux, inside the app elsewhere); once it lands on YouTube Music the session is kept in the app's private storage. OpenMusic never sees your password.
+Everything public works without an account. **Sign in with Google** opens Google's own sign-in page, in its own window on Linux and inside the app elsewhere. Once it lands on YouTube Music, the session is kept in the app's private storage on your device. OpenMusic never sees your password, and nothing is sent anywhere except to YouTube Music itself.
 
-On Linux the sign-in window needs WebKitGTK (`webkit2gtk-4.1`) at build time; without it the app still builds, just without sign-in.
+Changes you make (likes, playlists) go through YouTube Music's own API, so they show up in the official apps too.
+
+## Audio
+
+On Linux and Windows, playback runs on [libmpv](https://mpv.io). OpenMusic drives it directly:
+
+| | |
+|---|---|
+| **Sound** (Settings) | Equalizer with presets and automatic headroom, volume leveling (ReplayGain per song or album), gapless playback, headphone crossfeed |
+| **Advanced audio** | Output device, including direct ALSA hardware devices; **bit-perfect mode** (no DSP, no resampling, volume fixed at 100%; WASAPI exclusive on Windows, not yet tested on real hardware); output sample rate; SoX resampler; buffer size |
+| **Signal path** | Source codec and stored bit depth → decoder → every DSP stage → volume → resampler → output device, with a verdict: *Bit-perfect*, *Lossless to the system mixer* or *Processed* |
+
+What's still missing (ASIO, native DSD / DoP, DLNA, AirPlay, …) and how it could be built is tracked in **[Features.md](Features.md)**.
 
 ## Platform notes
 
-| Platform | Playback | YouTube downloads / streaming |
+| Platform | Playback | YouTube streaming / downloads |
 |---|---|---|
-| Linux | libmpv (`mpv` package) | yt-dlp: the system one if installed, otherwise the app downloads the official binary |
-| Windows | libmpv (bundled) | yt-dlp (auto-downloaded) |
-| macOS | AVPlayer | yt-dlp (auto-downloaded), AAC only (AVPlayer can't play Opus/WebM) |
-| Android / iOS | ExoPlayer / AVPlayer | In-app extractor |
+| Linux | libmpv | yt-dlp (system one, or the official binary downloaded automatically) |
+| Windows | libmpv (bundled) | yt-dlp (downloaded automatically) |
+| macOS | AVPlayer | yt-dlp, AAC only (AVPlayer can't play Opus/WebM) |
+| Android / iOS | ExoPlayer / AVPlayer | Built-in extractor |
 
-yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
+The equalizer, crossfeed, leveling, output device and signal path currently need libmpv (Linux and Windows). yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
 
-## Debugging
+Debug builds append every Flutter error with its full stack trace to `<app support dir>/errors.log` (on Linux, `~/.local/share/dev.openmusic.openmusic/errors.log`).
 
-Debug builds append every Flutter error with its full stack trace to
-`<app support dir>/errors.log` (on Linux, `~/.local/share/dev.openmusic.openmusic/errors.log`).
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Start with **[CONTRIBUTING.md](CONTRIBUTING.md)**. **[AGENT.md](AGENT.md)** explains how the code is laid out and how to test it (it's written for coding agents, but people find it useful too).
+
+## Acknowledgements
+
+OpenMusic stands on the shoulders of:
+
+- [mpv](https://mpv.io) / [media_kit](https://github.com/media-kit/media-kit) and [just_audio](https://github.com/ryanheise/just_audio) for playback
+- [FFmpeg](https://ffmpeg.org) for decoding, filters and resampling (with [SoX's resampler](https://sourceforge.net/projects/soxr/))
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [youtube_explode_dart](https://github.com/Hexer10/youtube_explode_dart) for YouTube audio
+- [ytmusicapi](https://github.com/sigma67/ytmusicapi), whose documentation of YouTube Music's API this app follows
+- [LRCLIB](https://lrclib.net) for free synced lyrics
+- [audio_metadata_reader](https://github.com/ClementBeal/audio_metadata_reader) for tags
+
+OpenMusic is not affiliated with YouTube, Google or Discord.
+
+## License
+
+OpenMusic is free software: you can redistribute it and/or modify it under the terms of the **GNU Affero General Public License v3.0** as published by the Free Software Foundation. See [LICENSE](LICENSE).
+
+If you run a modified version for others over a network, the AGPL asks you to offer them its source too.
+
+Vendored packages in [`third_party/`](third_party) keep their own licenses (the Unlicense for `just_audio_media_kit`, MIT for `audio_metadata_reader`).
