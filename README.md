@@ -23,10 +23,11 @@ flutter run -d linux     # or: windows, macos, android, ios
 
 After pulling new code that adds packages, quit and `flutter run` again; hot reload doesn't load new plugins.
 
-## YouTube Music sign-in
+## YouTube Music
 
-- **Desktop (easiest):** log in at music.youtube.com in your browser, then in OpenMusic switch the source to *YouTube Music* and pick that browser. yt-dlp reads the session from the browser on each request; OpenMusic never stores cookies or passwords.
-- **Advanced / mobile:** your own Google OAuth client ("TVs and Limited Input devices") with the official YouTube Data API v3. This gives liked music and playlists, but no history.
+Switch the source to *YouTube Music*: Home, Explore, charts and search work straight away, no account needed. To add your liked music, playlists and history, press **Sign in with Google**. Google's own sign-in page opens (in its own window on Linux, inside the app elsewhere); once it lands on YouTube Music the session is kept in the app's private storage. OpenMusic never sees your password.
+
+On Linux the sign-in window needs WebKitGTK (`webkit2gtk-4.1`) at build time; without it the app still builds, just without sign-in.
 
 ## Platform notes
 
@@ -35,7 +36,7 @@ After pulling new code that adds packages, quit and `flutter run` again; hot rel
 | Linux | libmpv (`mpv` package) | yt-dlp: the system one if installed, otherwise the app downloads the official binary |
 | Windows | libmpv (bundled) | yt-dlp (auto-downloaded) |
 | macOS | AVPlayer | yt-dlp (auto-downloaded), AAC only (AVPlayer can't play Opus/WebM) |
-| Android / iOS | ExoPlayer / AVPlayer | In-app extractor only; currently limited by YouTube's PO-token checks |
+| Android / iOS | ExoPlayer / AVPlayer | In-app extractor |
 
 yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
 

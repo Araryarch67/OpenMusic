@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/widgets.dart';
@@ -8,6 +9,8 @@ import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/track.dart';
+import 'audio_engine.dart';
+import 'cue_sheet.dart';
 import 'discord_presence.dart';
 import 'metadata.dart';
 import 'youtube_audio_source.dart';
@@ -41,6 +44,7 @@ class PlayerController extends ChangeNotifier {
       }),
     );
     _subs.add(player.durationStream.listen(_correctDuration));
+    _subs.add(player.errorStream.listen(_onPlaybackError));
     // Seeks move the Discord progress bar; track/play-state changes are covered above.
     _subs.add(player.positionDiscontinuityStream.listen((_) => _updatePresence(force: true)));
   }
@@ -90,6 +94,9 @@ class PlayerController extends ChangeNotifier {
 
   late final YoutubeImporter youtube = YoutubeImporter(onTrackReady: (t) => _addTracks([t]));
 
+  /// Equalizer, output device, gapless, leveling and the signal path (desktop).
+  final AudioEngine audio = AudioEngine();
+
   /// Signed-in YouTube Music library (official OAuth + YouTube Data API).
   final YoutubeMusicAccount ytMusic = YoutubeMusicAccount();
   final List<StreamSubscription<dynamic>> _subs = [];
@@ -116,10 +123,27 @@ class PlayerController extends ChangeNotifier {
     return i < 0 ? q : q.sublist(i + 1);
   }
 
+  final _errors = StreamController<String>.broadcast();
+
+  /// Human-readable playback failures (a stream that wouldn't resolve, a file that's gone).
+  Stream<String> get errors => _errors.stream;
+
+  /// A stream that fails to resolve shouldn't stall the whole queue: report it and move on.
+  void _onPlaybackError(PlayerException e) {
+    final title = currentTrack?.title;
+    _errors.add('Couldn\'t play ${title ?? 'this song'}${e.message == null ? '' : ': ${e.message}'}');
+    if (player.hasNext) {
+      player.seekToNext().then((_) => player.play(), onError: (Object _) {});
+    }
+  }
+
+  /// Whether the play button has something to start: the queue, or the local library.
+  bool get canPlay => player.audioSources.isNotEmpty || (_source == MusicSource.local && _library.isNotEmpty);
+
   bool get isPlaying => player.playing;
   bool get isBuffering =>
       player.processingState == ProcessingState.loading || player.processingState == ProcessingState.buffering;
-  bool get shuffle => player.shuffleModeEnabled;
+  bool get shuffle => _shuffled;
   LoopMode get loopMode => player.loopMode;
 
   /// Folder scanning needs real filesystem paths, which mobile sandboxes don't expose.
@@ -208,7 +232,14 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Songs on YouTube matching [query]; they stream when played. No sign-in needed.
+  /// YouTube Music's own song search first; plain YouTube search if that fails.
   Future<List<Track>> searchYoutube(String query) async {
+    try {
+      final songs = await ytMusic.searchSongs(query);
+      if (songs.isNotEmpty) return songs;
+    } catch (e) {
+      debugPrint('YouTube Music search failed, using YouTube: $e');
+    }
     final results = await youtube.client.search.search('$query song');
     return [
       for (final v in results.take(20))
@@ -225,6 +256,12 @@ class PlayerController extends ChangeNotifier {
     ];
   }
 
+  /// Bit-perfect means no digital volume: pin it at 100% while that mode is on.
+  void _fixVolumeForBitPerfect() {
+    if (audio.bitPerfect && player.volume != 1) player.setVolume(1);
+    notifyListeners();
+  }
+
   // ── Persistence & import ─────────────────────────────────────────────────
 
   Future<void> load() async {
@@ -238,6 +275,10 @@ class PlayerController extends ChangeNotifier {
     discord.enabled = prefs.getBool(_discordKey) ?? true;
     _source = MusicSource.values.asNameMap()[prefs.getString(_sourceKey)] ?? MusicSource.local;
     await ytMusic.load();
+    await audio.load();
+    unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
+    audio.addListener(_fixVolumeForBitPerfect);
+    _fixVolumeForBitPerfect();
     notifyListeners();
     unawaited(_enrichUntagged());
   }
@@ -272,10 +313,33 @@ class PlayerController extends ChangeNotifier {
   Future<int> pickFiles() async {
     final files = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: Track.audioExtensions.toList(),
+      allowedExtensions: [...Track.audioExtensions, 'cue'],
       dialogTitle: 'Add music',
     );
-    return _addTracks(files.map((f) => Track.fromUri(f.uri, displayName: f.name)));
+    final cues = files.where((f) => f.name.toLowerCase().endsWith('.cue') && f.path != null);
+    final split = await _readCues([for (final f in cues) File(f.path!)]);
+    return _addTracks([
+      ...split.tracks,
+      for (final f in files)
+        if (!f.name.toLowerCase().endsWith('.cue') && !split.covers.contains(f.path))
+          Track.fromUri(f.uri, displayName: f.name),
+    ]);
+  }
+
+  /// Songs from cue sheets; a sheet that can't be read is skipped (its audio file then shows as one track).
+  Future<({List<Track> tracks, Set<String> covers})> _readCues(List<File> cues) async {
+    final tracks = <Track>[];
+    final covers = <String>{};
+    for (final cue in cues) {
+      try {
+        final r = CueSheet.read(cue);
+        tracks.addAll(r.tracks);
+        covers.addAll(r.covers);
+      } catch (e) {
+        debugPrint('Skipping cue sheet ${cue.path}: $e');
+      }
+    }
+    return (tracks: tracks, covers: covers);
   }
 
   Future<int> pickFolder() async {
@@ -283,11 +347,16 @@ class PlayerController extends ChangeNotifier {
     if (dir == null) return 0;
     final entries = Directory(dir).list(recursive: true, followLinks: false);
     final tracks = <Track>[];
+    final cues = <File>[];
     await for (final e in entries) {
-      if (e is File && Track.isAudioPath(e.path)) tracks.add(Track.fromUri(Uri.file(e.path)));
+      if (e is! File) continue;
+      if (Track.isAudioPath(e.path)) tracks.add(Track.fromUri(Uri.file(e.path)));
+      if (e.path.toLowerCase().endsWith('.cue')) cues.add(e);
     }
+    final split = await _readCues(cues);
+    tracks.removeWhere((t) => split.covers.contains(t.path));
     tracks.sort((a, b) => a.id.compareTo(b.id));
-    return _addTracks(tracks);
+    return _addTracks([...tracks, ...split.tracks]);
   }
 
   Future<int> _addTracks(Iterable<Track> tracks) async {
@@ -329,6 +398,15 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// Writes new tags into [track]'s file and refreshes it in the library.
+  Future<void> editTags(Track track, TagEdit edit) async {
+    final updated = await Metadata.writeTags(track, edit);
+    final i = _library.indexWhere((t) => t.id == track.id);
+    if (i >= 0) _library[i] = updated;
+    notifyListeners();
+    await _save();
+  }
+
   Future<void> removeTrack(Track track) async {
     _library = _library.where((t) => t.id != track.id).toList();
     notifyListeners();
@@ -337,29 +415,46 @@ class PlayerController extends ChangeNotifier {
 
   // ── Playback ─────────────────────────────────────────────────────────────
 
+  /// The queue in its original order; the player holds the shuffled copy.
+  ///
+  /// Shuffle is done here, not with just_audio's shuffle(): the desktop
+  /// backend (media_kit / mpv) has no setShuffleOrder, so that call throws there.
+  List<Track> _ordered = const [];
+  bool _shuffled = false;
+  final _random = math.Random();
+
+  AudioSource _sourceFor(Track t) => t.isRemote
+      ? YoutubeAudioSource(t.videoId!, yt: youtube.client, tag: t)
+      : t.isCueTrack
+      ? ClippingAudioSource(child: AudioSource.uri(t.uri), start: t.start, end: t.end, tag: t)
+      : AudioSource.uri(t.uri, tag: t);
+
+  /// [first] followed by everything else in random order.
+  List<Track> _shuffledFrom(List<Track> tracks, int first) =>
+      [tracks[first], ...([...tracks]..removeAt(first))..shuffle(_random)];
+
+  Future<void> _load(List<Track> order, int index, {Duration? position}) =>
+      player.setAudioSources([for (final t in order) _sourceFor(t)], initialIndex: index, initialPosition: position);
+
   /// Replaces the queue with [tracks] and starts playing at [index].
   Future<void> playList(List<Track> tracks, int index, {String? from, bool shuffled = false}) async {
     if (tracks.isEmpty) return;
     playingFrom = from;
+    _ordered = List.of(tracks);
+    _shuffled = shuffled;
     try {
-      await player.setShuffleModeEnabled(false);
-      await player.setAudioSources([
-        for (final t in tracks)
-          t.isRemote ? YoutubeAudioSource(t.videoId!, yt: youtube.client, tag: t) : AudioSource.uri(t.uri, tag: t),
-      ], initialIndex: index);
-      if (shuffled) {
-        await player.shuffle();
-        await player.setShuffleModeEnabled(true);
-      }
+      await _load(shuffled ? _shuffledFrom(tracks, index) : tracks, shuffled ? 0 : index);
       unawaited(player.play());
     } on PlayerException catch (e) {
       debugPrint('Playback failed: ${e.message}');
+      _errors.add('Couldn\'t play ${tracks[index].title}${e.message == null ? '' : ': ${e.message}'}');
     }
+    notifyListeners();
   }
 
   Future<void> playCollection(Collection c, {int index = 0, bool shuffled = false}) => playList(
     c.tracks,
-    shuffled ? (DateTime.now().microsecond % c.tracks.length) : index,
+    shuffled ? _random.nextInt(c.tracks.length) : index,
     from: c.title,
     shuffled: shuffled,
   );
@@ -376,10 +471,12 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> togglePlay() async {
     if (player.audioSources.isEmpty) {
-      await playCollection(allSongs);
-    } else if (player.playing) {
+      if (canPlay) await playCollection(allSongs);
+    } else if (player.playing && player.processingState != ProcessingState.completed) {
       await player.pause();
     } else {
+      // At the end of the queue play() would do nothing: start it over.
+      if (player.processingState == ProcessingState.completed) await player.seek(Duration.zero, index: 0);
       unawaited(player.play());
     }
   }
@@ -395,10 +492,19 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// Reorders the rest of the queue (or restores it) without interrupting the current song for long.
   Future<void> toggleShuffle() async {
-    final enable = !player.shuffleModeEnabled;
-    if (enable) await player.shuffle();
-    await player.setShuffleModeEnabled(enable);
+    final current = currentTrack;
+    if (current == null || _ordered.isEmpty) return;
+    final enable = !_shuffled;
+    final at = _ordered.indexWhere((t) => t.id == current.id);
+    if (at < 0) return;
+    final wasPlaying = player.playing;
+    final position = player.position;
+    _shuffled = enable;
+    notifyListeners();
+    await _load(enable ? _shuffledFrom(_ordered, at) : _ordered, enable ? 0 : at, position: position);
+    if (wasPlaying) unawaited(player.play());
   }
 
   Future<void> cycleLoopMode() => player.setLoopMode(switch (player.loopMode) {
@@ -413,8 +519,10 @@ class PlayerController extends ChangeNotifier {
       s.cancel();
     }
     player.dispose();
+    _errors.close();
     youtube.dispose();
     ytMusic.dispose();
+    audio.dispose();
     discord.dispose();
     super.dispose();
   }

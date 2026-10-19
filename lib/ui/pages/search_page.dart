@@ -12,6 +12,7 @@ import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
 import '../widgets/source_switch.dart';
 import '../widgets/track_row.dart';
+import '../widgets/smooth_scroll.dart';
 
 class SearchPage extends StatefulWidget {
   const SearchPage({super.key, this.focusNode});
@@ -243,10 +244,14 @@ class _SearchPageState extends State<SearchPage> {
             padding: EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16),
             sliver: SliverList.builder(
               itemCount: tracks.length,
-              itemBuilder: (context, i) => TrackRow(
-                track: tracks[i],
-                showAlbum: false,
-                onTap: () => c.playList(tracks, i, from: 'YouTube search'),
+              // Results arriving from the network fade in, top first.
+              itemBuilder: (context, i) => _maybeFade(
+                i,
+                TrackRow(
+                  track: tracks[i],
+                  showAlbum: false,
+                  onTap: () => c.playList(tracks, i, from: 'YouTube search'),
+                ),
               ),
             ),
           );
@@ -311,3 +316,11 @@ class _BrowseTile extends StatelessWidget {
     );
   }
 }
+
+Widget _maybeFade(int i, Widget child) => i < 12
+    ? FadeIn(
+        delay: Duration(milliseconds: 30 * i),
+        offset: 8,
+        child: child,
+      )
+    : child;

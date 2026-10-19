@@ -37,6 +37,7 @@ dependencies:
   just_audio: ^0.10.6
   just_audio_media_kit: ^2.1.0
   media_kit_libs_audio: ^1.0.7
+  media_kit: ^1.2.6
   file_picker: ^13.1.0
   path: ^1.9.1
   shared_preferences: ^2.5.6
@@ -47,6 +48,23 @@ dependencies:
   http: ^1.6.0
   window_manager: ^0.5.2
   url_launcher: ^6.3.3
+  flutter_inappwebview: ^6.2.0-beta.3
+  crypto: ^3.0.7
+
+dependency_overrides:
+  # The real Linux implementation of flutter_inappwebview links WPE WebKit,
+  # which is not installed here and is only needed for the mobile-only WebView
+  # sign-in. See third_party/flutter_inappwebview_linux.
+  flutter_inappwebview_linux:
+    path: third_party/flutter_inappwebview_linux
+  # Exposes the libmpv player behind just_audio so the app can set mpv
+  # properties (EQ filters, output device, gapless, ReplayGain, signal path).
+  just_audio_media_kit:
+    path: third_party/just_audio_media_kit
+  # Its FLAC tag writer dropped ReplayGain, lyrics, disc numbers and custom
+  # tags on every save; the copy here keeps them (see flac_writer.dart).
+  audio_metadata_reader:
+    path: third_party/audio_metadata_reader
 
 dev_dependencies:
   flutter_test:

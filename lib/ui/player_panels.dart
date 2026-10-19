@@ -1,10 +1,14 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../services/player_controller.dart';
 import 'shell_scope.dart';
 import 'theme.dart';
 import 'widgets/controls.dart';
+import 'widgets/signal_path.dart';
 import 'widgets/track_row.dart';
+import 'widgets/smooth_scroll.dart';
 
 /// Floating bar above the bottom tabs on phones, tinted with the cover colour.
 class MiniPlayer extends StatelessWidget {
@@ -69,8 +73,7 @@ class MiniPlayer extends StatelessWidget {
                     ],
                   ),
                 ),
-                StreamBuilder<Duration>(
-                  stream: c.player.positionStream,
+                _MiniProgress(
                   builder: (context, snap) {
                     final total = c.player.duration?.inMilliseconds ?? 0;
                     final pos = snap.data?.inMilliseconds ?? 0;
@@ -118,39 +121,43 @@ class DesktopPlayerBar extends StatelessWidget {
           children: [
             Expanded(
               flex: 3,
-              child: track == null
-                  ? const SizedBox.shrink()
-                  : Row(
-                      children: [
-                        Artwork(track: track, size: 56),
-                        const SizedBox(width: 14),
-                        Flexible(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _LinkText(
-                                track.title,
-                                style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
-                                onTap: () {
-                                  final album = c.albumOf(track);
-                                  if (album != null) shell.openCollection(album);
-                                },
-                              ),
-                              const SizedBox(height: 2),
-                              _LinkText(
-                                track.artist,
-                                style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
-                                onTap: () {
-                                  final artist = c.artistNamed(track.artist);
-                                  if (artist != null) shell.openCollection(artist);
-                                },
-                              ),
-                            ],
+              child: _TrackSwitcher(
+                trackId: track?.id,
+                child: track == null
+                    ? const SizedBox.shrink()
+                    : Row(
+                        key: ValueKey(track.id),
+                        children: [
+                          Artwork(track: track, size: 56),
+                          const SizedBox(width: 14),
+                          Flexible(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _LinkText(
+                                  track.title,
+                                  style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                                  onTap: switch (c.albumOf(track)) {
+                                    final album? => () => shell.openCollection(album),
+                                    null => null,
+                                  },
+                                ),
+                                const SizedBox(height: 2),
+                                _LinkText(
+                                  track.artist,
+                                  style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                                  onTap: switch (c.artistNamed(track.artist)) {
+                                    final artist? => () => shell.openCollection(artist),
+                                    null => null,
+                                  },
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+              ),
             ),
             Expanded(
               flex: 4,
@@ -179,11 +186,17 @@ class DesktopPlayerBar extends StatelessWidget {
                       icon: const Icon(Icons.view_sidebar_outlined, size: 20),
                     ),
                   IconButton(
+                    tooltip: 'Lyrics',
+                    onPressed: track == null ? null : shell.openLyrics,
+                    icon: const Icon(Icons.lyrics_outlined, size: 20),
+                  ),
+                  IconButton(
                     tooltip: 'Queue',
                     onPressed: shell.openQueue,
                     icon: const Icon(Icons.queue_music_rounded, size: 20),
                   ),
-                  if (shell.width > 860) const VolumeSlider(),
+                  // The bar spans the whole window, so its own width decides (not the content area's).
+                  if (MediaQuery.sizeOf(context).width > 860) const VolumeSlider(),
                 ],
               ),
             ),
@@ -200,7 +213,9 @@ class _LinkText extends StatefulWidget {
 
   final String text;
   final TextStyle? style;
-  final VoidCallback onTap;
+
+  /// Null for plain text (e.g. streamed songs with no album page in the library).
+  final VoidCallback? onTap;
 
   @override
   State<_LinkText> createState() => _LinkTextState();
@@ -211,9 +226,10 @@ class _LinkTextState extends State<_LinkText> {
 
   @override
   Widget build(BuildContext context) {
+    final link = widget.onTap != null;
     return MouseRegion(
-      cursor: SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
+      cursor: link ? SystemMouseCursors.click : MouseCursor.defer,
+      onEnter: (_) => setState(() => _hover = link),
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
         onTap: widget.onTap,
@@ -257,66 +273,78 @@ class NowPlayingSidePanel extends StatelessWidget {
                 ),
               ),
             )
-          : ListView(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        c.playingFrom ?? 'Now playing',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                    IconButton(tooltip: 'Close', onPressed: onClose, icon: const Icon(Icons.close_rounded, size: 20)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                AspectRatio(aspectRatio: 1, child: Artwork(track: track, radius: 8)),
-                const SizedBox(height: 16),
-                Text(
-                  track.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
-                ),
-                const SizedBox(height: 4),
-                Text(track.artist, style: text.bodyLarge?.copyWith(color: AppColors.textSecondary)),
-                if (track.album != null) ...[
-                  const SizedBox(height: 2),
-                  Text(track.album!, style: text.bodyMedium?.copyWith(color: AppColors.textMuted)),
-                ],
-                const SizedBox(height: 24),
-                if (next != null)
-                  Container(
-                    decoration: BoxDecoration(color: AppColors.elevated, borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                'Next in queue',
-                                style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: shell.openQueue,
-                              style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
-                              child: const Text('Open queue'),
-                            ),
-                          ],
+          : SmoothScroll(
+              builder: (context, scroll) => ListView(
+                controller: scroll,
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          c.playingFrom ?? 'Now playing',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                         ),
-                        TrackRow(track: next, onTap: () => c.playQueueItem(next)),
-                      ],
+                      ),
+                      IconButton(tooltip: 'Close', onPressed: onClose, icon: const Icon(Icons.close_rounded, size: 20)),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: _TrackSwitcher(
+                      trackId: track.id,
+                      slide: false,
+                      child: Artwork(key: ValueKey(track.id), track: track, radius: 8),
                     ),
                   ),
-              ],
+                  const SizedBox(height: 16),
+                  Text(
+                    track.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(track.artist, style: text.bodyLarge?.copyWith(color: AppColors.textSecondary)),
+                  if (track.album != null) ...[
+                    const SizedBox(height: 2),
+                    Text(track.album!, style: text.bodyMedium?.copyWith(color: AppColors.textMuted)),
+                  ],
+                  const SizedBox(height: 12),
+                  const QualityBadge(),
+                  const SizedBox(height: 16),
+                  if (next != null)
+                    Container(
+                      decoration: BoxDecoration(color: AppColors.elevated, borderRadius: BorderRadius.circular(8)),
+                      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Next in queue',
+                                  style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              TextButton(
+                                onPressed: shell.openQueue,
+                                style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
+                                child: const Text('Open queue'),
+                              ),
+                            ],
+                          ),
+                          TrackRow(track: next, onTap: () => c.playQueueItem(next)),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
             ),
     );
   }
@@ -353,7 +381,11 @@ class NowPlayingPage extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (context, constraints) {
                   // Leave room for the controls; never let the cover push them off-screen.
-                  final art = (constraints.maxWidth - 48).clamp(160.0, constraints.maxHeight - 340);
+                  // On very short windows the cover (then the quality badge) makes way.
+                  final showBadge = constraints.maxHeight >= 480;
+                  final room = constraints.maxHeight - (showBadge ? 376 : 340);
+                  final art = math.min(constraints.maxWidth - 48, room);
+                  final narrow = constraints.maxWidth < 320;
                   return Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Column(
@@ -382,6 +414,13 @@ class NowPlayingPage extends StatelessWidget {
                                 ],
                               ),
                             ),
+                            if (!narrow)
+                              IconButton(
+                                tooltip: 'Lyrics',
+                                color: Colors.white,
+                                onPressed: ShellScope.of(context).openLyrics,
+                                icon: const Icon(Icons.lyrics_outlined),
+                              ),
                             IconButton(
                               tooltip: 'Queue',
                               color: Colors.white,
@@ -391,15 +430,16 @@ class NowPlayingPage extends StatelessWidget {
                           ],
                         ),
                         const Spacer(),
-                        Hero(
-                          tag: 'now-playing-art',
-                          child: DecoratedBox(
-                            decoration: const BoxDecoration(
-                              boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12))],
+                        if (art >= 96)
+                          Hero(
+                            tag: 'now-playing-art',
+                            child: DecoratedBox(
+                              decoration: const BoxDecoration(
+                                boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12))],
+                              ),
+                              child: Artwork(track: track, size: art, radius: 8),
                             ),
-                            child: Artwork(track: track, size: art, radius: 8),
                           ),
-                        ),
                         const Spacer(),
                         Align(
                           alignment: Alignment.centerLeft,
@@ -419,6 +459,7 @@ class NowPlayingPage extends StatelessWidget {
                                 overflow: TextOverflow.ellipsis,
                                 style: text.titleMedium?.copyWith(color: Colors.white70),
                               ),
+                              if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
                             ],
                           ),
                         ),
@@ -438,4 +479,54 @@ class NowPlayingPage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Cross-fades (and nudges up) whatever shows the current song when it changes.
+class _TrackSwitcher extends StatelessWidget {
+  const _TrackSwitcher({required this.trackId, required this.child, this.slide = true});
+
+  final String? trackId;
+  final Widget child;
+  final bool slide;
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: const Duration(milliseconds: 260),
+    switchInCurve: Curves.easeOutCubic,
+    switchOutCurve: Curves.easeInCubic,
+    layoutBuilder: (current, previous) => Stack(alignment: Alignment.centerLeft, children: [...previous, ?current]),
+    transitionBuilder: (child, anim) => FadeTransition(
+      opacity: anim,
+      child: slide
+          ? SlideTransition(
+              position: Tween(begin: const Offset(0, 0.15), end: Offset.zero).animate(anim),
+              child: child,
+            )
+          : child,
+    ),
+    child: child,
+  );
+}
+
+/// The mini player's progress line, updated every frame.
+class _MiniProgress extends StatefulWidget {
+  const _MiniProgress({required this.builder});
+
+  final AsyncWidgetBuilder<Duration> builder;
+
+  @override
+  State<_MiniProgress> createState() => _MiniProgressState();
+}
+
+class _MiniProgressState extends State<_MiniProgress> {
+  Stream<Duration>? _position;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _position ??= smoothPosition(PlayerScope.read(context).player);
+  }
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder<Duration>(stream: _position, builder: widget.builder);
 }

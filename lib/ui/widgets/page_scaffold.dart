@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../shell_scope.dart';
 import '../theme.dart';
+import 'smooth_scroll.dart';
 
 /// Scrolling page with a top colour wash and a sticky title bar that fades in on scroll.
 class PageScaffold extends StatefulWidget {
@@ -17,7 +18,7 @@ class PageScaffold extends StatefulWidget {
 }
 
 class _PageScaffoldState extends State<PageScaffold> {
-  final _scroll = ScrollController();
+  final _scroll = SmoothScrollController();
   double _offset = 0;
 
   @override
@@ -39,7 +40,8 @@ class _PageScaffoldState extends State<PageScaffold> {
   Widget build(BuildContext context) {
     final shell = ShellScope.of(context);
     final color = widget.gradientColor ?? AppColors.elevated;
-    final canPop = Navigator.of(context).canPop();
+    // Pages below this one, not above: Navigator.canPop() goes stale on a root page rebuilt while covered.
+    final canPop = ModalRoute.of(context)?.canPop ?? false;
     final barOpacity = ((_offset - 180) / 80).clamp(0.0, 1.0);
     const barHeight = 56.0;
     final topInset = shell.compact ? MediaQuery.paddingOf(context).top : 0.0;

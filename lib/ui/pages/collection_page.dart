@@ -33,6 +33,8 @@ class CollectionPage extends StatelessWidget {
     final playingHere = c.isPlayingFrom(live);
     final isArtist = live.kind == CollectionKind.artist;
     final isAll = live.kind == CollectionKind.allSongs;
+    final multiDisc = live.kind == CollectionKind.album && tracks.map((t) => t.discNumber ?? 1).toSet().length > 1;
+    final text = Theme.of(context).textTheme;
 
     return AccentBuilder(
       track: live.cover,
@@ -104,15 +106,33 @@ class CollectionPage extends StatelessWidget {
             if (!shell.compact) SliverToBoxAdapter(child: _ColumnHeader(showAlbum: live.kind != CollectionKind.album)),
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16),
-              sliver: SliverList.builder(
-                itemCount: tracks.length,
-                itemBuilder: (context, i) => TrackRow(
-                  track: tracks[i],
-                  index: i + 1,
-                  showArtwork: live.kind != CollectionKind.album,
-                  showAlbum: live.kind != CollectionKind.album,
-                  onTap: () => c.playCollection(live, index: i),
-                ),
+              sliver: SliverList.list(
+                children: [
+                  for (var i = 0; i < tracks.length; i++) ...[
+                    // Multi-disc albums: a "Disc 2" heading where each disc starts.
+                    if (multiDisc && (i == 0 || tracks[i].discNumber != tracks[i - 1].discNumber))
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.album_outlined, size: 18, color: AppColors.textSecondary),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Disc ${tracks[i].discNumber ?? 1}',
+                              style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ],
+                        ),
+                      ),
+                    TrackRow(
+                      track: tracks[i],
+                      index: multiDisc ? (tracks[i].trackNumber ?? i + 1) : i + 1,
+                      showArtwork: live.kind != CollectionKind.album,
+                      showAlbum: live.kind != CollectionKind.album,
+                      onTap: () => c.playCollection(live, index: i),
+                    ),
+                  ],
+                ],
               ),
             ),
             if (isArtist) ..._artistAlbums(context, c, live),

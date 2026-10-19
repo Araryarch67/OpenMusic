@@ -10,6 +10,8 @@ import '../../services/ytdlp.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/page_scaffold.dart';
+import 'sound_settings.dart';
+import 'youtube_music_page.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -56,6 +58,31 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    ListenableBuilder(
+                      listenable: c.ytMusic,
+                      builder: (context, _) {
+                        final account = c.ytMusic;
+                        return SettingTile(
+                          title: const Text('YouTube Music account'),
+                          subtitle: Text(
+                            account.isSignedIn
+                                ? 'Signed in${account.accountName == null ? '' : ' as ${account.accountName}'}'
+                                : 'Not signed in. Search and the public home work without an account.',
+                            style: muted,
+                          ),
+                          control: account.isSignedIn
+                              ? TextButton(onPressed: account.signOut, child: const Text('Disconnect'))
+                              : FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    backgroundColor: Colors.white,
+                                    foregroundColor: Colors.black,
+                                  ),
+                                  onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
+                                  child: const Text('Sign in with Google'),
+                                ),
+                        );
+                      },
+                    ),
                     if (DiscordPresence.supported)
                       SwitchListTile(
                         title: const Text('Discord Rich Presence'),
@@ -91,6 +118,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             : null,
                       ),
                     ),
+                    const SoundSettings(),
                   ],
                 ),
               ),

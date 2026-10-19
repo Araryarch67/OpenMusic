@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -7,6 +9,7 @@ import 'pages/collection_page.dart';
 import 'pages/downloads_page.dart';
 import 'pages/home_page.dart';
 import 'pages/library_page.dart';
+import 'pages/lyrics_page.dart';
 import 'pages/queue_page.dart';
 import 'pages/search_page.dart';
 import 'pages/settings_page.dart';
@@ -16,6 +19,7 @@ import 'theme.dart';
 import 'widgets/source_switch.dart';
 import 'youtube_import.dart';
 import '../services/youtube_importer.dart';
+import 'widgets/smooth_scroll.dart';
 
 enum _Tab { home, search, library }
 
@@ -38,8 +42,19 @@ class _HomeShellState extends State<HomeShell> {
 
   NavigatorState? get _nav => _navigators[_tab]!.currentState;
 
+  StreamSubscription<String>? _errors;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _errors ??= PlayerScope.read(context).errors.listen((message) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+    });
+  }
+
   @override
   void dispose() {
+    _errors?.cancel();
     _searchFocus.dispose();
     super.dispose();
   }
@@ -103,6 +118,7 @@ class _HomeShellState extends State<HomeShell> {
       openCollection: (Collection col) => _open(CollectionPage(collection: col)),
       openQueue: _openQueue,
       openNowPlaying: _openNowPlaying,
+      openLyrics: _openLyrics,
       openDownloads: () => _open(const DownloadsPage()),
       importFromYoutube: _importFromYoutube,
       addFiles: () => _add(c.pickFiles),
@@ -129,13 +145,36 @@ class _HomeShellState extends State<HomeShell> {
     if (text != null && YoutubeImporter.looksLikeYoutubeUrl(text)) await _importFromYoutube(url: text);
   }
 
+  /// Full-screen routes of the phone layout (now playing, queue, lyrics).
+  /// They're built for a phone, so they close when the window becomes wide.
+  final _phoneRoutes = <Route<void>>[];
+
+  void _pushPhoneRoute(Route<void> route) {
+    _phoneRoutes.add(route);
+    Navigator.of(context).push(route).whenComplete(() => _phoneRoutes.remove(route));
+  }
+
+  void _closePhoneRoutes() {
+    final nav = Navigator.of(context);
+    for (final r in [..._phoneRoutes]) {
+      if (r.isActive) nav.removeRoute(r);
+    }
+    _phoneRoutes.clear();
+    if (mounted) setState(() {});
+  }
+
   void _openQueue() {
     if (!_compact) return _open(const QueuePage());
-    Navigator.of(context).push(MaterialPageRoute(builder: (_) => _scoped(const Scaffold(body: QueuePage()))));
+    _pushPhoneRoute(MaterialPageRoute(builder: (_) => _scoped(const Scaffold(body: QueuePage()))));
+  }
+
+  void _openLyrics() {
+    if (!_compact) return _open(const LyricsPage());
+    _pushPhoneRoute(MaterialPageRoute(builder: (_) => _scoped(const LyricsPage(fullScreen: true))));
   }
 
   void _openNowPlaying() {
-    Navigator.of(context).push(
+    _pushPhoneRoute(
       PageRouteBuilder(
         transitionDuration: const Duration(milliseconds: 320),
         reverseTransitionDuration: const Duration(milliseconds: 260),
@@ -164,7 +203,11 @@ class _HomeShellState extends State<HomeShell> {
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
     final width = MediaQuery.sizeOf(context).width;
-    final compact = width < 700;
+    // Stay in the phone layout for the one frame it takes to close its full-screen pages.
+    final compact = width < 700 || _phoneRoutes.isNotEmpty;
+    if (width >= 700 && _phoneRoutes.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) => _closePhoneRoutes());
+    }
     final expanded = width >= 1200;
 
     _compact = compact;
@@ -181,7 +224,10 @@ class _HomeShellState extends State<HomeShell> {
       const SingleActivator(LogicalKeyboardKey.keyV, meta: true): _pasteLink,
     };
 
-    final pages = IndexedStack(index: _tab.index, children: [for (final t in _Tab.values) _tabNavigator(t)]);
+    final pages = _FadeOnChange(
+      index: _tab.index,
+      child: IndexedStack(index: _tab.index, children: [for (final t in _Tab.values) _tabNavigator(t)]),
+    );
 
     final Widget body;
     if (compact) {
@@ -227,15 +273,13 @@ class _HomeShellState extends State<HomeShell> {
                         ),
                         const SizedBox(width: 8),
                         Expanded(child: _Panel(child: pages)),
-                        if (sideOpen) ...[
-                          const SizedBox(width: 8),
-                          SizedBox(
-                            width: 332,
+                        if (expanded)
+                          _SlidingPanel(
+                            open: sideOpen,
                             child: _Panel(
                               child: NowPlayingSidePanel(onClose: () => setState(() => _sidePanel = false)),
                             ),
                           ),
-                        ],
                       ],
                     ),
                   ),
@@ -268,6 +312,71 @@ class _HomeShellState extends State<HomeShell> {
     }
     return KeyEventResult.ignored;
   }
+}
+
+/// Fades the tab content in when switching tabs (the stack keeps each tab's state).
+class _FadeOnChange extends StatefulWidget {
+  const _FadeOnChange({required this.index, required this.child});
+
+  final int index;
+  final Widget child;
+
+  @override
+  State<_FadeOnChange> createState() => _FadeOnChangeState();
+}
+
+class _FadeOnChangeState extends State<_FadeOnChange> with SingleTickerProviderStateMixin {
+  late final _fade = AnimationController(vsync: this, duration: const Duration(milliseconds: 220), value: 1);
+
+  @override
+  void didUpdateWidget(_FadeOnChange old) {
+    super.didUpdateWidget(old);
+    if (old.index != widget.index) _fade.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _fade.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => FadeTransition(
+    opacity: CurvedAnimation(parent: _fade, curve: Curves.easeOut),
+    child: widget.child,
+  );
+}
+
+/// The now-playing side panel, sliding open and shut instead of popping.
+class _SlidingPanel extends StatelessWidget {
+  const _SlidingPanel({required this.open, required this.child});
+
+  static const width = 332.0;
+  static const gap = 8.0;
+
+  final bool open;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+    tween: Tween(end: open ? 1 : 0),
+    duration: const Duration(milliseconds: 280),
+    curve: Curves.easeOutCubic,
+    builder: (context, t, child) => t == 0
+        ? const SizedBox.shrink()
+        : SizedBox(
+            width: (width + gap) * t,
+            child: ClipRect(
+              child: OverflowBox(
+                alignment: Alignment.centerLeft,
+                minWidth: width + gap,
+                maxWidth: width + gap,
+                child: Opacity(opacity: t, child: child),
+              ),
+            ),
+          ),
+    child: Padding(padding: const EdgeInsets.only(left: gap), child: child),
+  );
 }
 
 class _Panel extends StatelessWidget {
@@ -345,17 +454,20 @@ class _Sidebar extends StatelessWidget {
         // one scrolling panel and reach the library through a link instead.
         if (constraints.maxHeight < 440) {
           return _Panel(
-            child: ListView(
-              padding: const EdgeInsets.all(8),
-              children: [
-                ...navItems,
-                _NavLink(
-                  collapsed: collapsed,
-                  icon: Icons.video_library_outlined,
-                  label: 'Your Library',
-                  onTap: () => ShellScope.of(context).open(const LibraryPage()),
-                ),
-              ],
+            child: SmoothScroll(
+              builder: (context, scroll) => ListView(
+                controller: scroll,
+                padding: const EdgeInsets.all(8),
+                children: [
+                  ...navItems,
+                  _NavLink(
+                    collapsed: collapsed,
+                    icon: Icons.video_library_outlined,
+                    label: 'Your Library',
+                    onTap: () => ShellScope.of(context).open(const LibraryPage()),
+                  ),
+                ],
+              ),
             ),
           );
         }

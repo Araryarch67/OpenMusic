@@ -9,6 +9,23 @@ import 'package:http/http.dart' as http;
 
 import '../models/track.dart';
 
+/// Editable tags of one file.
+class TagEdit {
+  TagEdit({this.title, this.artist, this.album, this.year, this.trackNumber, this.discNumber, this.genre});
+
+  String? title;
+  String? artist;
+  String? album;
+  int? year;
+  int? trackNumber;
+  int? discNumber;
+  String? genre;
+
+  /// New front cover (replaces every embedded picture); null keeps the current one.
+  Uint8List? cover;
+  String coverMime = 'image/jpeg';
+}
+
 /// Reads embedded tags / cover art off the UI thread and caches the results.
 abstract final class Metadata {
   static const _maxCachedArtwork = 120;
@@ -25,7 +42,7 @@ abstract final class Metadata {
     try {
       final tags = await Isolate.run(() {
         final m = readMetadata(File(path));
-        return (m.title, m.artist ?? m.albumArtist, m.album, m.duration, m.trackNumber);
+        return (m.title, m.artist ?? m.albumArtist, m.album, m.duration, m.trackNumber, m.discNumber);
       });
       return track.copyWith(
         title: _clean(tags.$1),
@@ -33,10 +50,137 @@ abstract final class Metadata {
         album: _clean(tags.$3),
         duration: tags.$4,
         trackNumber: tags.$5,
+        discNumber: tags.$6,
         tagged: true,
       );
     } catch (_) {
       return track.copyWith(tagged: true);
+    }
+  }
+
+  /// FLAC is written in-process (the bundled writer keeps every other tag).
+  /// Other formats go through the `ffmpeg` command when it is installed: a
+  /// stream copy that only changes the tags it is told to.
+  ///
+  /// Not MP4/M4A: ffmpeg's MP4 muxer keeps only the iTunes tags it knows, so
+  /// ReplayGain and other freeform tags would be lost.
+  static const _ffmpegWritable = {'mp3', 'ogg', 'oga', 'opus', 'wav', 'aiff', 'aif', 'wv', 'mka'};
+
+  /// Formats where ffmpeg can also replace the embedded cover.
+  static const _ffmpegCover = {'mp3'};
+
+  static bool _ffmpeg = false;
+
+  /// Looks for `ffmpeg` once at startup so [canEditTags] can answer synchronously.
+  static Future<void> probeTagTools() async {
+    try {
+      _ffmpeg = (await Process.run('ffmpeg', ['-hide_banner', '-version'])).exitCode == 0;
+    } catch (_) {
+      _ffmpeg = false;
+    }
+  }
+
+  static String _ext(String path) => path.split('.').last.toLowerCase();
+
+  static bool canEditTags(Track t) {
+    final path = t.path;
+    if (path == null || t.isCueTrack) return false;
+    final ext = _ext(path);
+    return ext == 'flac' || (_ffmpeg && _ffmpegWritable.contains(ext));
+  }
+
+  /// Whether "Change cover" can be offered for [t].
+  static bool canEditCover(Track t) => _ext(t.path!) == 'flac' || _ffmpegCover.contains(_ext(t.path!));
+
+  static Future<TagEdit> readTags(Track track) {
+    final path = track.path!;
+    return Isolate.run(() {
+      final m = readMetadata(File(path));
+      return TagEdit(
+        title: m.title,
+        artist: m.artist,
+        album: m.album,
+        year: m.year?.year,
+        trackNumber: m.trackNumber,
+        discNumber: m.discNumber,
+        genre: m.genres.firstOrNull,
+      );
+    });
+  }
+
+  /// Writes [edit] into the file, safely: the change is made on a copy, which
+  /// must come out readable before it replaces the original.
+  static Future<Track> writeTags(Track track, TagEdit edit) async {
+    final path = track.path!;
+    final dot = path.lastIndexOf('.');
+    final temp = File('${path.substring(0, dot)}.openmusic-tmp${path.substring(dot)}');
+    try {
+      if (_ext(path) == 'flac') {
+        await Isolate.run(() => _writeFlac(path, temp, edit));
+      } else {
+        await _writeWithFfmpeg(path, temp, edit);
+      }
+      await temp.rename(path);
+    } finally {
+      if (temp.existsSync()) temp.deleteSync();
+    }
+    _artwork.remove(_artKey(track));
+    _accents.remove(_artKey(track));
+    final updated = await enrich(track.copyWith(tagged: false));
+    _artwork.remove(_artKey(updated));
+    _accents.remove(_artKey(updated));
+    return updated;
+  }
+
+  static void _writeFlac(String path, File temp, TagEdit edit) {
+    File(path).copySync(temp.path);
+    updateMetadata(temp, (m) {
+      m.setTitle(edit.title);
+      m.setArtist(edit.artist);
+      m.setAlbum(edit.album);
+      m.setYear(edit.year == null ? null : DateTime(edit.year!));
+      m.setTrackNumber(edit.trackNumber);
+      if (m case final VorbisMetadata v) v.discNumber = edit.discNumber;
+      m.setGenres([?edit.genre]);
+      if (edit.cover != null) m.setPictures([Picture(edit.cover!, edit.coverMime, PictureType.coverFront)]);
+    });
+    final check = readMetadata(temp);
+    if (check.title != edit.title || check.discNumber != edit.discNumber) {
+      throw const FileSystemException('The new info didn\'t save correctly; the file was left as it was');
+    }
+  }
+
+  static Future<void> _writeWithFfmpeg(String path, File temp, TagEdit edit) async {
+    final cover = edit.cover != null && _ffmpegCover.contains(_ext(path));
+    File? coverFile;
+    if (cover) {
+      coverFile = File('${temp.path}.${edit.coverMime == 'image/png' ? 'png' : 'jpg'}')..writeAsBytesSync(edit.cover!);
+    }
+    // Ogg keeps its tags (Vorbis comments) on the audio stream, not the file.
+    final scope = const {'ogg', 'oga', 'opus'}.contains(_ext(path)) ? ':s:a:0' : '';
+    try {
+      final r = await Process.run('ffmpeg', [
+        '-hide_banner', '-loglevel', 'error', '-y', '-i', path, //
+        if (cover) ...['-i', coverFile!.path, '-map', '0', '-map', '-0:v?', '-map', '1'] else ...['-map', '0'],
+        '-c', 'copy', '-map_metadata', '0',
+        for (final (key, value) in [
+          ('title', edit.title),
+          ('artist', edit.artist),
+          ('album', edit.album),
+          ('date', edit.year),
+          ('track', edit.trackNumber),
+          ('disc', edit.discNumber),
+          ('genre', edit.genre),
+        ]) ...['-metadata$scope', '$key=${value ?? ''}'],
+        if (cover) ...['-disposition:v:0', 'attached_pic'],
+        if (_ext(path) == 'mp3') ...['-id3v2_version', '3'],
+        temp.path,
+      ]);
+      if (r.exitCode != 0 || !temp.existsSync() || temp.lengthSync() == 0) {
+        throw FileSystemException('Couldn\'t write the new info: ${(r.stderr as String).trim()}');
+      }
+    } finally {
+      if (coverFile != null && coverFile.existsSync()) coverFile.deleteSync();
     }
   }
 

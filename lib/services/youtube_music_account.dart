@@ -3,13 +3,16 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
 import 'youtube_importer.dart';
+import 'desktop_login.dart';
 import 'ytdlp.dart';
+import 'ytmusic_web.dart';
 
 /// Code the user types at google.com/device while we poll for approval.
 class DeviceCode {
@@ -29,22 +32,48 @@ class YoutubeMusicLibrary {
 }
 
 class RemotePlaylist {
-  const RemotePlaylist({required this.id, required this.title, required this.count, this.thumbnailUrl});
+  const RemotePlaylist({
+    required this.id,
+    required this.title,
+    required this.count,
+    this.thumbnailUrl,
+    this.browseId,
+    this.subtitle,
+  });
 
   final String id;
   final String title;
   final int count;
   final String? thumbnailUrl;
+
+  /// Set for public albums / playlists from the discover pages; these load
+  /// through YouTube Music's public API whatever the sign-in mode.
+  final String? browseId;
+
+  /// Card subtitle as YouTube Music words it ("Album • Artist").
+  final String? subtitle;
 }
 
-/// Signs in with Google using the official OAuth 2.0 device flow ("TVs and
-/// limited input devices") and reads the user's library through the official
-/// YouTube Data API v3. One OAuth client works on every platform, with no
-/// redirect URIs, deep links or platform-specific setup.
+/// A titled row of the discover pages: songs, or albums and playlists.
+class RemoteShelf {
+  const RemoteShelf({required this.title, this.tracks = const [], this.collections = const []});
+
+  final String title;
+  final List<Track> tracks;
+  final List<RemotePlaylist> collections;
+}
+
+/// Reads the user's YouTube Music library through one of three sessions, in
+/// order of preference:
 ///
-/// The YouTube Data API exposes YouTube Music playlists and likes (they are
-/// ordinary YouTube playlists / ratings), but not YT Music-only features such
-/// as personalised mixes or uploads.
+/// 1. A browser session (desktop): yt-dlp reuses the login already in the
+///    user's browser; nothing is stored here.
+/// 2. A web session (mobile): signed in once in the app's own WebView. The
+///    requests go to YouTube Music's own API, so history and personalised
+///    pages work too.
+/// 3. The OAuth device flow with the user's own Google client, against the
+///    official YouTube Data API v3. No Google Cloud setup for us, but the
+///    official API has no history and no personal mixes.
 class YoutubeMusicAccount extends ChangeNotifier {
   static const _scope = 'https://www.googleapis.com/auth/youtube.readonly';
   static const _api = 'https://www.googleapis.com/youtube/v3';
@@ -67,6 +96,15 @@ class YoutubeMusicAccount extends ChangeNotifier {
   String? get browser => _browser;
   bool get usesBrowser => _browser != null;
 
+  /// Web-session mode (mobile): the cookies and visitor data a WebView login
+  /// produced, kept in the same private support file as the rest. Requests go
+  /// to YouTube Music's own API, so history and personalised pages work too.
+  String? _webCookies;
+  String? _webVisitor;
+  String _webUser = '0';
+  YtMusicWeb? _web;
+  bool get usesWebSession => _webCookies != null;
+
   bool connecting = false;
 
   DeviceCode? pendingCode;
@@ -74,7 +112,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
   bool _polling = false;
 
   bool get hasOAuthClient => (_clientId?.isNotEmpty ?? false) && (_clientSecret?.isNotEmpty ?? false);
-  bool get isSignedIn => _browser != null || _refreshToken != null;
+  bool get isSignedIn => _browser != null || _webCookies != null || _refreshToken != null;
   bool get isSigningIn => pendingCode != null;
   String? get clientId => _clientId;
 
@@ -94,6 +132,9 @@ class YoutubeMusicAccount extends ChangeNotifier {
       accountName = j['accountName'] as String?;
       avatarUrl = j['avatarUrl'] as String?;
       _browser = j['browser'] as String?;
+      _webCookies = j['webCookies'] as String?;
+      _webVisitor = j['webVisitor'] as String?;
+      _webUser = (j['webUser'] as String?) ?? '0';
       YtDlp.cookiesFromBrowser = _browser;
       notifyListeners();
     } catch (_) {
@@ -112,6 +153,9 @@ class YoutubeMusicAccount extends ChangeNotifier {
         'accountName': accountName,
         'avatarUrl': avatarUrl,
         'browser': _browser,
+        'webCookies': _webCookies,
+        'webVisitor': _webVisitor,
+        'webUser': _webUser,
       }),
     );
     // Holds a refresh token: keep it readable by this user only.
@@ -139,7 +183,11 @@ class YoutubeMusicAccount extends ChangeNotifier {
       YtDlp.cookiesFromBrowser = browser;
       final j = await YtDlp.flatPlaylist(_likedMusicUrl, limit: 1);
       _browser = browser;
+      _web?.close();
+      _web = null;
+      _webCookies = _webVisitor = null;
       _library = null;
+      _discover = null;
       accountName = (j['channel'] ?? j['uploader']) as String?;
       if (accountName == 'YouTube Music' || accountName == 'Music') accountName = null;
       await _save();
@@ -154,6 +202,142 @@ class YoutubeMusicAccount extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Takes over the session a WebView login just produced. The account menu is
+  /// checked first, so a half-finished login cannot look connected.
+  Future<bool> connectWebSession({
+    required String cookies,
+    required String visitorData,
+    required String authUser,
+  }) async {
+    connecting = true;
+    error = null;
+    notifyListeners();
+    final web = YtMusicWeb(cookies: cookies, visitorData: visitorData, authUser: authUser);
+    try {
+      final profile = await web.accountMenu();
+      _web?.close();
+      _web = web;
+      _webCookies = cookies;
+      _webVisitor = visitorData;
+      _webUser = authUser;
+      // One session at a time.
+      _browser = null;
+      YtDlp.cookiesFromBrowser = null;
+      accountName = profile.name ?? accountName;
+      avatarUrl = profile.avatarUrl ?? avatarUrl;
+      _library = null;
+      _discover = null;
+      await _save();
+      return true;
+    } catch (e) {
+      web.close();
+      error = _describe(e);
+      return false;
+    } finally {
+      connecting = false;
+      notifyListeners();
+    }
+  }
+
+  /// Signed-out client for the public pages and search; works on every platform.
+  final YtMusicWeb _public = YtMusicWeb.anonymous();
+
+  /// Personal pages for a web session, the public ones otherwise.
+  YtMusicWeb get _browseClient => usesWebSession ? _webClient : _public;
+
+  Future<List<RemoteShelf>>? _discover;
+
+  /// Home + Explore + Charts shelves; no sign-in needed. Cached until [refresh].
+  Future<List<RemoteShelf>> discover({bool refresh = false}) {
+    if (refresh || _discover == null) {
+      final future = _loadDiscover();
+      _discover = future;
+      future.then<void>((_) {}, onError: (Object _) => _discover = null);
+      if (refresh) notifyListeners();
+    }
+    return _discover!;
+  }
+
+  Future<List<RemoteShelf>> _loadDiscover() async {
+    final client = _browseClient;
+    // A page that fails (rate limit, layout change) just drops its shelves.
+    Future<List<WebShelf>> page(String id) => client.shelves(id).catchError((Object _) => const <WebShelf>[]);
+    final pages = await Future.wait([page('FEmusic_home'), page('FEmusic_explore'), page('FEmusic_charts')]);
+    final seen = <String>{};
+    final out = [
+      for (final shelf in pages.expand((p) => p))
+        if (seen.add(shelf.title.toLowerCase()))
+          RemoteShelf(
+            title: shelf.title,
+            tracks: _webTracks(shelf.tracks),
+            collections: [
+              for (final c in shelf.cards)
+                RemotePlaylist(
+                  id: c.browseId,
+                  browseId: c.browseId,
+                  title: c.title,
+                  subtitle: c.subtitle,
+                  count: 0,
+                  thumbnailUrl: c.thumbnailUrl,
+                ),
+            ],
+          ),
+    ];
+    if (out.isEmpty) throw const YtMusicWebError('YouTube Music returned nothing. Check your connection.');
+    return out;
+  }
+
+  /// Song search on YouTube Music itself (better matches than plain YouTube).
+  Future<List<Track>> searchSongs(String query) async => _webTracks(await _browseClient.searchSongs(query));
+
+  /// Google sign-in in an app window: the WebKitGTK helper on Linux, the
+  /// in-app WebView page everywhere else.
+  static bool get canSignInInWindow => DesktopLogin.supported || !Platform.isLinux;
+
+  /// Linux: runs the sign-in window and takes over its session. False when
+  /// the window was closed early or the session didn't work ([error] says why).
+  Future<bool> signInWithWindow() async {
+    error = null;
+    connecting = true;
+    notifyListeners();
+    try {
+      final session = await DesktopLogin.run();
+      if (session == null) {
+        connecting = false;
+        notifyListeners();
+        return false;
+      }
+      return await connectWebSession(
+        cookies: session.cookies,
+        visitorData: session.visitorData,
+        authUser: session.authUser,
+      );
+    } catch (e) {
+      connecting = false;
+      error = _describe(e);
+      notifyListeners();
+      return false;
+    }
+  }
+
+  YtMusicWeb get _webClient {
+    if (_web == null && _webCookies != null) {
+      _web = YtMusicWeb(cookies: _webCookies!, visitorData: _webVisitor ?? '', authUser: _webUser);
+    }
+    return _web!;
+  }
+
+  static List<Track> _webTracks(List<WebTrack> tracks) => [
+    for (final t in tracks)
+      Track.youtube(
+        videoId: t.videoId,
+        title: t.title,
+        artist: t.artist.isEmpty ? Track.unknownArtist : t.artist,
+        duration: t.duration,
+        artworkUrl: t.artworkUrl,
+      ),
+  ];
 
   static const _likedMusicUrl = 'https://music.youtube.com/playlist?list=LM';
 
@@ -260,15 +444,32 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   Future<void> signOut({bool revoke = true}) async {
     final token = _refreshToken;
+    final hadWebSession = _webCookies != null;
     _refreshToken = _accessToken = null;
     accountName = avatarUrl = null;
     _browser = null;
     YtDlp.cookiesFromBrowser = null;
+    _web?.close();
+    _web = null;
+    _webCookies = _webVisitor = null;
+    _webUser = '0';
     _library = null;
+    _discover = null;
     notifyListeners();
     await _save();
+    if (hadWebSession) unawaited(_clearWebViewCookies());
     if (revoke && token != null) {
       unawaited(_http.post(Uri.parse('https://oauth2.googleapis.com/revoke'), body: {'token': token}));
+    }
+  }
+
+  /// Disconnect should disconnect the login WebView as well. On platforms
+  /// without the WebView plugin this is a no-op.
+  static Future<void> _clearWebViewCookies() async {
+    try {
+      await CookieManager.instance().deleteAllCookies();
+    } catch (_) {
+      // The plugin is absent on platforms without a WebView.
     }
   }
 
@@ -331,8 +532,15 @@ class YoutubeMusicAccount extends ChangeNotifier {
     return YoutubeMusicLibrary(liked: liked, playlists: lists, recent: recent);
   }
 
-  /// Recently played on YouTube (browser mode only; the Data API has no history).
+  /// Recently played. Browser and web sessions have it; the Data API does not.
   Future<List<Track>> history() async {
+    if (usesWebSession) {
+      try {
+        return _webTracks(await _webClient.history());
+      } catch (_) {
+        return const [];
+      }
+    }
     if (!usesBrowser) return const [];
     try {
       return _flatTracks(await YtDlp.flatPlaylist(':ythis', limit: 30));
@@ -364,6 +572,13 @@ class YoutubeMusicAccount extends ChangeNotifier {
   ];
 
   Future<List<RemotePlaylist>> playlists() async {
+    if (usesWebSession) {
+      final lists = await _webClient.libraryPlaylists();
+      return [
+        for (final p in lists)
+          RemotePlaylist(id: p.id, title: p.title, count: p.count, thumbnailUrl: p.thumbnailUrl),
+      ];
+    }
     if (usesBrowser) {
       final j = await YtDlp.flatPlaylist('https://www.youtube.com/feed/playlists');
       return [
@@ -391,6 +606,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   /// Liked videos in the Music category: what YouTube Music shows as "Liked music".
   Future<List<Track>> likedMusic() async {
+    if (usesWebSession) return _webTracks(await _webClient.playlistTracks('LM', limit: _maxItems));
     if (usesBrowser) return _flatTracks(await YtDlp.flatPlaylist(_likedMusicUrl));
     final items = await _paged('videos', {'part': 'snippet,contentDetails', 'myRating': 'like'});
     return [
@@ -399,7 +615,16 @@ class YoutubeMusicAccount extends ChangeNotifier {
     ];
   }
 
+  /// Songs of a playlist from the library or of a public album / playlist.
+  Future<List<Track>> collectionTracks(RemotePlaylist p) async {
+    if (p.browseId != null) return _webTracks(await _browseClient.browseTracks(p.browseId!, limit: _maxItems));
+    return playlistTracks(p.id);
+  }
+
   Future<List<Track>> playlistTracks(String playlistId) async {
+    if (usesWebSession) {
+      return _webTracks(await _webClient.playlistTracks(playlistId, limit: _maxItems));
+    }
     if (usesBrowser) {
       return _flatTracks(await YtDlp.flatPlaylist('https://music.youtube.com/playlist?list=$playlistId'));
     }
@@ -449,6 +674,8 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   static String _describe(Object e) => switch (e) {
     _OAuthError(:final message) => message ?? 'Sign-in failed.',
+    YtMusicWebError(:final message) => message,
+    TimeoutException() => 'The request timed out. Try again.',
     SocketException() || http.ClientException() => 'Network error. Check your connection.',
     _ => e.toString(),
   };
@@ -457,6 +684,8 @@ class YoutubeMusicAccount extends ChangeNotifier {
   void dispose() {
     pendingCode = null;
     _http.close();
+    _web?.close();
+    _public.close();
     super.dispose();
   }
 }

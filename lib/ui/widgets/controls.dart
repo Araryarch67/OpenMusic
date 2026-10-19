@@ -170,6 +170,13 @@ class _EqualizerIconState extends State<EqualizerIcon> with SingleTickerProvider
 }
 
 /// Seek slider with elapsed / total labels; drags locally and seeks on release.
+/// Playback position at display rate (just_audio interpolates between engine updates).
+Stream<Duration> smoothPosition(AudioPlayer player) => player.createPositionStream(
+  steps: 100000,
+  minPeriod: const Duration(milliseconds: 16),
+  maxPeriod: const Duration(milliseconds: 33),
+);
+
 class SeekBar extends StatefulWidget {
   const SeekBar({super.key, this.inline = false});
 
@@ -183,6 +190,14 @@ class SeekBar extends StatefulWidget {
 class _SeekBarState extends State<SeekBar> {
   double? _dragValue;
   bool _hovering = false;
+  Stream<Duration>? _position;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Every frame instead of every ~200 ms: the bar glides rather than ticks.
+    _position ??= smoothPosition(PlayerScope.read(context).player);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -190,7 +205,7 @@ class _SeekBarState extends State<SeekBar> {
     final style = Theme.of(context).textTheme.labelSmall
         ?.copyWith(color: AppColors.textSecondary, fontFeatures: const [FontFeature.tabularFigures()]);
     return StreamBuilder<Duration>(
-      stream: player.positionStream,
+      stream: _position,
       builder: (context, snapshot) {
         final duration = player.duration ?? Duration.zero;
         final position = snapshot.data ?? Duration.zero;
@@ -284,7 +299,19 @@ class PlayButton extends StatelessWidget {
                 padding: EdgeInsets.all(size * 0.3),
                 child: CircularProgressIndicator(strokeWidth: 2.5, color: iconColor),
               )
-            : Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, color: iconColor, size: size * 0.6),
+            : AnimatedSwitcher(
+                duration: const Duration(milliseconds: 180),
+                transitionBuilder: (child, anim) => ScaleTransition(
+                  scale: Tween(begin: 0.6, end: 1.0).animate(CurvedAnimation(parent: anim, curve: Curves.easeOutBack)),
+                  child: FadeTransition(opacity: anim, child: child),
+                ),
+                child: Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  key: ValueKey(playing),
+                  color: iconColor,
+                  size: size * 0.6,
+                ),
+              ),
       ),
     );
   }
@@ -334,7 +361,7 @@ class TransportControls extends StatelessWidget {
     final hasQueue = c.queue.isNotEmpty;
     final skipSize = large ? 40.0 : 26.0;
     final modeSize = large ? 26.0 : 20.0;
-    return Row(
+    final row = Row(
       mainAxisSize: large ? MainAxisSize.max : MainAxisSize.min,
       mainAxisAlignment: large ? MainAxisAlignment.spaceBetween : MainAxisAlignment.center,
       children: [
@@ -358,7 +385,7 @@ class TransportControls extends StatelessWidget {
           size: large ? 68 : 34,
           playing: c.isPlaying,
           loading: large && c.isBuffering && c.isPlaying,
-          onPressed: c.library.isEmpty && !hasQueue ? null : c.togglePlay,
+          onPressed: c.canPlay ? c.togglePlay : null,
         ),
         if (!large) const SizedBox(width: 8),
         IconButton(
@@ -381,6 +408,16 @@ class TransportControls extends StatelessWidget {
           onPressed: hasQueue ? c.cycleLoopMode : null,
         ),
       ],
+    );
+    if (!large) return row;
+    // The big controls need ~270px; on tinier windows they shrink instead of overflowing.
+    return LayoutBuilder(
+      builder: (context, constraints) => constraints.maxWidth >= 280
+          ? row
+          : FittedBox(
+              fit: BoxFit.scaleDown,
+              child: SizedBox(width: 280, child: row),
+            ),
     );
   }
 }
@@ -432,7 +469,25 @@ class VolumeSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final player = PlayerScope.read(context).player;
+    final c = PlayerScope.of(context);
+    final player = c.player;
+    // Bit-perfect output has no digital volume: the DAC / amplifier sets the level.
+    if (c.audio.bitPerfect) {
+      return const Tooltip(
+        message: 'Volume is fixed at 100% in bit-perfect mode. Use your DAC or amplifier.',
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.volume_up_rounded, size: 20, color: AppColors.textMuted),
+              SizedBox(width: 6),
+              Text('Fixed', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
+            ],
+          ),
+        ),
+      );
+    }
     return StreamBuilder<double>(
       stream: player.volumeStream,
       builder: (context, snapshot) {
@@ -499,75 +554,81 @@ class _MediaCardState extends State<MediaCard> {
     return MouseRegion(
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
-      child: Material(
-        color: _hover ? AppColors.hover : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        child: InkWell(
-          onTap: widget.onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        decoration: BoxDecoration(
+          color: _hover ? AppColors.hover : AppColors.hover.withValues(alpha: 0),
           borderRadius: BorderRadius.circular(8),
-          hoverColor: Colors.transparent,
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: widget.circle ? CrossAxisAlignment.center : CrossAxisAlignment.start,
-              children: [
-                AspectRatio(
-                  aspectRatio: 1,
-                  child: Stack(
-                    children: [
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            shape: widget.circle ? BoxShape.circle : BoxShape.rectangle,
-                            borderRadius: widget.circle ? null : BorderRadius.circular(6),
-                            boxShadow: const [
-                              BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 4)),
-                            ],
+        ),
+        child: Material(
+          type: MaterialType.transparency,
+          child: InkWell(
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(8),
+            hoverColor: Colors.transparent,
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: widget.circle ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+                children: [
+                  AspectRatio(
+                    aspectRatio: 1,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              shape: widget.circle ? BoxShape.circle : BoxShape.rectangle,
+                              borderRadius: widget.circle ? null : BorderRadius.circular(6),
+                              boxShadow: const [
+                                BoxShadow(color: Color(0x66000000), blurRadius: 24, offset: Offset(0, 4)),
+                              ],
+                            ),
+                            child: Artwork(track: widget.track, radius: 6, circle: widget.circle),
                           ),
-                          child: Artwork(track: widget.track, radius: 6, circle: widget.circle),
                         ),
-                      ),
-                      if (widget.onPlay != null)
-                        Positioned(
-                          right: 8,
-                          bottom: 8,
-                          child: AnimatedSlide(
-                            duration: const Duration(milliseconds: 180),
-                            offset: _hover ? Offset.zero : const Offset(0, 0.25),
-                            child: AnimatedOpacity(
+                        if (widget.onPlay != null)
+                          Positioned(
+                            right: 8,
+                            bottom: 8,
+                            child: AnimatedSlide(
                               duration: const Duration(milliseconds: 180),
-                              opacity: _hover ? 1 : 0,
-                              child: PlayButton(
-                                playing: false,
-                                size: 44,
-                                color: AppColors.accent,
-                                iconColor: AppColors.onAccent,
-                                onPressed: widget.onPlay,
+                              offset: _hover ? Offset.zero : const Offset(0, 0.25),
+                              child: AnimatedOpacity(
+                                duration: const Duration(milliseconds: 180),
+                                opacity: _hover ? 1 : 0,
+                                child: PlayButton(
+                                  playing: false,
+                                  size: 44,
+                                  color: AppColors.accent,
+                                  iconColor: AppColors.onAccent,
+                                  onPressed: widget.onPlay,
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  widget.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: widget.circle ? TextAlign.center : TextAlign.start,
-                  style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  widget.subtitle,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: widget.circle ? TextAlign.center : TextAlign.start,
-                  style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
-                ),
-              ],
+                  const SizedBox(height: 10),
+                  Text(
+                    widget.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: widget.circle ? TextAlign.center : TextAlign.start,
+                    style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: widget.circle ? TextAlign.center : TextAlign.start,
+                    style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
             ),
           ),
         ),

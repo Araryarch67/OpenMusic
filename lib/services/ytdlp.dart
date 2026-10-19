@@ -151,7 +151,11 @@ abstract final class YtDlp {
   }
 
   static Future<ResolvedAudio> _refresh(String videoId) {
-    final future = _run(videoId);
+    // One retry: YouTube sometimes refuses a burst of lookups, then serves the next one.
+    final future = _run(videoId).catchError((Object _) async {
+      await Future<void>.delayed(const Duration(seconds: 2));
+      return _run(videoId);
+    });
     _resolved[videoId] = future;
     // Don't cache failures.
     future.then<void>(
@@ -185,13 +189,15 @@ abstract final class YtDlp {
     if (r.exitCode != 0) throw StateError(_lastError(r.stderr as String));
     final lines = (r.stdout as String).trim().split('\n');
     final f = lines.first.split('|');
+    final url = Uri.parse(lines.last.trim());
     return ResolvedAudio(
       formatId: f[0],
       ext: f[1],
       codec: f[2],
       kbps: double.tryParse(f[3])?.round(),
-      size: int.tryParse(f[4]),
-      url: Uri.parse(lines.last.trim()),
+      // googlevideo's clen is the exact byte length; yt-dlp may only know an estimate.
+      size: int.tryParse(url.queryParameters['clen'] ?? '') ?? int.tryParse(f[4]),
+      url: url,
       resolvedAt: DateTime.now(),
     );
   }

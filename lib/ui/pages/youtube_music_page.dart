@@ -1,11 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/track.dart';
 import '../../services/player_controller.dart';
 import '../../services/youtube_music_account.dart';
-import '../../services/ytdlp.dart';
+import '../../services/desktop_login.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/controls.dart';
@@ -14,9 +12,12 @@ import '../widgets/shelf.dart';
 import '../widgets/source_switch.dart';
 import 'collection_page.dart';
 import 'home_page.dart';
+import 'youtube_music_login_page.dart';
+import '../widgets/smooth_scroll.dart';
 
-/// Home when the source is YouTube Music: connect first, then liked music,
-/// recent plays and playlists, all streamed on demand.
+/// Home when the source is YouTube Music: public home, explore and charts
+/// shelves for everyone; liked music, recent plays and playlists on top once
+/// signed in. Everything streams on demand.
 class YoutubeMusicHome extends StatelessWidget {
   const YoutubeMusicHome({super.key});
 
@@ -25,7 +26,24 @@ class YoutubeMusicHome extends StatelessWidget {
     final account = PlayerScope.read(context).ytMusic;
     return ListenableBuilder(
       listenable: account,
-      builder: (context, _) => account.isSignedIn ? const _LibraryHome() : const _ConnectView(),
+      builder: (context, _) => account.isSignedIn ? const _LibraryHome() : const _DiscoverHome(),
+    );
+  }
+}
+
+/// The one sign-in: Google's own page, in a window on Linux (WebKitGTK helper)
+/// and inside the app everywhere else.
+Future<void> signInToYoutubeMusic(BuildContext context) async {
+  final account = PlayerScope.read(context).ytMusic;
+  if (DesktopLogin.supported) {
+    final messenger = ScaffoldMessenger.of(context);
+    final ok = await account.signInWithWindow();
+    if (!ok && account.error != null) messenger.showSnackBar(SnackBar(content: Text(account.error!)));
+  } else if (YoutubeMusicAccount.canSignInInWindow) {
+    ShellScope.of(context).open(const YoutubeMusicLoginPage());
+  } else {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Signing in needs WebKitGTK (webkit2gtk-4.1). Install it and restart OpenMusic.')),
     );
   }
 }
@@ -33,7 +51,7 @@ class YoutubeMusicHome extends StatelessWidget {
 Collection likedCollection(List<Track> liked) =>
     Collection(kind: CollectionKind.remote, title: 'Liked music', subtitle: 'YouTube Music', tracks: liked);
 
-/// Opens a playlist from the signed-in account in the current tab.
+/// Opens a library playlist or a public album / playlist in the current tab.
 void openRemotePlaylist(BuildContext context, RemotePlaylist p) {
   final account = PlayerScope.read(context).ytMusic;
   ShellScope.of(context).open(
@@ -42,8 +60,8 @@ void openRemotePlaylist(BuildContext context, RemotePlaylist p) {
       load: () async => Collection(
         kind: CollectionKind.remote,
         title: p.title,
-        subtitle: 'YouTube Music',
-        tracks: await account.playlistTracks(p.id),
+        subtitle: p.subtitle ?? 'YouTube Music',
+        tracks: await account.collectionTracks(p),
       ),
     ),
   );
@@ -54,10 +72,9 @@ Track playlistCover(RemotePlaylist p) =>
     Track.youtube(videoId: 'playlist-${p.id}', title: p.title, artist: '', artworkUrl: p.thumbnailUrl);
 
 class _Header extends StatelessWidget {
-  const _Header(this.title, {this.subtitle});
+  const _Header(this.title);
 
   final String title;
-  final String? subtitle;
 
   @override
   Widget build(BuildContext context) {
@@ -71,10 +88,6 @@ class _Header extends StatelessWidget {
         children: [
           if (shell.compact) ...[const SourceSwitch(), const SizedBox(height: 16)],
           Text(title, style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.8)),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Text(subtitle!, style: text.bodyLarge?.copyWith(color: AppColors.textSecondary)),
-          ],
         ],
       ),
     );
@@ -103,319 +116,129 @@ class _Narrow extends StatelessWidget {
   }
 }
 
-// ── Connect ─────────────────────────────────────────────────────────────────
+// ── Discover (no sign-in needed) ───────────────────────────────────────────
 
-class _ConnectView extends StatefulWidget {
-  const _ConnectView();
-
-  @override
-  State<_ConnectView> createState() => _ConnectViewState();
-}
-
-class _ConnectViewState extends State<_ConnectView> {
-  late final Future<List<String>> _installed = YtDlp.supported ? YtDlp.installedBrowsers() : Future.value(const []);
+class _DiscoverHome extends StatelessWidget {
+  const _DiscoverHome();
 
   @override
   Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
     final account = PlayerScope.read(context).ytMusic;
+    final text = Theme.of(context).textTheme;
+    final shell = ShellScope.of(context);
+    final pad = shell.compact ? 16.0 : 24.0;
     return PageScaffold(
       title: 'YouTube Music',
+      actions: [
+        IconButton(
+          tooltip: 'Refresh',
+          onPressed: () => account.discover(refresh: true),
+          icon: const Icon(Icons.refresh_rounded),
+        ),
+      ],
       slivers: [
-        const SliverToBoxAdapter(
-          child: _Header('Connect YouTube Music', subtitle: 'Stream your liked music, playlists and recent plays.'),
-        ),
+        const SliverToBoxAdapter(child: _Header('YouTube Music')),
         SliverToBoxAdapter(
-          child: _Narrow(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (YtDlp.supported) ...[
-                  Text('Use your browser\'s login', style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
-                  const SizedBox(height: 6),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(pad, 0, pad, 8),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
+              decoration: BoxDecoration(color: AppColors.elevated, borderRadius: BorderRadius.circular(8)),
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 8,
+                children: [
                   Text(
-                    'Sign in at music.youtube.com in your browser as usual, then pick that browser. '
-                    'OpenMusic reads the session from the browser each time; it never stores your cookies or password.',
+                    'Sign in to add your liked music, playlists and history.',
                     style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
                   ),
-                  const SizedBox(height: 16),
-                  FutureBuilder<List<String>>(
-                    future: _installed,
-                    builder: (context, snap) {
-                      final installed = snap.data ?? const <String>[];
-                      final others = YtDlp.browsers.where((b) => !installed.contains(b)).toList();
-                      return Wrap(
-                        spacing: 10,
-                        runSpacing: 10,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          for (final (i, b) in installed.indexed)
-                            _BrowserButton(browser: b, primary: i == 0, busy: account.connecting),
-                          PopupMenuButton<String>(
-                            tooltip: 'Other browsers',
-                            enabled: !account.connecting,
-                            onSelected: account.connectBrowser,
-                            itemBuilder: (_) => [
-                              for (final b in others) PopupMenuItem(value: b, child: Text(_label(b))),
-                            ],
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                              child: Text(
-                                installed.isEmpty ? 'Choose browser…' : 'Other browser…',
-                                style: text.labelLarge?.copyWith(color: AppColors.textSecondary),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    },
+                  FilledButton.icon(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                    onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
+                    icon: const Icon(Icons.login_rounded),
+                    label: Text(account.connecting ? 'Signing in…' : 'Sign in with Google'),
                   ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 12,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      TextButton.icon(
-                        onPressed: () => launchUrl(Uri.parse('https://music.youtube.com')),
-                        icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                        label: const Text('Open music.youtube.com'),
-                      ),
-                      if (account.connecting)
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const SizedBox.square(dimension: 14, child: CircularProgressIndicator(strokeWidth: 2)),
-                            const SizedBox(width: 8),
-                            Text('Checking your login…', style: text.bodySmall),
-                          ],
-                        ),
-                    ],
-                  ),
-                ] else
-                  Text(
-                    'On phones, connect with a Google OAuth client below.',
-                    style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
-                  ),
-                if (account.error != null) ...[
-                  const SizedBox(height: 12),
-                  Text(account.error!, style: text.bodyMedium?.copyWith(color: Theme.of(context).colorScheme.error)),
                 ],
-                const SizedBox(height: 24),
-                Theme(
-                  data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                  child: ExpansionTile(
-                    tilePadding: EdgeInsets.zero,
-                    initiallyExpanded: !YtDlp.supported || account.isSigningIn,
-                    title: Text(
-                      'Advanced: sign in with your own Google OAuth client',
-                      style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(
-                      'Uses the official YouTube Data API. Liked music and playlists only.',
-                      style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
-                    ),
-                    childrenPadding: const EdgeInsets.only(bottom: 16),
-                    children: const [_OAuthSection()],
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
+        const _DiscoverShelves(),
       ],
     );
   }
-
-  static String _label(String b) => switch (b) {
-    'firefox' => 'Firefox',
-    'chrome' => 'Chrome',
-    'chromium' => 'Chromium',
-    'brave' => 'Brave',
-    'edge' => 'Edge',
-    'vivaldi' => 'Vivaldi',
-    'opera' => 'Opera',
-    'safari' => 'Safari',
-    _ => b,
-  };
 }
 
-class _BrowserButton extends StatelessWidget {
-  const _BrowserButton({required this.browser, required this.primary, required this.busy});
-
-  final String browser;
-  final bool primary;
-  final bool busy;
+/// Home, Explore and Charts shelves, as one sliver.
+class _DiscoverShelves extends StatelessWidget {
+  const _DiscoverShelves();
 
   @override
   Widget build(BuildContext context) {
-    final account = PlayerScope.read(context).ytMusic;
-    final label = Text('Use ${_ConnectViewState._label(browser)}');
-    final onPressed = busy ? null : () => account.connectBrowser(browser);
-    return primary
-        ? FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+    final c = PlayerScope.read(context);
+    final text = Theme.of(context).textTheme;
+    return FutureBuilder<List<RemoteShelf>>(
+      future: c.ytMusic.discover(),
+      builder: (context, snap) {
+        if (snap.connectionState != ConnectionState.done) {
+          return const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(48),
+              child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
             ),
-            onPressed: onPressed,
-            child: label,
-          )
-        : OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.textPrimary,
-              side: const BorderSide(color: AppColors.textMuted),
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
-            ),
-            onPressed: onPressed,
-            child: label,
           );
-  }
-}
-
-/// OAuth client fields, then the device-code sign-in.
-class _OAuthSection extends StatefulWidget {
-  const _OAuthSection();
-
-  @override
-  State<_OAuthSection> createState() => _OAuthSectionState();
-}
-
-class _OAuthSectionState extends State<_OAuthSection> {
-  final _id = TextEditingController();
-  final _secret = TextEditingController();
-
-  @override
-  void dispose() {
-    _id.dispose();
-    _secret.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final account = PlayerScope.read(context).ytMusic;
-    final code = account.pendingCode;
-    if (code != null) return _CodeCard(code: code, onCancel: account.cancelSignIn);
-    if (account.hasOAuthClient) {
-      return Align(
-        alignment: Alignment.centerLeft,
-        child: Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        }
+        if (snap.hasError) {
+          return SliverToBoxAdapter(
+            child: _Narrow(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Couldn\'t load YouTube Music: ${snap.error}',
+                      style: text.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.error),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton(onPressed: () => c.ytMusic.discover(refresh: true), child: const Text('Try again')),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
+        return SliverList.list(
           children: [
-            FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-              onPressed: account.signIn,
-              icon: const Icon(Icons.login_rounded),
-              label: const Text('Sign in with Google'),
-            ),
-            TextButton(
-              style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
-              onPressed: () => account.configure(clientId: '', clientSecret: ''),
-              child: const Text('Change OAuth client'),
-            ),
+            for (final (si, shelf) in snap.data!.indexed)
+              FadeIn(
+                delay: Duration(milliseconds: 70 * (si < 5 ? si : 5)),
+                child: Shelf(
+                  title: shelf.title,
+                  cards: [
+                    for (final (i, t) in shelf.tracks.indexed)
+                      MediaCard(
+                        track: t,
+                        title: t.title,
+                        subtitle: t.artist,
+                        onTap: () => c.playList(shelf.tracks, i, from: shelf.title),
+                        onPlay: () => c.playList(shelf.tracks, i, from: shelf.title),
+                      ),
+                    for (final p in shelf.collections)
+                      MediaCard(
+                        track: playlistCover(p),
+                        title: p.title,
+                        subtitle: p.subtitle ?? 'Playlist',
+                        onTap: () => openRemotePlaylist(context, p),
+                      ),
+                  ],
+                ),
+              ),
           ],
-        ),
-      );
-    }
-    const steps = [
-      'Google Cloud Console → create a project.',
-      'Enable "YouTube Data API v3".',
-      'OAuth consent screen → External; add yourself as a test user.',
-      'Credentials → OAuth client ID → "TVs and Limited Input devices".',
-    ];
-    InputDecoration field(String label) => InputDecoration(
-      labelText: label,
-      filled: true,
-      fillColor: AppColors.hover,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        for (final (i, step) in steps.indexed)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Text('${i + 1}. $step', style: text.bodyMedium),
-          ),
-        TextButton.icon(
-          onPressed: () => launchUrl(Uri.parse('https://console.cloud.google.com/apis/credentials')),
-          icon: const Icon(Icons.open_in_new_rounded, size: 18),
-          label: const Text('Open Google Cloud Console'),
-        ),
-        const SizedBox(height: 8),
-        TextField(controller: _id, decoration: field('Client ID')),
-        const SizedBox(height: 12),
-        TextField(controller: _secret, obscureText: true, decoration: field('Client secret')),
-        const SizedBox(height: 12),
-        ListenableBuilder(
-          listenable: Listenable.merge([_id, _secret]),
-          builder: (context, _) => FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-            onPressed: _id.text.trim().isEmpty || _secret.text.trim().isEmpty
-                ? null
-                : () => account.configure(clientId: _id.text, clientSecret: _secret.text),
-            child: const Text('Save'),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _CodeCard extends StatelessWidget {
-  const _CodeCard({required this.code, required this.onCancel});
-
-  final DeviceCode code;
-  final VoidCallback onCancel;
-
-  @override
-  Widget build(BuildContext context) {
-    final text = Theme.of(context).textTheme;
-    final url = Uri.parse(code.verificationUrl);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: AppColors.elevated, borderRadius: BorderRadius.circular(12)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Open ${url.host}${url.path} and enter this code:', style: text.bodyLarge),
-          const SizedBox(height: 12),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            child: SelectableText(
-              code.userCode,
-              style: text.displaySmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: 4),
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              FilledButton.icon(
-                style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
-                onPressed: () {
-                  Clipboard.setData(ClipboardData(text: code.userCode));
-                  launchUrl(url);
-                },
-                icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                label: const Text('Copy code & open'),
-              ),
-              TextButton(
-                style: TextButton.styleFrom(foregroundColor: AppColors.textSecondary),
-                onPressed: onCancel,
-                child: const Text('Cancel'),
-              ),
-            ],
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -444,7 +267,10 @@ class _LibraryHome extends StatelessWidget {
           actions: [
             IconButton(
               tooltip: 'Refresh',
-              onPressed: () => account.library(refresh: true),
+              onPressed: () {
+                account.library(refresh: true);
+                account.discover(refresh: true);
+              },
               icon: const Icon(Icons.refresh_rounded),
             ),
             PopupMenuButton<VoidCallback>(
@@ -458,6 +284,7 @@ class _LibraryHome extends StatelessWidget {
                     [
                       account.accountName ?? 'Signed in',
                       if (account.browser != null) 'via ${account.browser}',
+                      if (account.usesWebSession) 'via the app',
                     ].join(' · '),
                     style: text.bodyMedium,
                   ),
@@ -564,6 +391,7 @@ class _LibraryHome extends StatelessWidget {
                     ],
                   ),
                 ),
+              const _DiscoverShelves(),
             ],
           ],
         );
@@ -630,9 +458,20 @@ class YoutubeMusicLibraryList extends StatelessWidget {
           ? const SizedBox.shrink()
           : Padding(
               padding: const EdgeInsets.all(16),
-              child: Text(
-                'Connect YouTube Music from Home to see your library here.',
-                style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Sign in to see your liked music and playlists here.',
+                    style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton(
+                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                    onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
+                    child: const Text('Sign in with Google'),
+                  ),
+                ],
               ),
             );
     }
@@ -691,23 +530,26 @@ class YoutubeMusicLibraryList extends StatelessWidget {
           return collapsed ? Tooltip(message: title, child: tile) : tile;
         }
 
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          children: [
-            row(
-              art: CoverMosaic(tracks: lib.liked, size: 48),
-              title: 'Liked music',
-              subtitle: 'Playlist • ${lib.liked.length} songs',
-              onTap: () => shell.openCollection(liked),
-            ),
-            for (final p in lib.playlists)
+        return SmoothScroll(
+          builder: (context, scroll) => ListView(
+            controller: scroll,
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            children: [
               row(
-                art: Artwork(track: playlistCover(p), size: 48),
-                title: p.title,
-                subtitle: p.count == 0 ? 'Playlist' : 'Playlist • ${p.count} songs',
-                onTap: () => openRemotePlaylist(context, p),
+                art: CoverMosaic(tracks: lib.liked, size: 48),
+                title: 'Liked music',
+                subtitle: 'Playlist • ${lib.liked.length} songs',
+                onTap: () => shell.openCollection(liked),
               ),
-          ],
+              for (final p in lib.playlists)
+                row(
+                  art: Artwork(track: playlistCover(p), size: 48),
+                  title: p.title,
+                  subtitle: p.count == 0 ? 'Playlist' : 'Playlist • ${p.count} songs',
+                  onTap: () => openRemotePlaylist(context, p),
+                ),
+            ],
+          ),
         );
       },
     );

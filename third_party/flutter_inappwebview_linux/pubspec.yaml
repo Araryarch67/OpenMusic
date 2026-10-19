@@ -1,0 +1,19 @@
+name: flutter_inappwebview_linux
+description: Stand-in for the real flutter_inappwebview_linux so Linux builds skip WPE WebKit; the WebView sign-in is mobile only.
+version: 0.1.0-beta.1
+publish_to: none
+
+environment:
+  sdk: ^3.8.0
+  flutter: ">=3.32.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  plugin:
+    implements: flutter_inappwebview
+    platforms:
+      linux:
+        dartPluginClass: LinuxInAppWebViewPlatform

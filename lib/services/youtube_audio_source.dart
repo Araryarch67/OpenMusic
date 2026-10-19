@@ -59,15 +59,25 @@ class YoutubeAudioSource extends StreamAudioSource {
   }
 
   Stream<List<int>> _ranged(Uri url, int from, int to) async* {
-    for (var pos = from; pos < to; pos += _chunkSize) {
+    var source = url;
+    var retried = false;
+    for (var pos = from; pos < to;) {
       final last = (pos + _chunkSize).clamp(0, to) - 1;
-      final req = http.Request('GET', url)..headers['Range'] = 'bytes=$pos-$last';
+      final req = http.Request('GET', source)..headers['Range'] = 'bytes=$pos-$last';
       final res = await _http.send(req);
       if (res.statusCode != 200 && res.statusCode != 206) {
-        if (YtDlp.supported) YtDlp.invalidate(videoId); // URL probably expired; re-resolve next request
-        throw http.ClientException('HTTP ${res.statusCode} while streaming $videoId', url);
+        await res.stream.drain<void>();
+        // Usually an expired or throttled URL: resolve a fresh one and retry once.
+        if (!retried) {
+          retried = true;
+          if (YtDlp.supported) YtDlp.invalidate(videoId);
+          source = (await _resolve()).url;
+          continue;
+        }
+        throw http.ClientException('HTTP ${res.statusCode} while streaming $videoId', source);
       }
       yield* res.stream;
+      pos = last + 1;
     }
   }
 }

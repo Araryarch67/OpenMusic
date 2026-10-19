@@ -1,0 +1,179 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:audio_metadata_reader/audio_metadata_reader.dart';
+import 'package:audio_metadata_reader/src/utils/bit_manipulator.dart';
+import 'package:audio_metadata_reader/src/writers/base_writer.dart';
+
+typedef _Block = ({int type, Uint8List data});
+
+/// Writer for FLAC metadata blocks (Vorbis comments and pictures).
+class FlacWriter extends BaseMetadataWriter<VorbisMetadata> {
+  /// Rebuilds FLAC metadata from [source] into [destination].
+  ///
+  /// The base writer owns the temporary file and calls this method with a
+  /// read-only source, so this method only serializes the FLAC replacement.
+  @override
+  void writeContents(File source, File destination, VorbisMetadata metadata) {
+    final reader = source.openSync();
+    late final Uint8List output;
+
+    try {
+      reader.setPositionSync(0);
+      final magic = reader.readSync(4);
+
+      // Comment and picture blocks get regenerated, rest carries over
+      final kept = <_Block>[];
+      var isLastBlock = false;
+
+      while (!isLastBlock) {
+        final header = reader.readSync(4);
+        isLastBlock = header[0] >> 7 == 1;
+        final type = header[0] & 0x7F;
+        final length = header[3] | header[2] << 8 | header[1] << 16;
+
+        if (type == 4 || type == 6) {
+          reader.setPositionSync(reader.positionSync() + length);
+        } else {
+          kept.add((type: type, data: reader.readSync(length)));
+        }
+      }
+
+      final audioStart = reader.positionSync();
+
+      // Streaminfo needs to stay first
+      final blocks = <_Block>[];
+      if (kept.isNotEmpty && kept.first.type == 0) {
+        blocks.add(kept.removeAt(0));
+      }
+      blocks.add((type: 4, data: _buildVorbisComments(metadata)));
+      for (final picture in metadata.pictures) {
+        blocks.add((type: 6, data: _buildPictureBlock(picture)));
+      }
+      blocks.addAll(kept);
+
+      final builder = BytesBuilder();
+      builder.add(magic);
+
+      // Flag real last block, otherwise the decoder reads into frames
+      for (var i = 0; i < blocks.length; i++) {
+        final block = blocks[i];
+        _writeBlockHeader(
+          builder,
+          block.type,
+          block.data.length,
+          i == blocks.length - 1,
+        );
+        builder.add(block.data);
+      }
+
+      reader.setPositionSync(audioStart);
+      builder.add(reader.readSync(reader.lengthSync() - audioStart));
+
+      output = builder.takeBytes();
+    } finally {
+      reader.closeSync();
+    }
+
+    destination.writeAsBytesSync(output);
+  }
+
+  void _writeBlockHeader(
+      BytesBuilder builder, int blockType, int length, bool isLastBlock) {
+    var firstByte = isLastBlock ? (1 << 7) : 0;
+    firstByte = (firstByte | (blockType & 0x7F));
+
+    builder.addByte(firstByte);
+    builder.add(intToUint24(length));
+  }
+
+  Uint8List _buildPictureBlock(Picture picture) {
+    final headerBytes = BytesBuilder();
+
+    headerBytes.add(intToUint32(picture.pictureType.index));
+    headerBytes.add(intToUint32(picture.mimetype.length));
+    headerBytes.add(ascii.encode(picture.mimetype));
+    headerBytes.add(intToUint32(0)); // No Description for now
+    headerBytes.add(intToUint32(0)); // No width for now
+    headerBytes.add(intToUint32(0)); // No height for now
+    headerBytes.add(intToUint32(0)); // No color depth for now
+    headerBytes.add(intToUint32(0)); // No color number for now
+    headerBytes.add(intToUint32(picture.bytes.length));
+    headerBytes.add(picture.bytes);
+
+    return headerBytes.takeBytes();
+  }
+
+  Uint8List _buildVorbisComments(VorbisMetadata metadata) {
+    final mainBuilder = BytesBuilder();
+    final commentsBuilder = BytesBuilder();
+
+    // vendor length
+    // I don't know what to use. The library name? The user selects the name he wants?
+    mainBuilder.add(intToUint32LE(0));
+
+    var count = 0;
+
+    void writeComment(String name, List<String> data) {
+      for (var d in data) {
+        count++;
+        final toWrite = utf8.encode("$name=$d");
+        commentsBuilder.add(intToUint32LE(toWrite.length));
+        commentsBuilder.add(toWrite);
+      }
+    }
+
+    writeComment("TITLE", metadata.title);
+    writeComment("VERSION", metadata.version);
+    writeComment("ALBUM", metadata.album);
+    writeComment(
+        "TRACKNUMBER", metadata.trackNumber.map((e) => e.toString()).toList());
+    writeComment("ARTIST", metadata.artist);
+    writeComment("ALBUMARTIST", metadata.albumArtist);
+    writeComment("PERFORMER", metadata.performer);
+    writeComment("COPYRIGHT", metadata.copyright);
+    writeComment("LICENSE", metadata.license);
+    writeComment("ORGANIZATION", metadata.organization);
+    writeComment("DESCRIPTION", metadata.description);
+    writeComment("GENRE", metadata.genres);
+    // ISO 8601, slashes are jected by a lot of taggers and Android MediaStore
+    writeComment(
+        "DATE",
+        metadata.date
+            .map((d) =>
+                "${d.year.toString().padLeft(4, "0")}-${d.month.toString().padLeft(2, "0")}-${d.day.toString().padLeft(2, "0")}")
+            .toList());
+    writeComment("LOCATION", metadata.location);
+    writeComment("CONTACT", metadata.contact);
+    writeComment("ISRC", metadata.isrc);
+    // OpenMusic: keep everything else the parser read, so editing a title
+    // doesn't wipe ReplayGain, lyrics, disc numbers or custom tags.
+    writeComment("ACTOR", metadata.actor);
+    writeComment("COMPOSER", metadata.composer);
+    writeComment("COMMENT", metadata.comment);
+    writeComment("LANGUAGE", metadata.language);
+    writeComment("DIRECTOR", metadata.director);
+    writeComment("ENCODED_BY", metadata.encodedBy);
+    writeComment("ENCODED_USING", metadata.encodedUsing);
+    writeComment("ENCODER", metadata.encoder);
+    writeComment("ENCODER_OPTIONS", metadata.encoderOptions);
+    writeComment("PRODUCER", metadata.producer);
+    writeComment("REPLAYGAIN_ALBUM_GAIN", metadata.replayGainAlbumGain);
+    writeComment("REPLAYGAIN_ALBUM_PEAK", metadata.replayGainAlbumPeak);
+    writeComment("REPLAYGAIN_TRACK_GAIN", metadata.replayGainTrackGain);
+    writeComment("REPLAYGAIN_TRACK_PEAK", metadata.replayGainTrackPeak);
+    if (metadata.trackTotal != null) writeComment("TRACKTOTAL", ["${metadata.trackTotal}"]);
+    if (metadata.discNumber != null) writeComment("DISCNUMBER", ["${metadata.discNumber}"]);
+    if (metadata.discTotal != null) writeComment("DISCTOTAL", ["${metadata.discTotal}"]);
+    if (metadata.lyric != null) writeComment("LYRICS", [metadata.lyric!]);
+    for (final e in metadata.unknowns.entries) {
+      writeComment(e.key, [e.value]);
+    }
+
+    mainBuilder.add(intToUint32LE(count));
+    mainBuilder.add(commentsBuilder.toBytes());
+
+    return mainBuilder.takeBytes();
+  }
+}

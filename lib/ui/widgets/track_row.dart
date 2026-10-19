@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../models/track.dart';
+import '../../services/metadata.dart';
 import '../../services/player_controller.dart';
 import '../shell_scope.dart';
+import '../tag_editor.dart';
 import '../theme.dart';
 import 'controls.dart';
 
@@ -182,7 +184,12 @@ class _TrackMenu extends StatelessWidget {
               onTap: () => c.youtube.enqueueTracks([track]),
               child: const ListTile(leading: Icon(Icons.download_rounded), title: Text('Download')),
             )
-          else
+          else ...[
+            if (Metadata.canEditTags(track))
+              PopupMenuItem(
+                onTap: () => showTagEditor(context, track),
+                child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit info')),
+              ),
             PopupMenuItem(
               onTap: () => c.removeTrack(track),
               child: const ListTile(
@@ -190,6 +197,7 @@ class _TrackMenu extends StatelessWidget {
                 title: Text('Remove from library'),
               ),
             ),
+          ],
         ],
       ),
     );

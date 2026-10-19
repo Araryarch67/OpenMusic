@@ -10,6 +10,9 @@ class Track {
     this.album,
     this.duration,
     this.trackNumber,
+    this.discNumber,
+    this.start,
+    this.end,
     this.addedAt = 0,
     this.tagged = false,
     this.sourceUrl,
@@ -61,6 +64,9 @@ class Track {
     album: json['album'] as String?,
     duration: json['durationMs'] == null ? null : Duration(milliseconds: json['durationMs'] as int),
     trackNumber: json['trackNumber'] as int?,
+    discNumber: json['discNumber'] as int?,
+    start: json['startMs'] == null ? null : Duration(milliseconds: json['startMs'] as int),
+    end: json['endMs'] == null ? null : Duration(milliseconds: json['endMs'] as int),
     addedAt: json['addedAt'] as int? ?? 0,
     tagged: json['tagged'] as bool? ?? false,
     sourceUrl: json['sourceUrl'] as String?,
@@ -77,6 +83,11 @@ class Track {
   final String? album;
   final Duration? duration;
   final int? trackNumber;
+  final int? discNumber;
+
+  /// Where this song begins and ends inside a longer file (cue sheet tracks).
+  final Duration? start;
+  final Duration? end;
   final int addedAt;
 
   /// Whether embedded tags have been read (so we don't re-scan every launch).
@@ -93,6 +104,9 @@ class Track {
 
   bool get isRemote => videoId != null;
 
+  /// One song out of a whole-album file, described by a cue sheet.
+  bool get isCueTrack => start != null;
+
   /// Local filesystem path, when the URI points at one (not Android content URIs).
   String? get path => uri.scheme == 'file' ? uri.toFilePath() : null;
 
@@ -106,6 +120,7 @@ class Track {
     String? album,
     Duration? duration,
     int? trackNumber,
+    int? discNumber,
     bool? tagged,
   }) => Track(
     id: id,
@@ -115,6 +130,9 @@ class Track {
     album: album ?? this.album,
     duration: duration ?? this.duration,
     trackNumber: trackNumber ?? this.trackNumber,
+    discNumber: discNumber ?? this.discNumber,
+    start: start,
+    end: end,
     addedAt: addedAt,
     tagged: tagged ?? this.tagged,
     sourceUrl: sourceUrl,
@@ -130,6 +148,9 @@ class Track {
     'album': album,
     'durationMs': duration?.inMilliseconds,
     'trackNumber': trackNumber,
+    'discNumber': discNumber,
+    'startMs': start?.inMilliseconds,
+    'endMs': end?.inMilliseconds,
     'addedAt': addedAt,
     'tagged': tagged,
     'sourceUrl': sourceUrl,
@@ -137,7 +158,11 @@ class Track {
     'artworkUrl': artworkUrl,
   };
 
-  static const audioExtensions = {'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'webm', 'wma', 'aiff', 'alac'};
+  /// Everything libmpv / FFmpeg decodes. DSD (dsf/dff) plays as high-rate PCM.
+  static const audioExtensions = {
+    'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'oga', 'opus', 'webm', 'wma', 'aiff', 'aif', 'aifc', 'alac', //
+    'wv', 'ape', 'tta', 'mka', 'caf', 'w64', 'dsf', 'dff', 'mpc', 'm4b',
+  };
 
   static bool isAudioPath(String path) {
     final ext = p.extension(path).replaceFirst('.', '').toLowerCase();
@@ -145,8 +170,10 @@ class Track {
   }
 }
 
-/// Album order: track number first, title as a tiebreak for untagged files.
+/// Album order: disc, then track number, title as a tiebreak for untagged files.
 int compareAlbumOrder(Track a, Track b) {
+  final byDisc = (a.discNumber ?? 1).compareTo(b.discNumber ?? 1);
+  if (byDisc != 0) return byDisc;
   final byNumber = (a.trackNumber ?? 1 << 20).compareTo(b.trackNumber ?? 1 << 20);
   return byNumber != 0 ? byNumber : a.title.toLowerCase().compareTo(b.title.toLowerCase());
 }

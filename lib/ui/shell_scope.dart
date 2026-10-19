@@ -12,6 +12,7 @@ class ShellScope extends InheritedWidget {
     required this.openCollection,
     required this.openQueue,
     required this.openNowPlaying,
+    required this.openLyrics,
     required this.openDownloads,
     required this.importFromYoutube,
     required this.addFiles,
@@ -29,6 +30,7 @@ class ShellScope extends InheritedWidget {
   final void Function(Collection collection) openCollection;
   final VoidCallback openQueue;
   final VoidCallback openNowPlaying;
+  final VoidCallback openLyrics;
   final VoidCallback openDownloads;
 
   /// Opens the paste-a-link sheet / dialog.

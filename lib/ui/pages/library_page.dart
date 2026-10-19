@@ -9,6 +9,7 @@ import 'home_page.dart';
 import 'settings_page.dart';
 import 'youtube_music_page.dart';
 import '../widgets/source_switch.dart';
+import '../widgets/smooth_scroll.dart';
 
 enum LibraryFilter { albums, artists }
 
@@ -99,44 +100,53 @@ class _LibraryListState extends State<LibraryList> {
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        header,
-        if (!widget.collapsed && c.library.isNotEmpty && c.source == MusicSource.local)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-            child: Wrap(
-              spacing: 8,
-              children: [
-                for (final f in LibraryFilter.values)
-                  FilterChip(
-                    label: Text(f == LibraryFilter.albums ? 'Albums' : 'Artists'),
-                    selected: _filter == f,
-                    onSelected: (on) => setState(() => _filter = on ? f : null),
-                  ),
-              ],
-            ),
-          ),
-        if (!widget.dense) const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 8), child: SourceSwitch()),
-        if (c.source == MusicSource.youtubeMusic)
-          Expanded(child: YoutubeMusicLibraryList(collapsed: widget.collapsed))
-        else ...[
-          if (c.library.isEmpty)
+    // Very short windows: drop the filter chips so the list keeps some room.
+    return LayoutBuilder(
+      builder: (context, constraints) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          header,
+          if (!widget.collapsed &&
+              c.library.isNotEmpty &&
+              c.source == MusicSource.local &&
+              constraints.maxHeight >= 300)
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: widget.collapsed ? const SizedBox.shrink() : _SidebarPrompt(onAdd: shell.addFiles),
-            )
-          else
-            Expanded(
-              child: ListView.builder(
-                padding: EdgeInsets.fromLTRB(8, 0, 8, widget.dense ? 8 : 16),
-                itemCount: rows.length,
-                itemBuilder: (context, i) => _LibraryRow(collection: rows[i], collapsed: widget.collapsed),
+              padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              child: Wrap(
+                spacing: 8,
+                children: [
+                  for (final f in LibraryFilter.values)
+                    FilterChip(
+                      label: Text(f == LibraryFilter.albums ? 'Albums' : 'Artists'),
+                      selected: _filter == f,
+                      onSelected: (on) => setState(() => _filter = on ? f : null),
+                    ),
+                ],
               ),
             ),
+          if (!widget.dense) const Padding(padding: EdgeInsets.fromLTRB(16, 4, 16, 8), child: SourceSwitch()),
+          if (c.source == MusicSource.youtubeMusic)
+            Expanded(child: YoutubeMusicLibraryList(collapsed: widget.collapsed))
+          else ...[
+            if (c.library.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: widget.collapsed ? const SizedBox.shrink() : _SidebarPrompt(onAdd: shell.addFiles),
+              )
+            else
+              Expanded(
+                child: SmoothScroll(
+                  builder: (context, scroll) => ListView.builder(
+                    controller: scroll,
+                    padding: EdgeInsets.fromLTRB(8, 0, 8, widget.dense ? 8 : 16),
+                    itemCount: rows.length,
+                    itemBuilder: (context, i) => _LibraryRow(collection: rows[i], collapsed: widget.collapsed),
+                  ),
+                ),
+              ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }
