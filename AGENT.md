@@ -175,6 +175,11 @@ It fails when:
 Raster (GPU) time can't be measured headless; check that on real hardware
 with `flutter run --profile` and DevTools.
 
+Memory: `tool/memory.sh [runs]` runs `integration_test/memory_test.dart` the
+same way (profile, headless, fresh process per run) and prints PSS / private /
+RSS at idle, playing a local FLAC, streaming YouTube and after scrolling.
+Compare medians of several complete runs; debug builds are meaningless here.
+
 ## Conventions
 
 - Match the surrounding code: comment *why*, not what; doc comments on public
