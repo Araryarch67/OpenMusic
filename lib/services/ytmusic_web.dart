@@ -152,6 +152,18 @@ class WebShelf {
   final List<WebCard> cards;
 }
 
+/// A song's lyrics from YouTube Music's Lyrics tab (licensed from LyricFind,
+/// Musixmatch...). Timed lines when YouTube has them, otherwise plain text.
+class WebLyrics {
+  const WebLyrics({this.lines = const [], this.plain, required this.source});
+
+  final List<({Duration time, String text})> lines;
+  final String? plain;
+
+  /// The licensor, e.g. "LyricFind" (from "Source: LyricFind"), or "".
+  final String source;
+}
+
 class YtMusicWebError implements Exception {
   const YtMusicWebError(this.message);
   final String message;
@@ -233,20 +245,32 @@ class YtMusicWeb {
     return 'SAPISIDHASH ${seconds}_$hash';
   }
 
-  Future<Map<String, dynamic>> _send(String endpoint, Map<String, dynamic> body) async {
+  /// YouTube Music's Android app: the only client it sends timed lyrics to.
+  /// Never with the session's cookies, which belong to the web client.
+  static const _android = {
+    'context': {
+      'client': {'clientName': 'ANDROID_MUSIC', 'clientVersion': '7.21.50', 'androidSdkVersion': 34, 'hl': 'en'},
+      'user': <String, dynamic>{},
+    },
+  };
+  static const _androidUa = 'com.google.android.apps.youtube.music/7.21.50 (Linux; U; Android 14) gzip';
+
+  Future<Map<String, dynamic>> _send(String endpoint, Map<String, dynamic> body, {bool android = false}) async {
     final res = await _http
         .post(
           Uri.parse('$_base$endpoint?prettyPrint=false'),
           headers: {
             'content-type': 'application/json',
-            'user-agent': _ua,
-            'origin': _origin,
-            'x-origin': _origin,
-            if (signedIn) ...{'cookie': cookies, 'authorization': _authorization, 'x-goog-authuser': authUser},
-            if (visitorData.isNotEmpty) 'x-goog-visitor-id': visitorData,
+            'user-agent': android ? _androidUa : _ua,
+            if (!android) ...{
+              'origin': _origin,
+              'x-origin': _origin,
+              if (signedIn) ...{'cookie': cookies, 'authorization': _authorization, 'x-goog-authuser': authUser},
+              if (visitorData.isNotEmpty) 'x-goog-visitor-id': visitorData,
+            },
             'accept-language': 'en-US,en;q=0.9',
           },
-          body: jsonEncode({..._context, ...body}),
+          body: jsonEncode({...android ? _android : _context, ...body}),
         )
         .timeout(const Duration(seconds: 30));
     if (res.statusCode != 200) {
@@ -450,6 +474,51 @@ class YtMusicWeb {
       duration: _duration(_text(row['lengthText'])),
       artworkUrl: _lastThumb(_at(row, const ['thumbnail', 'thumbnails'])),
     );
+  }
+
+  /// The lyrics of [videoId], or null when YouTube Music has none. The watch
+  /// page links a Lyrics tab (`MPLY…`); the Android client gets that page with
+  /// timed lines, the web client only as text.
+  Future<WebLyrics?> lyrics(String videoId) async {
+    final next = await _send('next', {'videoId': videoId, 'isAudioOnly': true});
+    String? browseId;
+    for (final id in _deepFindAll(next, 'browseId')) {
+      if (id is String && id.startsWith('MPLY')) {
+        browseId = id;
+        break;
+      }
+    }
+    if (browseId == null) return null;
+
+    final timed = await _send('browse', {'browseId': browseId}, android: true);
+    final source = _lyricsSource(timed);
+    final lines = [
+      for (final line in _list(_deepFind(timed, 'timedLyricsData')))
+        if (_asMap(line) case final l?)
+          if ((l['lyricLine'], _at(l, const ['cueRange', 'startTimeMilliseconds'])) case (
+            final String text,
+            final String ms,
+          ))
+            if (int.tryParse(ms) case final start?)
+              // "♪" marks the instrumental parts; the page shows nothing there.
+              (time: Duration(milliseconds: start), text: text.trim() == '♪' ? '' : text.trim()),
+    ];
+    if (lines.isNotEmpty) return WebLyrics(lines: lines, source: source ?? '');
+
+    final web = await _send('browse', {'browseId': browseId});
+    final shelf = _asMap(_deepFind(web, 'musicDescriptionShelfRenderer'));
+    final plain = _text(shelf?['description'])?.trim();
+    if (plain == null || plain.isEmpty) return null;
+    return WebLyrics(plain: plain, source: _lyricsSource(web) ?? '');
+  }
+
+  /// "Source: LyricFind" → "LyricFind".
+  static String? _lyricsSource(Map<String, dynamic> page) {
+    for (final node in [..._deepFindAll(page, 'footer'), ..._deepFindAll(page, 'sourceMessage')]) {
+      final text = node is String ? node : _text(node);
+      if (text != null && text.trim().isNotEmpty) return text.replaceFirst(RegExp(r'^\s*Source:\s*'), '').trim();
+    }
+    return null;
   }
 
   /// Every song of a playlist (`VL…`) or album (`MPRE…`) page. Album rows carry
