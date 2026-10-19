@@ -89,8 +89,6 @@ class YtMusicWeb {
   static const _base = 'https://music.youtube.com/youtubei/v1/';
   static const _origin = 'https://music.youtube.com';
 
-  /// The public web key; ytmusicapi sends the same constant.
-  static const _key = 'AIzaSyC9XL3ZjWddXya6X74dJoCTL-WEYFDNX30';
   static const _ua = 'Mozilla/5.0 (X11; Linux x86_64; rv:88.0) Gecko/20100101 Firefox/88.0';
 
   final http.Client _http = http.Client();
@@ -138,7 +136,7 @@ class YtMusicWeb {
   Future<Map<String, dynamic>> _send(String endpoint, Map<String, dynamic> body) async {
     final res = await _http
         .post(
-          Uri.parse('$_base$endpoint?prettyPrint=false&key=$_key'),
+          Uri.parse('$_base$endpoint?prettyPrint=false'),
           headers: {
             'content-type': 'application/json',
             'user-agent': _ua,
