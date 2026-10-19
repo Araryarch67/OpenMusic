@@ -286,7 +286,10 @@ class _HomeShellState extends State<HomeShell> {
           body: Stack(
             children: [
               Positioned.fill(child: tabs()),
-              Offstage(child: TickerMode(enabled: false, child: _desktopNavigator())),
+              // Full size even while hidden: laid out at width 0 its pages would break.
+              Positioned.fill(
+                child: Offstage(child: TickerMode(enabled: false, child: _desktopNavigator())),
+              ),
             ],
           ),
           bottomNavigationBar: _BottomBar(
