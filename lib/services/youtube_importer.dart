@@ -9,6 +9,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import '../models/track.dart';
 import 'ranged_download.dart';
+import 'youtube_stream.dart';
 import 'ytdlp.dart';
 
 enum DownloadStatus { queued, downloading, done, failed, cancelled }
@@ -209,7 +210,13 @@ class YoutubeImporter extends ChangeNotifier {
       final r = await YtDlp.resolve(videoId);
       return (url: r.url, size: r.size, ext: r.ext == 'webm' ? 'webm' : 'm4a', quality: r.quality);
     }
-    // Mobile: no yt-dlp, fall back to the in-app extractor.
+    // Mobile: YouTube's player API as yt-dlp asks it, then the in-app extractor.
+    try {
+      final r = await YoutubeStream.resolve(videoId);
+      return (url: r.url, size: r.size, ext: r.ext == 'webm' ? 'webm' : 'm4a', quality: r.quality);
+    } catch (e) {
+      debugPrint('YouTube stream lookup failed, trying youtube_explode: $e');
+    }
     final manifest = await _yt.videos.streams.getManifest(videoId);
     final stream = pickBestAudio(manifest.audioOnly);
     if (stream == null) throw StateError('No playable audio stream for this video.');

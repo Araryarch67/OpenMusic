@@ -17,6 +17,7 @@ import 'metadata.dart';
 import 'youtube_audio_source.dart';
 import 'youtube_music_account.dart';
 import 'youtube_importer.dart';
+import 'youtube_stream.dart';
 import 'ytdlp.dart';
 
 /// Owns the audio player, the library and the play queue.
@@ -192,15 +193,18 @@ class PlayerController extends ChangeNotifier {
   /// Looks up the stream of the next two songs ahead of time, so skipping
   /// to a YouTube song doesn't wait on yt-dlp. Cached, so repeats are free.
   void _prefetchNext() {
-    if (!YtDlp.supported) return;
     final seq = player.sequenceState;
     final at = seq.currentIndex;
     if (at == null) return;
     for (final s in seq.sequence.skip(at + 1).take(2)) {
       final t = s.tag as Track;
-      if (t.isRemote && downloadedCopy(t) == null) YtDlp.resolve(t.videoId!).ignore();
+      if (t.isRemote && downloadedCopy(t) == null) _resolveAhead(t.videoId!);
     }
   }
+
+  /// Looks a song's stream up in advance (cached), so it starts right away.
+  static void _resolveAhead(String videoId) =>
+      (YtDlp.supported ? YtDlp.resolve(videoId) : YoutubeStream.resolve(videoId)).ignore();
 
   /// Whether the play button has something to start: the queue, or the local library.
   bool get canPlay => player.audioSources.isNotEmpty || _library.isNotEmpty;
@@ -439,7 +443,7 @@ class PlayerController extends ChangeNotifier {
     future.then<void>(
       (tracks) {
         final top = tracks.firstOrNull?.videoId;
-        if (top != null && YtDlp.supported) YtDlp.resolve(top).ignore();
+        if (top != null) _resolveAhead(top);
       },
       onError: (Object _) {
         _searches.remove(key);

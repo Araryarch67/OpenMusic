@@ -4,11 +4,13 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'youtube_importer.dart';
+import 'youtube_stream.dart';
 import 'ytdlp.dart';
 
 /// Streams a YouTube video's audio track without downloading it first.
@@ -26,13 +28,20 @@ class YoutubeAudioSource extends StreamAudioSource {
   final YoutubeExplode yt;
   final _http = http.Client();
 
-  /// Desktop resolves through yt-dlp (works with current YouTube); mobile uses the in-app extractor.
+  /// Desktop resolves through yt-dlp; phones ask YouTube's player API the way
+  /// yt-dlp does ([YoutubeStream]), with youtube_explode as a last resort.
   Future<({Uri url, int total, String mime})> _resolve() async {
     if (YtDlp.supported) {
       final r = await YtDlp.resolve(videoId);
       final size = r.size;
       if (size == null) throw StateError('Unknown stream size for $videoId');
       return (url: r.url, total: size, mime: r.mimeType);
+    }
+    try {
+      final r = await YoutubeStream.resolve(videoId);
+      if (r.size case final size?) return (url: r.url, total: size, mime: r.mimeType);
+    } catch (e) {
+      debugPrint('YouTube stream lookup failed, trying youtube_explode: $e');
     }
     final manifest = await yt.videos.streams.getManifest(videoId);
     final best = YoutubeImporter.pickBestAudio(manifest.audioOnly);
@@ -70,7 +79,7 @@ class YoutubeAudioSource extends StreamAudioSource {
         // Usually an expired or throttled URL: resolve a fresh one and retry once.
         if (!retried) {
           retried = true;
-          if (YtDlp.supported) YtDlp.invalidate(videoId);
+          YtDlp.supported ? YtDlp.invalidate(videoId) : YoutubeStream.invalidate(videoId);
           source = (await _resolve()).url;
           continue;
         }
