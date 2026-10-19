@@ -103,6 +103,9 @@ if(TARGET openmusic_login)
     COMPONENT Runtime)
 endif()
 
+install(FILES "runner/openmusic.png" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
+  COMPONENT Runtime)
+
 install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)
 
