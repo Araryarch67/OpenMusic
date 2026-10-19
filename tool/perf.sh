@@ -8,7 +8,8 @@ cd "$(dirname "$0")/.."
 
 scratch=$(mktemp -d)
 trap 'kill $weston 2>/dev/null || true; rm -rf "$scratch"' EXIT
-weston --backend=headless --socket=om-perf >/dev/null 2>&1 &
+# GL renderer: the app draws on the real GPU, so raster times mean something.
+weston --backend=headless --renderer=gl --socket=om-perf --width=2560 --height=1600 >/dev/null 2>&1 &
 weston=$!
 sleep 1
 

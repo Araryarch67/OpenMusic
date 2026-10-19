@@ -21,6 +21,8 @@ import 'package:media_kit/media_kit.dart' show NativePlayer;
 import 'package:openmusic/main.dart';
 import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/player_controller.dart';
+import 'package:openmusic/ui/shell_scope.dart';
+import 'package:openmusic/ui/widgets/page_scaffold.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Budgets, in profile mode. A frame has 16.7 ms at 60 Hz; build is only part of it.
@@ -103,8 +105,9 @@ void main() {
     while (c.scanning) {
       await tester.pump(const Duration(milliseconds: 100));
     }
-    tester.view.physicalSize = const Size(1440, 900);
-    tester.view.devicePixelRatio = 1;
+    // A 2560x1600 laptop panel at 160% scale.
+    tester.view.physicalSize = const Size(2560, 1600);
+    tester.view.devicePixelRatio = 1.6;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(OpenMusicApp(controller: c));
     await c.playCollection(c.allSongs);
@@ -159,14 +162,20 @@ void main() {
       await run(const Duration(milliseconds: 1200));
     }
 
+    /// Opens a collection the way the app does, wherever its link happens to be.
+    Future<void> openCollection(Collection col) async {
+      ShellScope.of(tester.element(find.byType(PageScaffold).first)).openCollection(col);
+      await run(const Duration(milliseconds: 1200));
+    }
+
     final idle = await measure('idle while playing', () => run(const Duration(seconds: 3)));
     await measure('wheel scroll Home', wheel);
     await measure('wheel scroll sidebar library', () => wheel(at: const Offset(150, 650)));
-    await open(find.text('All Songs'));
+    await openCollection(c.allSongs);
     await measure('wheel scroll All Songs', () => wheel(ticks: 60));
-    await open(find.text('Album 3'));
+    await openCollection(c.albums[2]);
     await measure('wheel scroll album', wheel);
-    await open(find.text('Artist 2'));
+    await openCollection(c.artists[1]);
     await measure('wheel scroll artist', wheel);
     await open(find.text('Search'));
     await tester.enterText(find.byType(TextField).first, 'Song');
@@ -182,7 +191,7 @@ void main() {
     await measure('wheel scroll settings', wheel);
     // Linux desktops with an accessibility bus (AT-SPI) turn Flutter's semantics
     // tree on, which every scrolled frame then has to update too.
-    await open(find.text('All Songs'));
+    await openCollection(c.allSongs);
     final semantics = tester.ensureSemantics();
     await run(const Duration(milliseconds: 500));
     await measure('wheel scroll All Songs (accessibility on)', () => wheel(ticks: 60));
