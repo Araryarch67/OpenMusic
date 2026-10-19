@@ -255,6 +255,7 @@ class _SignalPathSheet extends StatelessWidget {
       'pulse' => 'PulseAudio (system mixer)',
       'alsa' => p.viaSystemMixer ? 'ALSA' : 'ALSA, direct to hardware',
       'wasapi' => 'WASAPI',
+      'asio' => 'ASIO',
       'coreaudio' => 'Core Audio',
       final o => o,
     };

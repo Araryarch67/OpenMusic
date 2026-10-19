@@ -37,7 +37,7 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 - **Follow artists.** Artists you follow on YouTube Music show up in your library; follow or unfollow from any artist page.
 - **Playlists.** OpenMusic playlists live on your device and can mix your own files with YouTube Music songs.
 - **Autoplay.** When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song.
-- **Synced lyrics** that follow the song line by line, from a `.lrc` file, the file's tags or [LRCLIB](https://lrclib.net). Click a line to jump to it.
+- **Synced lyrics** that follow the song line by line: YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net) or [Better Lyrics](https://betterlyrics.org). Click a line to jump to it.
 - **Hi-fi audio** with a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio).
 - **Downloads.** Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves.
 - **Made for every screen.** Bottom tabs and a mini player on phones, a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward, mouse side buttons, `Alt+←/→`.
@@ -97,10 +97,10 @@ On Linux and Windows, playback runs on [libmpv](https://mpv.io). OpenMusic drive
 | | |
 |---|---|
 | **Sound** (Settings) | Equalizer with presets and automatic headroom, volume leveling (ReplayGain per song or album), gapless playback, headphone crossfeed |
-| **Advanced audio** | Output device, including direct ALSA hardware devices; **bit-perfect mode** (no DSP, no resampling, volume fixed at 100%; WASAPI exclusive on Windows, not yet tested on real hardware); output sample rate; SoX resampler; buffer size |
+| **Advanced audio** | Output device, including direct ALSA hardware devices; **bit-perfect mode** (no DSP, no resampling, volume fixed at 100%; WASAPI exclusive on Windows, not yet tested on real hardware); **ASIO output** on Windows, built into the app's own libmpv (tested under Wine, not yet on real hardware); output sample rate; SoX resampler; buffer size |
 | **Signal path** | Source codec and stored bit depth → decoder → every DSP stage → volume → resampler → output device, with a verdict: *Bit-perfect*, *Lossless to the system mixer* or *Processed* |
 
-What's still missing (ASIO, native DSD / DoP, DLNA, AirPlay, …) and how it could be built is tracked in **[Features.md](Features.md)**.
+What's still missing (native DSD / DoP, DLNA, AirPlay, …) and how it could be built is tracked in **[Features.md](Features.md)**.
 
 ## Platform notes
 
@@ -127,7 +127,7 @@ OpenMusic stands on the shoulders of:
 - [FFmpeg](https://ffmpeg.org) for decoding, filters and resampling (with [SoX's resampler](https://sourceforge.net/projects/soxr/))
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [youtube_explode_dart](https://github.com/Hexer10/youtube_explode_dart) for YouTube audio
 - [ytmusicapi](https://github.com/sigma67/ytmusicapi), whose documentation of YouTube Music's API this app follows
-- [LRCLIB](https://lrclib.net) for free synced lyrics
+- [LRCLIB](https://lrclib.net) and [Better Lyrics](https://betterlyrics.org) for free synced lyrics
 - [audio_metadata_reader](https://github.com/ClementBeal/audio_metadata_reader) for tags
 
 OpenMusic is not affiliated with YouTube, Google or Discord.
@@ -138,4 +138,4 @@ OpenMusic is free software: you can redistribute it and/or modify it under the t
 
 If you run a modified version for others over a network, the AGPL asks you to offer them its source too.
 
-Vendored packages in [`third_party/`](third_party) keep their own licenses (the Unlicense for `just_audio_media_kit`, MIT for `audio_metadata_reader`).
+Vendored packages in [`third_party/`](third_party) keep their own licenses (the Unlicense for `just_audio_media_kit`, MIT for `audio_metadata_reader`, GPLv3 for Steinberg's `asiosdk`).

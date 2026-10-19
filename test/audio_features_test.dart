@@ -193,6 +193,30 @@ FILE "album.wav" WAVE
       expect(viaPipewire.bitPerfect, isFalse);
     });
 
+    test('ASIO (mpv\'s own output): straight to the driver, resampling shows', () {
+      SignalPath via({int outRate = 96000, String outFormat = 's32p'}) => SignalPath(
+        codec: 'flac',
+        container: 'flac',
+        inFormat: 's32',
+        inRate: 96000,
+        inChannels: 2,
+        outFormat: outFormat,
+        outRate: outRate,
+        outChannels: 2,
+        output: 'asio',
+        device: 'asio/Focusrite USB ASIO',
+        filters: const [],
+        volume: 100,
+        leveling: false,
+        bitrate: null,
+        sourceBits: 24,
+      );
+      expect(via().viaSystemMixer, isFalse);
+      expect(via().bitPerfect, isTrue, reason: 's32 into the driver\'s own Int32 buffers');
+      expect(via(outRate: 48000).bitPerfect, isFalse, reason: 'the driver can\'t run at 96 kHz, mpv resampled');
+      expect(via(outFormat: 's16p').bitPerfect, isFalse, reason: 'a 16-bit driver drops bits');
+    });
+
     test('describes formats', () {
       expect(SignalPath.describe('s32', 96000), '32-bit / 96 kHz');
       expect(SignalPath.describe('floatp', 44100), '32-bit float / 44.1 kHz');
@@ -262,7 +286,9 @@ FILE "album.wav" WAVE
       expect(b.filterChain, contains('afir'));
       final corrected = await peakDb(b.filterChain);
       // ignore: avoid_print
-      print('measured: dry ${dry.toStringAsFixed(2)} dB, volume 25% ${(quieter - dry).toStringAsFixed(2)} dB, room correction ${(corrected - dry).toStringAsFixed(1)} dB');
+      print(
+        'measured: dry ${dry.toStringAsFixed(2)} dB, volume 25% ${(quieter - dry).toStringAsFixed(2)} dB, room correction ${(corrected - dry).toStringAsFixed(1)} dB',
+      );
       expect(corrected - dry, lessThan(-30), reason: 'the 1 kHz tone sits in the impulse response\'s null');
 
       // Positive control: a single unit impulse must leave the tone as it is.

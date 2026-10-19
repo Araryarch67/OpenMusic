@@ -11,7 +11,6 @@ native players (ExoPlayer / AVPlayer), which none of the DSP below reaches.
 
 | Feature | Status | Why it's missing | Likely way to build it |
 |---|---|---|---|
-| ASIO output (Windows) | Not started | mpv has no ASIO output driver, and the ASIO SDK is Steinberg-licensed | A separate native output (e.g. PortAudio built with ASIO, or BASS + BASSASIO) fed decoded PCM, or a custom libmpv build. Until then **WASAPI Exclusive** (bit-perfect mode) is the Windows path |
 | Native DSD output (DoP / native DSD to the DAC) | Not started | FFmpeg decodes DSF/DFF to PCM (DSD64 → 352.8 kHz float); mpv can't pass DSD through | DoP packing (DSD bits in 24-bit PCM frames with 0x05/0xFA markers) in a custom output path, sent bit-perfect to an ALSA hw / WASAPI exclusive device |
 | SACD ISO | Not started | FFmpeg has no SACD ISO demuxer | Extract with `sacd_extract` (or port its demuxer) to DSF tracks at import time |
 | Convolution / room correction | Not started | No IR loader or UI yet | FFmpeg's `afir` lavfi filter in the `af` chain, plus a WAV impulse-response picker in Advanced audio |
@@ -27,6 +26,7 @@ native players (ExoPlayer / AVPlayer), which none of the DSP below reaches.
 
 | Feature | What works | What's missing |
 |---|---|---|
+| ASIO output (Windows) | The app ships its own libmpv (`windows/libmpv/libmpv-2.dll`, built by `tool/build_libmpv_windows.sh`) with a native **ASIO audio output** (`third_party/mpv_asio`, on Steinberg's GPLv3 ASIO SDK). Installed drivers show under **Output device** as "ASIO: …"; the driver's callback pulls audio straight from mpv, Int16/Int32/Float32/Float64 are written into the driver's buffers as they are (24-bit and right-aligned formats are converted), the device follows each song's rate and mpv converts when the driver can't run at it. Tested under Wine with a test driver in all four sample formats, and in the full app (`tool/test_asio_wine.sh`, `tool/build_windows_wine.sh`) | Never run on real Windows hardware with a real ASIO driver. No channel routing; no buffer-size or control-panel button; drivers show in the list only once something has played; for 24-bit drivers the signal path reports 32-bit |
 | WASAPI Exclusive / bit-perfect (Windows) | `audio-exclusive=yes` is set when **Bit-perfect mode** or **Exclusive mode** is on; volume pinned at 100% | Never run on real Windows hardware; needs a check with a DAC |
 | 64-bit float volume | mpv scales in float internally; **Bit-perfect mode** bypasses digital volume entirely | No explicit 64-bit volume stage |
 | Signal path indicator | Codec, stored bit depth (FLAC/WAV/AIFF headers), decoder format, DSP stages, volume, resampling, output, and on Linux **what the DAC actually receives** (kernel `hw_params`), including PipeWire's own resampling | Bit depth for WavPack / APE / ALAC isn't read |
@@ -50,4 +50,4 @@ formats (anything FFmpeg decodes; tested with 24-bit / 96 kHz FLAC), cue
 sheets, multi-disc albums, tag editor that keeps ReplayGain and custom tags
 (tested on FLAC, MP3 and Ogg; WAV, AIFF, WavPack and MKA go through the same
 ffmpeg path but are untested), embedded and sidecar cover art, synced lyrics
-(LRC files, embedded, LRCLIB).
+(LRC files, embedded, YouTube Music's Lyrics tab, LRCLIB, Better Lyrics).

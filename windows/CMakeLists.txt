@@ -81,6 +81,12 @@ install(FILES "${FLUTTER_ICU_DATA_FILE}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}
 install(FILES "${FLUTTER_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
   COMPONENT Runtime)
 
+# OpenMusic's own libmpv instead of media_kit's: it has the ASIO output and the
+# FFmpeg filters the app uses (crossfeed, room correction). Built with
+# tool/build_libmpv_windows.sh from third_party/mpv_asio.
+list(FILTER PLUGIN_BUNDLED_LIBRARIES EXCLUDE REGEX "libmpv-2\\.dll$")
+list(APPEND PLUGIN_BUNDLED_LIBRARIES "${CMAKE_CURRENT_SOURCE_DIR}/libmpv/libmpv-2.dll")
+
 if(PLUGIN_BUNDLED_LIBRARIES)
   install(FILES "${PLUGIN_BUNDLED_LIBRARIES}"
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
