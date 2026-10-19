@@ -7,7 +7,7 @@
 //
 //   {"cookies":"...","visitorData":"...","authUser":"0"}
 //
-// Closing the window exits 1. The WebKit profile is ephemeral: nothing stays
+// Closing the window exits 3; any other non-zero exit is a failure. The WebKit profile is ephemeral: nothing stays
 // on disk here, the app keeps the session itself.
 
 #include <gtk/gtk.h>
@@ -15,6 +15,7 @@
 #include <webkit2/webkit2.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 
 namespace {
@@ -33,6 +34,7 @@ struct State {
   WebKitWebView* view = nullptr;
   bool checking = false;
   bool done = false;
+  bool closed = false;
   int attempts = 0;
 };
 
@@ -146,12 +148,21 @@ void OnLoadChanged(WebKitWebView*, WebKitLoadEvent event, gpointer data) {
 }  // namespace
 
 int main(int argc, char** argv) {
+  // WebKitGTK's DMA-BUF renderer kills the process with a Wayland "Error 71
+  // (Protocol error)" on NVIDIA and some hybrid-GPU setups. The window is a
+  // login form: the plain renderer is plenty, and works everywhere.
+  setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
   gtk_init(&argc, &argv);
   State state;
 
   GtkWidget* window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
   gtk_window_set_title(GTK_WINDOW(window), "Sign in to YouTube Music");
   gtk_window_set_default_size(GTK_WINDOW(window), 480, 720);
+  g_signal_connect(window, "delete-event", G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer data) -> gboolean {
+                     static_cast<State*>(data)->closed = true;
+                     return FALSE;
+                   }),
+                   &state);
   g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), nullptr);
 
   WebKitWebsiteDataManager* data = webkit_website_data_manager_new_ephemeral();
@@ -164,5 +175,5 @@ int main(int argc, char** argv) {
   webkit_web_view_load_uri(state.view, kStartUrl);
   gtk_widget_show_all(window);
   gtk_main();
-  return state.done ? 0 : 1;
+  return state.done ? 0 : state.closed ? 3 : 1;
 }

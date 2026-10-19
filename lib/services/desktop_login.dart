@@ -18,15 +18,26 @@ abstract final class DesktopLogin {
 
   static bool get supported => helperPath != null;
 
-  /// Opens the window and waits. Null when the user closed it before finishing.
+  /// Exit code when the user closed the window before finishing.
+  static const _closedByUser = 3;
+
+  /// Opens the window and waits. Null when the user closed it before finishing;
+  /// throws [DesktopLoginException] when the window failed (crashed, no display...).
   static Future<({String cookies, String visitorData, String authUser})?> run() async {
     final proc = await Process.start(helperPath!, const []);
-    final (out, _, code) = await (
+    final (out, err, code) = await (
       proc.stdout.transform(utf8.decoder).join(),
-      proc.stderr.drain<void>(),
+      proc.stderr.transform(utf8.decoder).join(),
       proc.exitCode,
     ).wait;
-    if (code != 0) return null;
+    if (code == _closedByUser) return null;
+    if (code != 0) {
+      final reason = const LineSplitter()
+          .convert(err)
+          .where((l) => l.trim().isNotEmpty && !l.contains('CRITICAL') && !l.contains('MESA'))
+          .lastOrNull;
+      throw DesktopLoginException('The sign-in window closed unexpectedly${reason == null ? '' : ' ($reason)'}');
+    }
     final line = const LineSplitter().convert(out).lastWhere((l) => l.startsWith('{'), orElse: () => '');
     if (line.isEmpty) return null;
     final j = jsonDecode(line) as Map<String, dynamic>;
@@ -36,4 +47,13 @@ abstract final class DesktopLogin {
       authUser: j['authUser'] as String? ?? '0',
     );
   }
+}
+
+class DesktopLoginException implements Exception {
+  const DesktopLoginException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
 }
