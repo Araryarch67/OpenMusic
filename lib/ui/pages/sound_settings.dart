@@ -8,6 +8,7 @@ import '../../services/audio_engine.dart';
 import '../../services/player_controller.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
+import '../widgets/menus.dart';
 import '../widgets/signal_path.dart';
 import 'equalizer_page.dart';
 
@@ -50,11 +51,10 @@ class PlaybackSettings extends StatelessWidget {
                   lockedNote('Plays songs at a similar loudness, using their ReplayGain tags'),
                   style: muted,
                 ),
-                control: DropdownButton<VolumeLeveling>(
+                control: OptionPicker<VolumeLeveling>(
                   value: audio.leveling,
-                  underline: const SizedBox.shrink(),
-                  onChanged: locked ? null : (v) => audio.setLeveling(v!),
-                  items: [for (final v in VolumeLeveling.values) DropdownMenuItem(value: v, child: Text(v.label))],
+                  onChanged: locked ? null : audio.setLeveling,
+                  options: [for (final v in VolumeLeveling.values) (v, v.label)],
                 ),
               ),
               SwitchListTile(
@@ -64,29 +64,33 @@ class PlaybackSettings extends StatelessWidget {
                 value: audio.gapless,
                 onChanged: audio.setGapless,
               ),
-              SettingTile(
-                icon: Icons.headphones_rounded,
-                title: const Text('Headphone crossfeed'),
-                subtitle: Text(lockedNote('Makes headphones sound more like speakers in a room'), style: muted),
-                control: SizedBox(
-                  width: 200,
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Slider(
-                          value: audio.crossfeed,
-                          divisions: 10,
-                          onChanged: locked ? null : audio.setCrossfeed,
+              if (AudioEngine.hasCrossfeed)
+                SettingTile(
+                  icon: Icons.headphones_rounded,
+                  title: const Text('Headphone crossfeed'),
+                  subtitle: Text(lockedNote('Makes headphones sound more like speakers in a room'), style: muted),
+                  control: SizedBox(
+                    width: 200,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Slider(
+                            value: audio.crossfeed,
+                            divisions: 10,
+                            onChanged: locked ? null : audio.setCrossfeed,
+                          ),
                         ),
-                      ),
-                      SizedBox(
-                        width: 40,
-                        child: Text(audio.crossfeed == 0 ? 'Off' : '${(audio.crossfeed * 100).round()}%', style: muted),
-                      ),
-                    ],
+                        SizedBox(
+                          width: 40,
+                          child: Text(
+                            audio.crossfeed == 0 ? 'Off' : '${(audio.crossfeed * 100).round()}%',
+                            style: muted,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
-              ),
             ],
           ],
         );
@@ -134,7 +138,11 @@ class AdvancedAudioSettings extends StatelessWidget {
                 leading: const Icon(Icons.tune_rounded),
                 title: const Text('Advanced audio'),
                 subtitle: Text(
-                  locked ? 'Bit-perfect mode is on' : 'Output device, bit-perfect, sample rate, room correction',
+                  locked
+                      ? 'Bit-perfect mode is on'
+                      : AudioEngine.hasOutputChoice
+                      ? 'Output device, bit-perfect, sample rate, room correction'
+                      : 'Sample rate, resampler, buffer, signal path',
                   style: muted,
                 ),
                 shape: const Border(),
@@ -144,47 +152,39 @@ class AdvancedAudioSettings extends StatelessWidget {
                 },
                 children: [
                   for (final row in [
-                    SettingTile(
-                      icon: Icons.speaker_rounded,
-                      title: const Text('Output device'),
-                      subtitle: Text(
-                        audio.deviceError ??
-                            'Devices marked "direct" skip the system mixer: bit-perfect, but other apps go quiet',
-                        style: audio.deviceError == null
-                            ? muted
-                            : muted?.copyWith(color: Theme.of(context).colorScheme.error),
-                      ),
-                      control: SizedBox(
-                        width: 260,
-                        child: DropdownButton<String>(
-                          isExpanded: true,
+                    if (AudioEngine.hasOutputChoice)
+                      SettingTile(
+                        icon: Icons.speaker_rounded,
+                        title: const Text('Output device'),
+                        subtitle: Text(
+                          audio.deviceError ??
+                              'Devices marked "direct" skip the system mixer: bit-perfect, but other apps go quiet',
+                          style: audio.deviceError == null
+                              ? muted
+                              : muted?.copyWith(color: Theme.of(context).colorScheme.error),
+                        ),
+                        control: OptionPicker<String>(
+                          maxWidth: 200,
                           value: audio.devices.any((d) => d.name == audio.device) ? audio.device : 'auto',
-                          underline: const SizedBox.shrink(),
-                          onChanged: (v) => audio.setDevice(v!),
-                          items: [
+                          onChanged: audio.setDevice,
+                          options: [
                             for (final d in audio.devices)
-                              DropdownMenuItem(
-                                value: d.name,
-                                child: Text(
-                                  d.direct ? '${d.description} (direct)' : d.description,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
+                              (d.name, d.direct ? '${d.description} (direct)' : d.description),
                           ],
                         ),
                       ),
-                    ),
-                    SwitchListTile(
-                      secondary: const Icon(Icons.verified_outlined),
-                      title: const Text('Bit-perfect mode'),
-                      subtitle: Text(
-                        'Sends the file to your DAC untouched: no equalizer, leveling, resampling or digital volume. '
-                        '${AudioEngine.hasExclusiveMode ? 'Takes the device exclusively.' : 'Takes over your DAC so the system mixer can\'t resample. Meanwhile other apps play through another output.'}',
-                        style: muted,
+                    if (AudioEngine.hasOutputChoice)
+                      SwitchListTile(
+                        secondary: const Icon(Icons.verified_outlined),
+                        title: const Text('Bit-perfect mode'),
+                        subtitle: Text(
+                          'Sends the file to your DAC untouched: no equalizer, leveling, resampling or digital volume. '
+                          '${AudioEngine.hasExclusiveMode ? 'Takes the device exclusively.' : 'Takes over your DAC so the system mixer can\'t resample. Meanwhile other apps play through another output.'}',
+                          style: muted,
+                        ),
+                        value: audio.bitPerfect,
+                        onChanged: audio.setBitPerfect,
                       ),
-                      value: audio.bitPerfect,
-                      onChanged: audio.setBitPerfect,
-                    ),
                     if (AudioEngine.hasExclusiveMode)
                       SwitchListTile(
                         secondary: const Icon(Icons.lock_outline_rounded),
@@ -197,31 +197,32 @@ class AdvancedAudioSettings extends StatelessWidget {
                         value: audio.exclusive || locked,
                         onChanged: locked ? null : audio.setExclusive,
                       ),
-                    SettingTile(
-                      icon: Icons.surround_sound_rounded,
-                      title: const Text('Room correction'),
-                      subtitle: Text(
-                        locked
-                            ? 'Off while bit-perfect mode is on'
-                            : audio.impulseName == null
-                            ? 'Load an impulse response (WAV or FLAC, e.g. made with REW) to correct your room or headphones'
-                            : audio.impulseName!,
-                        style: muted,
+                    if (AudioEngine.hasRoomCorrection)
+                      SettingTile(
+                        icon: Icons.surround_sound_rounded,
+                        title: const Text('Room correction'),
+                        subtitle: Text(
+                          locked
+                              ? 'Off while bit-perfect mode is on'
+                              : audio.impulseName == null
+                              ? 'Load an impulse response (WAV or FLAC, e.g. made with REW) to correct your room or headphones'
+                              : audio.impulseName!,
+                          style: muted,
+                        ),
+                        control: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextButton(
+                              onPressed: locked ? null : () => _pickImpulse(context, audio),
+                              child: Text(audio.impulseName == null ? 'Choose file' : 'Change'),
+                            ),
+                            Switch(
+                              value: audio.convolution && !locked,
+                              onChanged: locked || audio.impulsePath == null ? null : audio.setConvolution,
+                            ),
+                          ],
+                        ),
                       ),
-                      control: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          TextButton(
-                            onPressed: locked ? null : () => _pickImpulse(context, audio),
-                            child: Text(audio.impulseName == null ? 'Choose file' : 'Change'),
-                          ),
-                          Switch(
-                            value: audio.convolution && !locked,
-                            onChanged: locked || audio.impulsePath == null ? null : audio.setConvolution,
-                          ),
-                        ],
-                      ),
-                    ),
                     SettingTile(
                       icon: Icons.multiline_chart_rounded,
                       title: const Text('Output sample rate'),
@@ -231,14 +232,10 @@ class AdvancedAudioSettings extends StatelessWidget {
                             : 'Follow the song, or convert everything to one rate',
                         style: muted,
                       ),
-                      control: DropdownButton<int>(
+                      control: OptionPicker<int>(
                         value: locked ? 0 : audio.outputRate ?? 0,
-                        underline: const SizedBox.shrink(),
                         onChanged: locked ? null : (v) => audio.setOutputRate(v == 0 ? null : v),
-                        items: [
-                          const DropdownMenuItem(value: 0, child: Text('Follow the song')),
-                          for (final r in _rates) DropdownMenuItem(value: r, child: Text(SignalPath.formatRate(r))),
-                        ],
+                        options: [(0, 'Follow the song'), for (final r in _rates) (r, SignalPath.formatRate(r))],
                       ),
                     ),
                     SwitchListTile(
@@ -255,13 +252,11 @@ class AdvancedAudioSettings extends StatelessWidget {
                       icon: Icons.timer_outlined,
                       title: const Text('Buffer'),
                       subtitle: Text('Raise it if you hear crackles or dropouts', style: muted),
-                      control: DropdownButton<BufferSize>(
+                      control: OptionPicker<BufferSize>(
                         value: audio.buffer,
-                        underline: const SizedBox.shrink(),
-                        onChanged: (v) => audio.setBuffer(v!),
-                        items: [
-                          for (final b in BufferSize.values)
-                            DropdownMenuItem(value: b, child: Text('${b.label} (${(b.seconds * 1000).round()} ms)')),
+                        onChanged: audio.setBuffer,
+                        options: [
+                          for (final b in BufferSize.values) (b, '${b.label} (${(b.seconds * 1000).round()} ms)'),
                         ],
                       ),
                     ),

@@ -11,6 +11,7 @@ import 'settings_page.dart';
 import 'youtube_music_page.dart';
 import '../widgets/smooth_scroll.dart';
 import '../navigation.dart';
+import '../widgets/menus.dart';
 
 enum LibraryFilter { playlists, albums, artists }
 
@@ -156,20 +157,20 @@ class _LibraryListState extends State<LibraryList> {
                   itemBuilder: (_) => [
                     PopupMenuItem(
                       value: () => createPlaylist(context),
-                      child: const ListTile(leading: Icon(Icons.playlist_add_rounded), title: Text('New playlist')),
+                      child: const MenuRow(leading: Icon(Icons.playlist_add_rounded), title: Text('New playlist')),
                     ),
                     PopupMenuItem(
                       value: shell.addFiles,
-                      child: const ListTile(leading: Icon(Icons.audio_file_outlined), title: Text('Add songs')),
+                      child: const MenuRow(leading: Icon(Icons.audio_file_outlined), title: Text('Add songs')),
                     ),
                     if (shell.addFolder != null)
                       PopupMenuItem(
                         value: shell.addFolder,
-                        child: const ListTile(leading: Icon(Icons.folder_open_rounded), title: Text('Add a folder')),
+                        child: const MenuRow(leading: Icon(Icons.folder_open_rounded), title: Text('Add a folder')),
                       ),
                     PopupMenuItem(
                       value: shell.importFromYoutube,
-                      child: const ListTile(leading: Icon(Icons.add_link_rounded), title: Text('Import from YouTube')),
+                      child: const MenuRow(leading: Icon(Icons.add_link_rounded), title: Text('Import from YouTube')),
                     ),
                   ],
                 ),

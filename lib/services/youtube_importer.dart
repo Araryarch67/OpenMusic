@@ -16,11 +16,21 @@ enum DownloadStatus { queued, downloading, done, failed, cancelled }
 
 /// One video being turned into a library track.
 class DownloadJob {
-  DownloadJob({required this.videoId, required this.title, required this.channel, required this.thumbnailUrl});
+  DownloadJob({
+    required this.videoId,
+    required this.title,
+    required this.channel,
+    required this.thumbnailUrl,
+    this.knownNames = false,
+  });
 
   final String videoId;
   final String title;
   final String channel;
+
+  /// [title] and [channel] are the song's real title and artist (a YouTube
+  /// Music song), not a video title and uploader that still need splitting.
+  final bool knownNames;
   final String thumbnailUrl;
 
   DownloadStatus status = DownloadStatus.queued;
@@ -130,8 +140,12 @@ class YoutubeImporter extends ChangeNotifier {
         title: t.title,
         channel: t.artist,
         thumbnailUrl: t.artworkUrl ?? 'https://i.ytimg.com/vi/${t.videoId}/hqdefault.jpg',
+        knownNames: true,
       ),
   ]);
+
+  /// The newest download of [videoId], if any (queued, running, done or failed).
+  DownloadJob? jobFor(String videoId) => _jobs.where((j) => j.videoId == videoId).lastOrNull;
 
   bool isDownloaded(String videoId) => _jobs.any((j) => j.videoId == videoId && j.status == DownloadStatus.done);
 
@@ -282,7 +296,8 @@ class YoutubeImporter extends ChangeNotifier {
       await partFile.rename(audioFile.path);
       await thumbnail;
 
-      final names = parseTitle(video.title, video.author);
+      // YouTube Music already named the song; only a bare video title needs guessing.
+      final names = job.knownNames ? (title: job.title, artist: job.channel) : parseTitle(video.title, video.author);
       final track = Track(
         id: Uri.file(audioFile.path).toString(),
         uri: Uri.file(audioFile.path),

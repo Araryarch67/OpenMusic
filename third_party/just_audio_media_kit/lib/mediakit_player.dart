@@ -175,8 +175,14 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _dataController.add(PlayerDataMessage(speed: rate));
       }),
       _player.stream.log.listen((event) {
-        // OpenMusic: a skipped song's network read being cancelled is expected, not an error.
-        if (event.text.contains('Immediate exit requested')) return;
+        // OpenMusic: a skipped song's network read being cancelled is expected,
+        // and audio-only libmpv builds (Android) lack media_kit's video/subtitle
+        // properties; neither is an error.
+        if (event.text.contains('Immediate exit requested') ||
+            event.text.contains('property not found _setProperty(subs-fallback') ||
+            event.text.contains('property not found _setProperty(osc')) {
+          return;
+        }
         // ignore: avoid_print
         print("MPV: [${event.level}] ${event.prefix}: ${event.text}");
       }),
@@ -300,6 +306,14 @@ class MediaKitPlayer extends AudioPlayerPlatform {
     return _player
         .setVolume(request.volume * 100.0)
         .then((value) => SetVolumeResponse());
+  }
+
+  // OpenMusic: just_audio sends this on Android; mpv's audio output picks its
+  // own stream type, and audio focus is handled by just_audio in Dart.
+  @override
+  Future<SetAndroidAudioAttributesResponse> setAndroidAudioAttributes(
+      SetAndroidAudioAttributesRequest request) async {
+    return SetAndroidAudioAttributesResponse();
   }
 
   @override

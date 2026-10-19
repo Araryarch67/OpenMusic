@@ -739,6 +739,17 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Stops and empties the queue: the mini player and the notification go away.
+  Future<void> closePlayer() async {
+    await player.stop();
+    await player.clearAudioSources();
+    _ordered = const [];
+    _autoplayed.clear();
+    _autoplaySeed = null;
+    playingFrom = null;
+    notifyListeners();
+  }
+
   Future<void> togglePlay() async {
     if (player.audioSources.isEmpty) {
       if (canPlay) await playCollection(allSongs);

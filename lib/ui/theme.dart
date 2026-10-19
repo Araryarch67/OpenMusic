@@ -9,6 +9,9 @@ abstract final class AppColors {
   static const panel = Color(0xFF121212);
   static const elevated = Color(0xFF1C1C1C);
   static const hover = Color(0xFF2A2A2A);
+
+  /// Popup menus and pickers.
+  static const menu = Color(0xFF242424);
   static const tile = Color(0x14FFFFFF);
   static const textPrimary = Color(0xFFFFFFFF);
   static const textSecondary = Color(0xFFA7A7A7);
@@ -66,9 +69,17 @@ ThemeData buildAppTheme({String? fontFamily}) {
       shape: const StadiumBorder(),
       showCheckmark: false,
     ),
+    // Menus: a dark rounded card with a hairline border (see widgets/menus.dart).
     popupMenuTheme: PopupMenuThemeData(
-      color: AppColors.hover,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+      color: AppColors.menu,
+      surfaceTintColor: Colors.transparent,
+      elevation: 12,
+      shadowColor: Colors.black,
+      menuPadding: const EdgeInsets.symmetric(vertical: 6),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: Color(0x1AFFFFFF)),
+      ),
     ),
     // A small dark card floating over the bottom of the page: centred and
     // narrow on desktop, inset from the edges on phones.

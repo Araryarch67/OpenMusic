@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/track.dart';
 import '../services/player_controller.dart';
+import '../services/youtube_importer.dart';
 import '../services/youtube_music_account.dart';
 import '../services/ytmusic_web.dart';
 import 'theme.dart';
@@ -329,6 +330,70 @@ class FollowButton extends StatelessWidget {
             following ? 'Unfollowed $name' : 'Following $name',
           ),
           child: Text(following ? 'Following' : 'Follow'),
+        );
+      },
+    );
+  }
+}
+
+/// Download for offline, for a streamed song: an arrow, a progress ring while
+/// it downloads (tap to stop), a check once it's on the device.
+class DownloadButton extends StatelessWidget {
+  const DownloadButton({super.key, required this.track, this.size = 20, this.color});
+
+  final Track track;
+  final double size;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = PlayerScope.of(context);
+    if (!track.isRemote) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: c.youtube,
+      builder: (context, _) {
+        final job = c.youtube.jobFor(track.videoId!);
+        if (c.downloadedCopy(track) != null || job?.status == DownloadStatus.done) {
+          return IconButton(
+            tooltip: 'Downloaded',
+            iconSize: size,
+            color: AppColors.accent,
+            onPressed: null,
+            disabledColor: AppColors.accent,
+            icon: const Icon(Icons.download_done_rounded),
+          );
+        }
+        if (job != null && job.isActive) {
+          return IconButton(
+            tooltip: 'Stop download',
+            iconSize: size,
+            onPressed: () => c.youtube.cancel(job),
+            icon: SizedBox.square(
+              dimension: size,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  CircularProgressIndicator(
+                    value: job.status == DownloadStatus.downloading && job.progress > 0 ? job.progress : null,
+                    strokeWidth: 2,
+                    color: AppColors.accent,
+                    backgroundColor: Colors.white24,
+                  ),
+                  Icon(Icons.stop_rounded, size: size * 0.5, color: color),
+                ],
+              ),
+            ),
+          );
+        }
+        return IconButton(
+          tooltip: job?.status == DownloadStatus.failed ? 'Download failed, try again' : 'Download',
+          iconSize: size,
+          color: job?.status == DownloadStatus.failed ? Theme.of(context).colorScheme.error : color,
+          onPressed: () {
+            c.youtube.enqueueTracks([track]);
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Downloading ${track.title}…')));
+          },
+          icon: Icon(job?.status == DownloadStatus.failed ? Icons.error_outline_rounded : Icons.download_rounded),
         );
       },
     );

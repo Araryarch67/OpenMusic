@@ -9,6 +9,7 @@ import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
 import '../widgets/track_row.dart';
 import '../ytmusic_edit.dart';
+import '../widgets/menus.dart';
 
 /// Album / artist / "All Songs" page with a colour-washed header.
 class CollectionPage extends StatelessWidget {
@@ -332,7 +333,7 @@ class _PlaylistMenu extends StatelessWidget {
             final answer = await askPlaylistName(context, initialTitle: name, askPrivacy: false);
             if (answer != null) c.renamePlaylist(id, answer.title);
           },
-          child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
+          child: const MenuRow(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
         ),
         PopupMenuItem(
           value: () async {
@@ -357,7 +358,7 @@ class _PlaylistMenu extends StatelessWidget {
             c.deletePlaylist(id);
             history != null ? history.back() : navigator.maybePop();
           },
-          child: const ListTile(leading: Icon(Icons.delete_outline_rounded), title: Text('Delete playlist')),
+          child: const MenuRow(leading: Icon(Icons.delete_outline_rounded), title: Text('Delete playlist')),
         ),
       ],
     );

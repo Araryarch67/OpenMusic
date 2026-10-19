@@ -27,72 +27,85 @@ class MiniPlayer extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return AccentBuilder(
       track: track,
-      builder: (context, accent) => Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
-        child: Material(
-          color: Color.lerp(accent, Colors.black, 0.35),
-          borderRadius: BorderRadius.circular(8),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            onTap: onOpen,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 8, 4, 6),
-                  child: Row(
-                    children: [
-                      Hero(
-                        tag: 'now-playing-art',
-                        child: Artwork(track: track, size: 40),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              track.title,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                            Text(
-                              track.artist,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: text.bodySmall?.copyWith(color: Colors.white70),
-                            ),
-                          ],
+      // Swipe it sideways to close, like other music apps.
+      builder: (context, accent) => Dismissible(
+        key: ValueKey('mini-${track.id}'),
+        direction: DismissDirection.horizontal,
+        onDismissed: (_) => c.closePlayer(),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+          child: Material(
+            color: Color.lerp(accent, Colors.black, 0.35),
+            borderRadius: BorderRadius.circular(8),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              onTap: onOpen,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 8, 4, 6),
+                    child: Row(
+                      children: [
+                        Hero(
+                          tag: 'now-playing-art',
+                          child: Artwork(track: track, size: 40),
                         ),
-                      ),
-                      IconButton(
-                        tooltip: c.isPlaying ? 'Pause' : 'Play',
-                        color: Colors.white,
-                        iconSize: 30,
-                        onPressed: c.togglePlay,
-                        icon: Icon(c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
-                      ),
-                    ],
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                track.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                              ),
+                              Text(
+                                track.artist,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: text.bodySmall?.copyWith(color: Colors.white70),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: c.isPlaying ? 'Pause' : 'Play',
+                          color: Colors.white,
+                          iconSize: 30,
+                          onPressed: c.togglePlay,
+                          icon: Icon(c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                        ),
+                        IconButton(
+                          tooltip: 'Close player',
+                          color: Colors.white70,
+                          iconSize: 22,
+                          onPressed: c.closePlayer,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                _MiniProgress(
-                  builder: (context, snap) {
-                    final total = c.player.duration?.inMilliseconds ?? 0;
-                    final pos = snap.data?.inMilliseconds ?? 0;
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 8),
-                      child: LinearProgressIndicator(
-                        value: total == 0 ? 0 : (pos / total).clamp(0, 1),
-                        minHeight: 2,
-                        color: Colors.white,
-                        backgroundColor: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    );
-                  },
-                ),
-              ],
+                  _MiniProgress(
+                    builder: (context, snap) {
+                      final total = c.player.duration?.inMilliseconds ?? 0;
+                      final pos = snap.data?.inMilliseconds ?? 0;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: LinearProgressIndicator(
+                          value: total == 0 ? 0 : (pos / total).clamp(0, 1),
+                          minHeight: 2,
+                          color: Colors.white,
+                          backgroundColor: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      );
+                    },
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -159,6 +172,7 @@ class DesktopPlayerBar extends StatelessWidget {
                             ),
                           ),
                           LikeButton(track: track),
+                          DownloadButton(track: track),
                         ],
                       ),
               ),
@@ -489,7 +503,11 @@ class NowPlayingPage extends StatelessWidget {
                                 ],
                               ),
                             ),
-                            if (track != null) LikeButton(track: track, size: 28, color: Colors.white),
+                            if (track != null) ...[
+                              DownloadButton(track: track, size: 26, color: Colors.white),
+                              LikeButton(track: track, size: 28, color: Colors.white),
+                              TrackMenuButton(track: track, color: Colors.white),
+                            ],
                           ],
                         ),
                         const SizedBox(height: 16),

@@ -204,7 +204,8 @@ class SignalPath {
 /// equalizer and crossfeed are lavfi filters, leveling is mpv's ReplayGain,
 /// output/exclusive/rate/resampler are AO options. On platforms where
 /// just_audio uses its own native backend (Android/iOS/macOS) [supported] is
-/// false and the settings UI hides itself.
+/// false and the settings UI hides itself. Where libmpv lacks a filter or a
+/// device choice, the `has…` flags say so.
 class AudioEngine extends ChangeNotifier {
   AudioEngine() {
     // Pitch control makes media_kit own the `af` property (scaletempo); the app needs it for EQ.
@@ -214,6 +215,12 @@ class AudioEngine extends ChangeNotifier {
   }
 
   static bool get supported => Platform.isLinux || Platform.isWindows;
+
+  /// media_kit's Android libmpv is built without FFmpeg's `crossfeed`, `afir`
+  /// and `amovie` filters, and Android offers no exclusive or raw device output.
+  static bool get hasCrossfeed => !Platform.isAndroid;
+  static bool get hasRoomCorrection => !Platform.isAndroid;
+  static bool get hasOutputChoice => !Platform.isAndroid;
 
   /// Whether the OS output can be opened exclusively by mpv's own option
   /// (WASAPI / CoreAudio). On Linux a direct ALSA device does the same.
@@ -287,6 +294,11 @@ class AudioEngine extends ChangeNotifier {
       impulsePath = j['impulsePath'] as String?;
       impulseName = j['impulseName'] as String?;
       convolution = (j['convolution'] as bool? ?? false) && impulsePath != null && File(impulsePath!).existsSync();
+      if (!hasOutputChoice) {
+        device = 'auto';
+        bitPerfect = false;
+        exclusive = false;
+      }
     } catch (e) {
       debugPrint('Ignoring bad audio settings: $e');
     }
@@ -422,8 +434,8 @@ class AudioEngine extends ChangeNotifier {
 
   /// Equalizer curve active right now (bit-perfect mode bypasses everything).
   bool get eqActive => eqEnabled && !bitPerfect && bands.any((b) => b.gain.abs() > 0.05);
-  bool get crossfeedActive => crossfeed > 0 && !bitPerfect;
-  bool get convolutionActive => convolution && impulsePath != null && !bitPerfect;
+  bool get crossfeedActive => hasCrossfeed && crossfeed > 0 && !bitPerfect;
+  bool get convolutionActive => hasRoomCorrection && convolution && impulsePath != null && !bitPerfect;
   VolumeLeveling get effectiveLeveling => bitPerfect ? VolumeLeveling.off : leveling;
 
   /// Lowered so boosted bands can't clip: the loudest band ends at 0 dB.

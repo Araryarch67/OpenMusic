@@ -16,6 +16,7 @@ import '../widgets/smooth_scroll.dart';
 import '../navigation.dart';
 import '../ytmusic_edit.dart';
 import '../../services/ytmusic_web.dart';
+import '../widgets/menus.dart';
 
 /// Home when the source is YouTube Music: public home, explore and charts
 /// shelves for everyone; liked music, recent plays and playlists on top once
@@ -339,7 +340,7 @@ class _LibraryHome extends StatelessWidget {
                 ),
                 PopupMenuItem(
                   value: account.signOut,
-                  child: const ListTile(leading: Icon(Icons.logout_rounded), title: Text('Disconnect')),
+                  child: const MenuRow(leading: Icon(Icons.logout_rounded), title: Text('Disconnect')),
                 ),
               ],
             ),
@@ -657,13 +658,13 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
                   itemBuilder: (_) => [
                     PopupMenuItem(
                       value: _rename,
-                      child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
+                      child: const MenuRow(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
                     ),
                     for (final p in PlaylistPrivacy.values)
                       if (p != d.privacy)
                         PopupMenuItem(
                           value: () => _setPrivacy(p),
-                          child: ListTile(
+                          child: MenuRow(
                             leading: Icon(switch (p) {
                               PlaylistPrivacy.public => Icons.public_rounded,
                               PlaylistPrivacy.unlisted => Icons.link_rounded,
@@ -674,10 +675,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
                         ),
                     PopupMenuItem(
                       value: _delete,
-                      child: const ListTile(
-                        leading: Icon(Icons.delete_outline_rounded),
-                        title: Text('Delete playlist'),
-                      ),
+                      child: const MenuRow(leading: Icon(Icons.delete_outline_rounded), title: Text('Delete playlist')),
                     ),
                   ],
                 ),

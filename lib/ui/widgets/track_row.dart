@@ -10,6 +10,7 @@ import '../pages/youtube_music_page.dart' show openRemotePlaylist;
 import '../ytmusic_edit.dart';
 import '../theme.dart';
 import 'controls.dart';
+import 'menus.dart';
 
 /// One song in a list: number (or play icon on hover), cover, title, album, duration.
 class TrackRow extends StatefulWidget {
@@ -146,7 +147,7 @@ class _TrackRowState extends State<TrackRow> {
                       ),
                     ),
                   ),
-                _TrackMenu(track: t, visible: !wide || _hover),
+                TrackMenuButton(track: t, visible: !wide || _hover),
               ],
             ),
           ),
@@ -156,8 +157,9 @@ class _TrackRowState extends State<TrackRow> {
   }
 }
 
-class _TrackMenu extends StatelessWidget {
-  const _TrackMenu({required this.track, required this.visible});
+/// The ⋯ menu of a song: play next, add to playlist, like, download, go to artist…
+class TrackMenuButton extends StatelessWidget {
+  const TrackMenuButton({super.key, required this.track, this.visible = true, this.color});
 
   static Future<void> _queued(BuildContext context, Future<void> change, String done) async {
     final messenger = ScaffoldMessenger.of(context);
@@ -167,6 +169,7 @@ class _TrackMenu extends StatelessWidget {
 
   final Track track;
   final bool visible;
+  final Color? color;
 
   @override
   Widget build(BuildContext context) {
@@ -180,7 +183,7 @@ class _TrackMenu extends StatelessWidget {
         // Over the whole window, so a click anywhere (sidebar included) closes it.
         useRootNavigator: true,
         tooltip: 'More options for ${track.title}',
-        icon: const Icon(Icons.more_horiz_rounded),
+        icon: Icon(Icons.more_horiz_rounded, color: color),
         // The row can be rebuilt away while the menu is open (a list refreshing),
         // so actions run against the navigator's context, which outlives it.
         itemBuilder: (_) {
@@ -189,16 +192,16 @@ class _TrackMenu extends StatelessWidget {
           return [
             PopupMenuItem(
               onTap: () => _queued(host, c.playNext([track]), 'Plays next'),
-              child: const ListTile(leading: Icon(Icons.playlist_play_rounded), title: Text('Play next')),
+              child: const MenuRow(leading: Icon(Icons.playlist_play_rounded), title: Text('Play next')),
             ),
             PopupMenuItem(
               onTap: () => _queued(host, c.addToQueue([track]), 'Added to queue'),
-              child: const ListTile(leading: Icon(Icons.queue_music_rounded), title: Text('Add to queue')),
+              child: const MenuRow(leading: Icon(Icons.queue_music_rounded), title: Text('Add to queue')),
             ),
             if (artist != null)
               PopupMenuItem(
                 onTap: () => shell.openCollection(artist),
-                child: const ListTile(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
+                child: const MenuRow(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
               )
             else if (track.artistId case final id?)
               PopupMenuItem(
@@ -206,21 +209,21 @@ class _TrackMenu extends StatelessWidget {
                   host,
                   RemotePlaylist(id: id, browseId: id, title: track.artist.split(', ').first, count: 0),
                 ),
-                child: const ListTile(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
+                child: const MenuRow(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
               ),
             if (album != null)
               PopupMenuItem(
                 onTap: () => shell.openCollection(album),
-                child: const ListTile(leading: Icon(Icons.album_outlined), title: Text('Go to album')),
+                child: const MenuRow(leading: Icon(Icons.album_outlined), title: Text('Go to album')),
               ),
             PopupMenuItem(
               onTap: () => addToPlaylist(host, [track]),
-              child: const ListTile(leading: Icon(Icons.playlist_add_rounded), title: Text('Add to playlist')),
+              child: const MenuRow(leading: Icon(Icons.playlist_add_rounded), title: Text('Add to playlist')),
             ),
             if (editScope?.canRemove(track) ?? false)
               PopupMenuItem(
                 onTap: () => editScope!.remove(host, track),
-                child: const ListTile(
+                child: const MenuRow(
                   leading: Icon(Icons.playlist_remove_rounded),
                   title: Text('Remove from this playlist'),
                 ),
@@ -229,29 +232,29 @@ class _TrackMenu extends StatelessWidget {
               if (c.ytMusic.canEdit)
                 PopupMenuItem(
                   onTap: () => toggleLike(host, track),
-                  child: ListTile(
+                  child: MenuRow(
                     leading: Icon(c.ytMusic.isLiked(track) ? Icons.favorite_rounded : Icons.favorite_border_rounded),
                     title: Text(c.ytMusic.isLiked(track) ? 'Remove from Liked music' : 'Add to Liked music'),
                   ),
                 ),
               PopupMenuItem(
                 onTap: () => c.startRadio(track),
-                child: const ListTile(leading: Icon(Icons.radio_rounded), title: Text('Start radio')),
+                child: const MenuRow(leading: Icon(Icons.radio_rounded), title: Text('Start radio')),
               ),
               if (c.downloadedCopy(track) == null)
                 PopupMenuItem(
                   onTap: () => c.youtube.enqueueTracks([track]),
-                  child: const ListTile(leading: Icon(Icons.download_rounded), title: Text('Download for offline')),
+                  child: const MenuRow(leading: Icon(Icons.download_rounded), title: Text('Download for offline')),
                 ),
             ] else ...[
               if (Metadata.canEditTags(track))
                 PopupMenuItem(
                   onTap: () => showTagEditor(host, track),
-                  child: const ListTile(leading: Icon(Icons.edit_outlined), title: Text('Edit info')),
+                  child: const MenuRow(leading: Icon(Icons.edit_outlined), title: Text('Edit info')),
                 ),
               PopupMenuItem(
                 onTap: () => c.removeTrack(track),
-                child: const ListTile(
+                child: const MenuRow(
                   leading: Icon(Icons.remove_circle_outline_rounded),
                   title: Text('Remove from library'),
                 ),

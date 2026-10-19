@@ -9,6 +9,7 @@ import '../widgets/page_scaffold.dart';
 import '../widgets/shelf.dart';
 import 'downloads_page.dart';
 import 'youtube_music_page.dart';
+import '../widgets/menus.dart';
 
 /// One Home for everything: your files, your OpenMusic playlists and your
 /// YouTube Music library side by side, then YouTube Music's own shelves.
@@ -336,11 +337,11 @@ class _AddMenu extends StatelessWidget {
       itemBuilder: (_) => [
         PopupMenuItem(
           value: shell.addFiles,
-          child: const ListTile(leading: Icon(Icons.audio_file_outlined), title: Text('Add songs')),
+          child: const MenuRow(leading: Icon(Icons.audio_file_outlined), title: Text('Add songs')),
         ),
         PopupMenuItem(
           value: shell.importFromYoutube,
-          child: const ListTile(leading: Icon(Icons.add_link_rounded), title: Text('Import from YouTube')),
+          child: const MenuRow(leading: Icon(Icons.add_link_rounded), title: Text('Import from YouTube')),
         ),
       ],
     );
