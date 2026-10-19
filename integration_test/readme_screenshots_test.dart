@@ -104,14 +104,9 @@ void main() {
       await tester.tap(find.text('Search').first);
       await settle();
       await tester.enterText(find.byType(TextField).first, 'codfish');
-      await until(
-        () =>
-            find
-                .byWidgetPredicate((w) => w is Tooltip && (w.message?.startsWith('More options') ?? false))
-                .evaluate()
-                .length >
-            3,
-      );
+      // Enter: the suggestions close and the results (top result, songs, artists…) show.
+      await tester.testTextInput.receiveAction(TextInputAction.search);
+      await until(() => find.text('Top result').evaluate().isNotEmpty);
       await shot('search');
 
       // An OpenMusic playlist mixing artists.
@@ -130,9 +125,9 @@ void main() {
       await until(() => find.text('Lyrics from LRCLIB').evaluate().isNotEmpty);
       await shot('lyrics');
 
-      // Equalizer.
+      // Settings, then the equalizer.
       await tester.tap(find.text('Settings').first);
-      await settle();
+      await shot('settings');
       await tester.tap(find.text('Equalizer'));
       await settle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'Bass boost'));
@@ -154,6 +149,15 @@ void main() {
       await tester.tapAt(const Offset(700, 150));
       await settle();
       await c.player.setVolume(0);
+
+      // Desktop full-screen player.
+      await c.playList(dlow, 0, from: 'D-low');
+      await playing();
+      await tester.tap(find.byTooltip('Full screen'));
+      await settle(4000); // past the "Press Esc" hint
+      await shot('fullscreen');
+      await tester.tap(find.byTooltip('Exit full screen').first);
+      await settle();
 
       // Phone: full-screen player.
       await c.playList(codfish, 0, from: 'Codfish');
