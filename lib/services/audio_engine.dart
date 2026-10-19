@@ -7,6 +7,8 @@ import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'linux_alsa.dart';
+
 /// How loudness differences between songs are evened out (mpv `replaygain`).
 enum VolumeLeveling {
   off('Off', 'no'),
@@ -98,6 +100,8 @@ class SignalPath {
     required this.leveling,
     required this.bitrate,
     this.sourceBits,
+    this.dac,
+    this.dacName,
   });
 
   final String codec;
@@ -121,6 +125,22 @@ class SignalPath {
 
   /// Bit depth stored in the file (24 for a 24-bit FLAC that decodes to `s32`), when known.
   final int? sourceBits;
+
+  /// What the sound card is really being fed (Linux reads it from the kernel).
+  final HwParams? dac;
+  final String? dacName;
+
+  /// The card gets this stream's samples as they are: same rate and channels,
+  /// integer, at least as many bits as the file has.
+  bool get dacMatches {
+    final d = dac;
+    if (d == null) return true;
+    final need = sourceBits ?? bitsOf(inFormat) ?? 99;
+    return d.rate == inRate && d.channels == inChannels && !d.isFloat && (d.bits ?? 0) >= need;
+  }
+
+  /// The system mixer runs the card at another rate than the song's.
+  bool get mixerResamples => viaSystemMixer && dac != null && dac!.rate != inRate;
 
   static const _lossless = {
     'flac', 'alac', 'wavpack', 'ape', 'tta', 'truehd', 'mlp', 'shorten', 'tak', //
@@ -163,7 +183,7 @@ class SignalPath {
     return b >= a;
   }
 
-  bool get bitPerfect => untouched && !viaSystemMixer && !isDsd;
+  bool get bitPerfect => untouched && !viaSystemMixer && !isDsd && dacMatches;
 
   /// e.g. "24-bit / 96 kHz". [stored] overrides the bit count for padded formats.
   static String describe(String format, int rate, {int? stored}) {
@@ -222,6 +242,13 @@ class AudioEngine extends ChangeNotifier {
   bool bitPerfect = false;
 
   List<OutputDevice> devices = const [OutputDevice('auto', 'System default')];
+
+  /// Why the chosen output couldn't be used as asked (shown under Output device).
+  String? deviceError;
+
+  /// Linux: the sound card held for direct, bit-perfect output.
+  CardReservation? _reservation;
+  String? _heldTarget;
 
   Player? get _player => JustAudioMediaKit.activePlayer;
 
@@ -373,6 +400,7 @@ class AudioEngine extends ChangeNotifier {
 
   Future<void> _applyProps(NativePlayer p) async {
     final exclusiveOut = exclusive || bitPerfect;
+    final outputDevice = await _outputDevice();
     final props = <String, String>{
       // media_kit turns on mpv's disk cache, which fails ("Failed to create file
       // cache") without a writable cache dir. Audio needs no more than the RAM cache.
@@ -384,7 +412,7 @@ class AudioEngine extends ChangeNotifier {
       'replaygain-fallback': '0',
       'audio-buffer': buffer.seconds.toString(),
       'af': filterChain,
-      'audio-device': device,
+      'audio-device': outputDevice,
       'audio-exclusive': hasExclusiveMode && exclusiveOut ? 'yes' : 'no',
       'audio-samplerate': bitPerfect ? '0' : '${outputRate ?? 0}',
       // Only used when the rate has to change; keeps the default otherwise.
@@ -395,6 +423,81 @@ class AudioEngine extends ChangeNotifier {
     for (final e in props.entries) {
       await p.setProperty(e.key, e.value);
     }
+  }
+
+  /// The mpv device to open. On Linux, bit-perfect mode goes straight to the
+  /// sound card behind the chosen output (the system mixer would resample),
+  /// and a direct card is first taken over from PipeWire.
+  Future<String> _outputDevice() async {
+    if (!LinuxAlsa.supported) return device;
+    var target = device;
+    if (bitPerfect && LinuxAlsa.byMpvName(device) == null) {
+      // Already holding the card: keep it. (While it's held, PipeWire's default
+      // output is some other card, so asking again would pick the wrong one.)
+      final held = _reservation == null ? null : _heldTarget;
+      final hw = held == null ? await _behind(device) : null;
+      target = held ?? hw?.mpvName ?? device;
+    }
+    final card = LinuxAlsa.byMpvName(target);
+    if (card == null) {
+      _releaseCard();
+      _setDeviceError(null);
+      return target;
+    }
+    if (_reservation?.card == card.card) return target;
+    _releaseCard();
+    final got = await CardReservation.acquire(card.card);
+    if (_disposed) {
+      got?.release(); // closed while waiting: don't leave the card held
+      return target;
+    }
+    _reservation = got;
+    _heldTarget = got == null ? null : target;
+    if (_reservation == null) {
+      _setDeviceError('${card.name} is busy, so it plays through the system mixer for now.');
+      return device == target ? 'auto' : device;
+    }
+    _setDeviceError(null);
+    return target;
+  }
+
+  void _setDeviceError(String? e) {
+    if (deviceError == e) return;
+    deviceError = e;
+    notifyListeners();
+  }
+
+  void _releaseCard() {
+    _reservation?.release().ignore();
+    _reservation = null;
+    _behindCache.clear(); // the card's output comes back under a new id
+  }
+
+  final _behindCache = <String, (DateTime, AlsaOutput?)>{};
+
+  /// The card behind a mixer output (`auto`, `pipewire/<node>`), cached briefly:
+  /// asking PipeWire spawns a process, and this runs on every settings change.
+  Future<AlsaOutput?> _behind(String mpvDevice) async {
+    final hit = _behindCache[mpvDevice];
+    if (hit != null && DateTime.now().difference(hit.$1) < const Duration(seconds: 10)) return hit.$2;
+    final node = switch (mpvDevice) {
+      'auto' || 'pipewire' || 'pulse' => null,
+      final d when d.startsWith('pipewire/') => d.substring('pipewire/'.length),
+      final d when d.startsWith('pulse/') => d.substring('pulse/'.length),
+      _ => null,
+    };
+    final out = await LinuxAlsa.behind(node);
+    _behindCache[mpvDevice] = (DateTime.now(), out);
+    return out;
+  }
+
+  bool _disposed = false;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _releaseCard();
+    super.dispose();
   }
 
   static String? _resamplerOptions;
@@ -426,6 +529,13 @@ class AudioEngine extends ChangeNotifier {
       final raw = await p.getProperty('audio-device-list');
       final list = (jsonDecode(raw) as List).cast<Map<String, dynamic>>();
       devices = _usable([for (final d in list) (d['name'] as String, d['description'] as String? ?? '')]);
+      if (LinuxAlsa.supported) {
+        // mpv lists few raw cards (often not USB DACs); the kernel lists them all.
+        devices = [
+          ...devices.where((d) => !d.name.startsWith('alsa/')),
+          for (final o in LinuxAlsa.outputs()) OutputDevice(o.mpvName, o.name, direct: true),
+        ];
+      }
       notifyListeners();
     } catch (e) {
       debugPrint('audio-device-list: $e');
@@ -512,7 +622,15 @@ class AudioEngine extends ChangeNotifier {
     if (inRate == 0) return null;
     final af = await g('af');
     final file = await g('path');
+    final output = await g('current-ao');
+    final device = await g('audio-device');
+    AlsaOutput? card;
+    if (LinuxAlsa.supported) {
+      card = LinuxAlsa.byMpvName(device) ?? (output == 'pipewire' || output == 'pulse' ? await _behind(device) : null);
+    }
     return SignalPath(
+      dac: card == null ? null : LinuxAlsa.hwParams(card),
+      dacName: card?.name,
       sourceBits: _bitsCache[file] ??= await _sourceBits(file),
       codec: await g('audio-codec-name'),
       container: await g('file-format'),
@@ -522,8 +640,8 @@ class AudioEngine extends ChangeNotifier {
       outFormat: await g('audio-out-params/format'),
       outRate: int.tryParse(await g('audio-out-params/samplerate')) ?? 0,
       outChannels: int.tryParse(await g('audio-out-params/channel-count')) ?? 0,
-      output: await g('current-ao'),
-      device: await g('audio-device'),
+      output: output,
+      device: device,
       filters: [
         for (final m in RegExp(r'@(\w+):').allMatches(af))
           switch (m[1]) {

@@ -140,6 +140,14 @@ class _SignalPathSheet extends StatelessWidget {
         }
         final (verdict, verdictColor, detail) = p.bitPerfect
             ? ('Bit-perfect', AppColors.accent, 'Every sample reaches your DAC exactly as it is stored in the file.')
+            : p.untouched && p.mixerResamples
+            ? (
+                'Resampled by the system mixer',
+                Colors.white,
+                'OpenMusic leaves the sound alone, but the system mixer runs your DAC at '
+                    '${SignalPath.formatRate(p.dac!.rate)} instead of ${SignalPath.formatRate(p.inRate)}. '
+                    'Turn on Bit-perfect mode in Settings › Advanced audio to send it as it is.',
+              )
             : p.untouched && p.viaSystemMixer
             ? (
                 'Lossless to the system mixer',
@@ -216,8 +224,17 @@ class _SignalPathSheet extends StatelessWidget {
                       '${SignalPath.describe(p.outFormat, p.outRate)} · ${_channels(p.outChannels)}\n'
                       '${_outputName(p)}',
                   changes: p.viaSystemMixer,
-                  last: true,
+                  last: p.dac == null,
                 ),
+                if (p.dac case final dac?)
+                  _Stage(
+                    title: 'DAC receives',
+                    value:
+                        '${dac.bits == null ? dac.format : '${dac.bits}-bit${dac.isFloat ? ' float' : ''}'} / '
+                        '${SignalPath.formatRate(dac.rate)} · ${_channels(dac.channels)} (${dac.format})\n${p.dacName ?? ''}',
+                    changes: !p.dacMatches,
+                    last: true,
+                  ),
               ],
             ),
           ),

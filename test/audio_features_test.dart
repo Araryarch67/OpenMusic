@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/audio_engine.dart';
 import 'package:openmusic/services/cue_sheet.dart';
+import 'package:openmusic/services/linux_alsa.dart';
 import 'package:openmusic/services/lyrics.dart';
 import 'package:openmusic/services/metadata.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -140,6 +141,45 @@ FILE "album.wav" WAVE
         expect(AudioEngine.parseSourceBits(head), bits, reason: name);
       }
       expect(SignalPath.describe('s32', 96000, stored: 24), '24-bit / 96 kHz');
+    });
+
+    test('reads what the DAC receives and judges it', () {
+      final hw = HwParams.parse(
+        'access: RW_INTERLEAVED\nformat: S24_3LE\nsubformat: STD\nchannels: 2\nrate: 96000 (96000/1)\n',
+      )!;
+      expect(hw.format, 'S24_3LE');
+      expect(hw.bits, 24);
+      expect(hw.rate, 96000);
+      expect(HwParams.parse('closed'), isNull);
+      SignalPath at(
+        HwParams dac, {
+        int? bits = 24,
+        String output = 'alsa',
+        String device = 'alsa/hw:CARD=Audio,DEV=0',
+      }) => SignalPath(
+        codec: 'flac',
+        container: 'flac',
+        inFormat: 's32',
+        inRate: 96000,
+        inChannels: 2, //
+        outFormat: 's32',
+        outRate: 96000,
+        outChannels: 2,
+        output: output,
+        device: device,
+        filters: const [],
+        volume: 100,
+        leveling: false,
+        bitrate: null,
+        sourceBits: bits,
+        dac: dac,
+      );
+      expect(at(hw).bitPerfect, isTrue);
+      expect(at(hw, bits: 32).bitPerfect, isFalse, reason: '32-bit file into a 24-bit DAC loses bits');
+      const mixed = HwParams(format: 'S24_3LE', rate: 48000, channels: 2);
+      final viaPipewire = at(mixed, output: 'pipewire', device: 'auto');
+      expect(viaPipewire.mixerResamples, isTrue);
+      expect(viaPipewire.bitPerfect, isFalse);
     });
 
     test('describes formats', () {

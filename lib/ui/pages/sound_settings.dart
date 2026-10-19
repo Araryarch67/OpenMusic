@@ -91,8 +91,11 @@ class SoundSettings extends StatelessWidget {
                   SettingTile(
                     title: const Text('Output device'),
                     subtitle: Text(
-                      'Devices marked "direct" skip the system mixer: bit-perfect, but other apps go quiet',
-                      style: muted,
+                      audio.deviceError ??
+                          'Devices marked "direct" skip the system mixer: bit-perfect, but other apps go quiet',
+                      style: audio.deviceError == null
+                          ? muted
+                          : muted?.copyWith(color: Theme.of(context).colorScheme.error),
                     ),
                     control: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 260),
@@ -118,7 +121,7 @@ class SoundSettings extends StatelessWidget {
                     title: const Text('Bit-perfect mode'),
                     subtitle: Text(
                       'Sends the file to your DAC untouched: no equalizer, leveling, resampling or digital volume. '
-                      '${AudioEngine.hasExclusiveMode ? 'Takes the device exclusively.' : 'Pick a "direct" output device for the full effect.'}',
+                      '${AudioEngine.hasExclusiveMode ? 'Takes the device exclusively.' : 'Takes over your DAC so the system mixer can\'t resample. Meanwhile other apps play through another output.'}',
                       style: muted,
                     ),
                     value: audio.bitPerfect,

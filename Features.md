@@ -28,15 +28,20 @@ native players (ExoPlayer / AVPlayer), which none of the DSP below reaches.
 | Feature | What works | What's missing |
 |---|---|---|
 | WASAPI Exclusive / bit-perfect (Windows) | `audio-exclusive=yes` is set when **Bit-perfect mode** or **Exclusive mode** is on; volume pinned at 100% | Never run on real Windows hardware; needs a check with a DAC |
-| Automatic sample-rate switching (Linux) | mpv opens the output at the file's rate; a **direct** ALSA device follows every file | Through PipeWire the graph rate only changes if the user's PipeWire allows it (`default.clock.allowed-rates`); the app can't set that |
 | 64-bit float volume | mpv scales in float internally; **Bit-perfect mode** bypasses digital volume entirely | No explicit 64-bit volume stage |
-| Signal path indicator | Codec, stored bit depth (FLAC/WAV/AIFF headers), decoder format, DSP stages, volume, resampling, output driver/device, bit-perfect verdict | Bit depth for WavPack / APE / ALAC isn't read; the system mixer's own rate (PipeWire) isn't shown |
+| Signal path indicator | Codec, stored bit depth (FLAC/WAV/AIFF headers), decoder format, DSP stages, volume, resampling, output, and on Linux **what the DAC actually receives** (kernel `hw_params`), including PipeWire's own resampling | Bit depth for WavPack / APE / ALAC isn't read |
 | DSD files (DSF / DFF) | Play as high-rate PCM; signal path says "DSD64 → PCM 352.8 kHz" | No DoP / native output (see above) |
 | Desktop audio engine on macOS | Plays through AVPlayer | Equalizer, crossfeed, leveling, output device, bit-perfect and signal path are Linux/Windows only |
 
 ## Working
 
-Bit-perfect mode (Linux direct ALSA device, Windows WASAPI exclusive), output
+Bit-perfect mode on Linux, **verified on a USB DAC** (KTMicro CDS.KT): it takes
+the card behind the current output over from PipeWire (D-Bus device
+reservation, like JACK) and plays straight to `hw:`; a 24-bit / 96 kHz FLAC
+reaches the DAC as `S24_3LE` at 96 kHz and a CD-quality file as `S16_LE` at
+44.1 kHz, so the sample rate follows each file. The system's default output
+is restored afterwards, and the card is released even if the app is killed
+(`integration_test/zz_dac_test.dart`, opt-in). Also: output
 device picker, output sample-rate override, SoX (VHQ) resampler when
 libswresample has it (high-quality swr settings otherwise), buffer size,
 gapless playback, ReplayGain (track / album), 10-band parametric equalizer
