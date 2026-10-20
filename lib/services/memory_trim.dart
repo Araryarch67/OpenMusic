@@ -10,7 +10,8 @@ import 'dart:io';
 /// Linux (glibc) only; elsewhere this does nothing.
 abstract final class MemoryTrim {
   static final int Function(int)? _trim = () {
-    if (!Platform.isLinux) return null;
+    // Not in widget tests either: their fake clock fails on timers left running.
+    if (!Platform.isLinux || Platform.environment.containsKey('FLUTTER_TEST')) return null;
     try {
       return DynamicLibrary.process().lookupFunction<Int32 Function(IntPtr), int Function(int)>('malloc_trim');
     } catch (_) {
