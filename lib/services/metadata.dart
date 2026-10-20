@@ -4,8 +4,10 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
+import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
 
@@ -218,11 +220,49 @@ abstract final class Metadata {
     }
   }
 
+  /// One connection pool for every cover: a fresh client per image would pay
+  /// a TLS handshake each time.
+  static final _artHttp = http.Client();
+
+  /// Covers of YouTube songs, kept on disk so the next launch paints them
+  /// without the network. Null where there is no cache folder (tests).
+  static final Future<Directory?> _artDir = () async {
+    try {
+      final dir = Directory('${(await getApplicationCacheDirectory()).path}${Platform.pathSeparator}artwork');
+      await dir.create(recursive: true);
+      _pruneArtCache(dir).ignore();
+      return dir;
+    } catch (_) {
+      return null;
+    }
+  }();
+
+  /// Keeps the newest few thousand covers (each ~20-60 KB).
+  static Future<void> _pruneArtCache(Directory dir, {int keep = 3000}) async {
+    final files = await dir.list().where((e) => e is File).cast<File>().toList();
+    if (files.length <= keep) return;
+    final dated = [for (final f in files) (f, (await f.stat()).modified)]..sort((a, b) => b.$2.compareTo(a.$2));
+    for (final (f, _) in dated.skip(keep)) {
+      f.delete().ignore();
+    }
+  }
+
   static Future<Uint8List?> _networkArtwork(String? url) async {
     if (url == null) return null;
+    final dir = await _artDir;
+    final file = dir == null ? null : File('${dir.path}${Platform.pathSeparator}${sha1.convert(url.codeUnits)}');
     try {
-      final res = await http.get(Uri.parse(url));
-      return res.statusCode == 200 ? res.bodyBytes : null;
+      if (file != null && await file.exists()) return await file.readAsBytes();
+    } catch (_) {}
+    try {
+      final res = await _artHttp.get(Uri.parse(url));
+      if (res.statusCode != 200) return null;
+      if (file != null) {
+        // Written aside and renamed, so a half-written cover never gets read.
+        final part = File('${file.path}.part');
+        part.writeAsBytes(res.bodyBytes).then((_) => part.rename(file.path)).ignore();
+      }
+      return res.bodyBytes;
     } catch (_) {
       return null;
     }

@@ -1,11 +1,15 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ytdlp.dart';
 
-/// Finds a YouTube song's audio stream on phones, where there is no yt-dlp.
+/// Finds a YouTube song's audio stream with one request to YouTube's player
+/// API (~0.2 s once warmed up). Desktop falls back to yt-dlp ([best]) when
+/// YouTube refuses it; phones, which have no yt-dlp, to youtube_explode.
 ///
 /// Asks YouTube's player API as the Apple Vision Pro app (`VISIONOS`), the
 /// client yt-dlp itself uses when it can't run JavaScript: its stream URLs
@@ -36,22 +40,91 @@ abstract final class YoutubeStream {
 
   static Future<String?>? _visitor;
   static DateTime? _visitorAt;
+  static const _visitorKey = 'youtube.visitor.v1';
+  static const _visitorLife = Duration(hours: 6);
 
-  /// The visitor id from a watch page, reused for a few hours.
+  /// A visitor id, reused for a few hours, across restarts too (the first
+  /// song after launch then needs no extra request).
   static Future<String?> _visitorData(String videoId, {bool fresh = false}) {
-    final stale = _visitorAt == null || DateTime.now().difference(_visitorAt!) > const Duration(hours: 6);
+    final stale = _visitorAt == null || DateTime.now().difference(_visitorAt!) > _visitorLife;
     if (fresh || stale || _visitor == null) {
       _visitorAt = DateTime.now();
       _visitor = () async {
-        final page = await _http.get(
-          Uri.parse('https://www.youtube.com/watch?v=$videoId&bpctr=9999999999&has_verified=1'),
-          headers: {'user-agent': _pageUa, 'accept-language': 'en-US,en;q=0.9'},
-        );
-        return RegExp(r'"VISITOR_DATA":"([^"]+)"').firstMatch(page.body)?.group(1);
+        if (!fresh) {
+          final saved = await _savedVisitor();
+          if (saved != null) return saved;
+        }
+        final id = await _fetchVisitor(videoId);
+        if (id != null) _saveVisitor(id).ignore();
+        return id;
       }();
       _visitor!.then<void>((_) {}, onError: (Object _) => _visitor = null);
     }
     return _visitor!;
+  }
+
+  static Future<String?> _savedVisitor() async {
+    try {
+      final saved = (await SharedPreferences.getInstance()).getString(_visitorKey)?.split(' ');
+      if (saved == null || saved.length != 2) return null;
+      final at = DateTime.fromMillisecondsSinceEpoch(int.tryParse(saved[0]) ?? 0);
+      if (DateTime.now().difference(at) > _visitorLife) return null;
+      _visitorAt = at;
+      return saved[1];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> _saveVisitor(String id) async =>
+      (await SharedPreferences.getInstance()).setString(_visitorKey, '${DateTime.now().millisecondsSinceEpoch} $id');
+
+  /// InnerTube's visitor_id endpoint (~1 KB); the watch page (~1.4 MB) if that fails.
+  static Future<String?> _fetchVisitor(String videoId) async {
+    try {
+      final res = await _http
+          .post(
+            Uri.parse('https://www.youtube.com/youtubei/v1/visitor_id?prettyPrint=false'),
+            headers: {'content-type': 'application/json', 'user-agent': _pageUa},
+            body: jsonEncode({
+              'context': {
+                'client': {'clientName': 'WEB', 'clientVersion': '2.20251001.00.00', 'hl': 'en'},
+              },
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      final id = ((jsonDecode(res.body) as Map)['responseContext'] as Map?)?['visitorData'];
+      if (res.statusCode == 200 && id is String && id.isNotEmpty) return id;
+    } catch (e) {
+      debugPrint('visitor_id failed, reading the watch page: $e');
+    }
+    final page = await _http.get(
+      Uri.parse('https://www.youtube.com/watch?v=$videoId&bpctr=9999999999&has_verified=1'),
+      headers: {'user-agent': _pageUa, 'accept-language': 'en-US,en;q=0.9'},
+    );
+    return RegExp(r'"VISITOR_DATA":"([^"]+)"').firstMatch(page.body)?.group(1);
+  }
+
+  /// Fetches the visitor id in the background, so the first song starts fast.
+  static void warmUp() => _visitorData('dQw4w9WgXcQ').ignore();
+
+  /// The stream to play or download: the player API first, then yt-dlp where
+  /// there is one (much slower: a process per song, but it keeps up with
+  /// YouTube's changes). Both are cached while the URL is fresh.
+  static Future<ResolvedAudio> best(String videoId) async {
+    try {
+      return await resolve(videoId);
+    } catch (e) {
+      if (!YtDlp.supported) rethrow;
+      debugPrint('YouTube player API failed for $videoId, using yt-dlp: $e');
+      return YtDlp.resolve(videoId);
+    }
+  }
+
+  /// Forget [videoId]'s URL everywhere (e.g. after the server rejected it).
+  static void invalidateEverywhere(String videoId) {
+    invalidate(videoId);
+    if (YtDlp.supported) YtDlp.invalidate(videoId);
   }
 
   static final _resolved = <String, Future<ResolvedAudio>>{};

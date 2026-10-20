@@ -206,12 +206,11 @@ class YoutubeImporter extends ChangeNotifier {
     }
   }
 
-  /// Exact size and quality of what a download would fetch (desktop, via yt-dlp).
-  /// Also warms the cache, so a download started right after skips resolving.
+  /// Exact size and quality of what a download would fetch. Also warms the
+  /// cache, so a download started right after skips resolving.
   Future<({int? size, String quality})?> peekAudio(String videoId) async {
-    if (!YtDlp.supported) return null;
     try {
-      final r = await YtDlp.resolve(videoId);
+      final r = await YoutubeStream.best(videoId);
       return (size: r.size, quality: r.quality);
     } catch (_) {
       return null;
@@ -220,15 +219,12 @@ class YoutubeImporter extends ChangeNotifier {
 
   /// Best audio as (url, size, file extension, quality label).
   Future<({Uri url, int? size, String ext, String quality})> _resolveAudio(String videoId) async {
-    if (YtDlp.supported) {
-      final r = await YtDlp.resolve(videoId);
-      return (url: r.url, size: r.size, ext: r.ext == 'webm' ? 'webm' : 'm4a', quality: r.quality);
-    }
-    // Mobile: YouTube's player API as yt-dlp asks it, then the in-app extractor.
+    // YouTube's player API (yt-dlp on desktop if refused), then the in-app extractor.
     try {
-      final r = await YoutubeStream.resolve(videoId);
+      final r = await YoutubeStream.best(videoId);
       return (url: r.url, size: r.size, ext: r.ext == 'webm' ? 'webm' : 'm4a', quality: r.quality);
     } catch (e) {
+      if (YtDlp.supported) rethrow;
       debugPrint('YouTube stream lookup failed, trying youtube_explode: $e');
     }
     final manifest = await _yt.videos.streams.getManifest(videoId);
@@ -290,7 +286,7 @@ class YoutubeImporter extends ChangeNotifier {
         );
       } catch (_) {
         // A stale cached URL is the usual cause; resolve fresh next time.
-        if (YtDlp.supported) YtDlp.invalidate(job.videoId);
+        YoutubeStream.invalidateEverywhere(job.videoId);
         rethrow;
       }
       await partFile.rename(audioFile.path);

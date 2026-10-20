@@ -60,6 +60,24 @@ class RemotePlaylist {
 
   /// Card subtitle as YouTube Music words it ("Album • Artist").
   final String? subtitle;
+
+  factory RemotePlaylist.fromJson(Map<String, dynamic> j) => RemotePlaylist(
+    id: j['id'] as String,
+    title: j['title'] as String,
+    count: j['count'] as int? ?? 0,
+    thumbnailUrl: j['thumb'] as String?,
+    browseId: j['browseId'] as String?,
+    subtitle: j['subtitle'] as String?,
+  );
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'title': title,
+    'count': count,
+    'thumb': thumbnailUrl,
+    'browseId': browseId,
+    'subtitle': subtitle,
+  };
 }
 
 /// A library playlist opened for viewing, with what's needed to edit it.
@@ -80,9 +98,21 @@ class RemotePlaylistDetails {
 class RemoteShelf {
   const RemoteShelf({required this.title, this.tracks = const [], this.collections = const []});
 
+  factory RemoteShelf.fromJson(Map<String, dynamic> j) => RemoteShelf(
+    title: j['title'] as String,
+    tracks: [for (final t in j['tracks'] as List) Track.fromJson((t as Map).cast())],
+    collections: [for (final c in j['collections'] as List) RemotePlaylist.fromJson((c as Map).cast())],
+  );
+
   final String title;
   final List<Track> tracks;
   final List<RemotePlaylist> collections;
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'tracks': [for (final t in tracks) t.toJson()],
+    'collections': [for (final c in collections) c.toJson()],
+  };
 }
 
 /// A search hit: a song to play ([track]) or an artist / album / playlist to open ([collection]).
@@ -242,7 +272,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
       _web = null;
       _webCookies = _webVisitor = null;
       _library = null;
-      _discover = null;
+      _discover = _discovered = null; // another account's shelves
       accountName = (j['channel'] ?? j['uploader']) as String?;
       if (accountName == 'YouTube Music' || accountName == 'Music') accountName = null;
       await _save();
@@ -282,7 +312,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
       accountName = profile.name ?? accountName;
       avatarUrl = profile.avatarUrl ?? avatarUrl;
       _library = null;
-      _discover = null;
+      _discover = _discovered = null; // another account's shelves
       await _save();
       return true;
     } catch (e) {
@@ -303,15 +333,68 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   Future<List<RemoteShelf>>? _discover;
 
+  /// The shelves to show right now: last session's from disk until today's
+  /// arrive, so Home paints at once on launch. Null before the first load.
+  List<RemoteShelf>? get discovered => _discovered;
+  List<RemoteShelf>? _discovered;
+
   /// Home + Explore + Charts shelves; no sign-in needed. Cached until [refresh].
   Future<List<RemoteShelf>> discover({bool refresh = false}) {
     if (refresh || _discover == null) {
-      final future = _loadDiscover();
+      final first = _discover == null && !refresh;
+      final future = _loadDiscover().then((shelves) {
+        _discovered = shelves;
+        _saveDiscover(shelves).ignore();
+        notifyListeners();
+        return shelves;
+      });
       _discover = future;
       future.then<void>((_) {}, onError: (Object _) => _discover = null);
+      if (first) {
+        // Meanwhile, what the last session showed (same account, under a week old).
+        _cachedDiscover().then((cached) {
+          if (cached == null || _discovered != null) return;
+          _discovered = cached;
+          notifyListeners();
+        }).ignore();
+      }
       if (refresh) notifyListeners();
     }
     return _discover!;
+  }
+
+  String get _discoverOwner => accountName ?? '';
+
+  static Future<File> _discoverFile() async =>
+      File(p.join((await getApplicationSupportDirectory()).path, 'discover-cache.json'));
+
+  Future<List<RemoteShelf>?> _cachedDiscover() async {
+    try {
+      final f = await _discoverFile();
+      if (!await f.exists()) return null;
+      final j = jsonDecode(await f.readAsString()) as Map<String, dynamic>;
+      final at = DateTime.fromMillisecondsSinceEpoch(j['at'] as int);
+      if (j['owner'] != _discoverOwner || DateTime.now().difference(at) > const Duration(days: 7)) return null;
+      return [for (final s in j['shelves'] as List) RemoteShelf.fromJson((s as Map).cast())];
+    } catch (_) {
+      return null; // unreadable or no app folder (tests): just wait for the network
+    }
+  }
+
+  Future<void> _saveDiscover(List<RemoteShelf> shelves) async {
+    try {
+      final f = await _discoverFile();
+      await f.parent.create(recursive: true);
+      final part = File('${f.path}.part');
+      await part.writeAsString(
+        jsonEncode({
+          'owner': _discoverOwner,
+          'at': DateTime.now().millisecondsSinceEpoch,
+          'shelves': [for (final s in shelves) s.toJson()],
+        }),
+      );
+      await part.rename(f.path);
+    } catch (_) {}
   }
 
   Future<List<RemoteShelf>> _loadDiscover() async {
@@ -550,7 +633,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
     _webCookies = _webVisitor = null;
     _webUser = '0';
     _library = null;
-    _discover = null;
+    _discover = _discovered = null; // another account's shelves
     notifyListeners();
     await _save();
     if (hadWebSession) unawaited(_clearWebViewCookies());
@@ -847,9 +930,23 @@ class YoutubeMusicAccount extends ChangeNotifier {
     return _webTracks(rows.where((r) => r.videoId != seed.videoId).toList());
   }
 
+  /// Public albums and playlists opened lately: going back to one, or
+  /// opening it again, shows it at once. (Library playlists can be edited,
+  /// so those are always fetched.)
+  final _publicPages = <String, (DateTime, Future<List<Track>>)>{};
+
   /// Songs of a playlist from the library or of a public album / playlist.
   Future<List<Track>> collectionTracks(RemotePlaylist p) async {
-    if (p.browseId != null) return _webTracks(await _browseClient.browseTracks(p.browseId!, limit: _maxItems));
+    final browseId = p.browseId;
+    if (browseId != null) {
+      final hit = _publicPages[browseId];
+      if (hit != null && DateTime.now().difference(hit.$1) < const Duration(minutes: 30)) return hit.$2;
+      final future = _browseClient.browseTracks(browseId, limit: _maxItems).then(_webTracks);
+      _publicPages[browseId] = (DateTime.now(), future);
+      if (_publicPages.length > 50) _publicPages.remove(_publicPages.keys.first);
+      future.then<void>((_) {}, onError: (Object _) => _publicPages.remove(browseId)); // retry next time
+      return future;
+    }
     return playlistTracks(p.id);
   }
 

@@ -16,4 +16,4 @@ sleep 1
 env -u DISPLAY WAYLAND_DISPLAY=om-perf GDK_BACKEND=wayland XDG_DATA_HOME="$scratch" \
   flutter drive --profile -d linux \
   --driver=test_driver/integration_test.dart \
-  --target=integration_test/performance_test.dart "$@" 2>&1 | grep -E "PERF|Expected|Actual|Which|reason|All tests|Some tests|failed"
+  --target=integration_test/performance_test.dart "$@" 2>&1 | grep -E "PERF|LATENCY|Expected|Actual|Which|reason|All tests|Some tests|failed"

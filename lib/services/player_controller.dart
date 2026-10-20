@@ -18,11 +18,12 @@ import 'youtube_audio_source.dart';
 import 'youtube_music_account.dart';
 import 'youtube_importer.dart';
 import 'youtube_stream.dart';
-import 'ytdlp.dart';
 
 /// Owns the audio player, the library and the play queue.
 class PlayerController extends ChangeNotifier {
   PlayerController() {
+    // The first YouTube song then needs one request, not two.
+    YoutubeStream.warmUp();
     _subs.add(
       // just_audio re-emits the sequence state with every position update
       // (several times a second); only a real queue / song change matters here.
@@ -191,7 +192,7 @@ class PlayerController extends ChangeNotifier {
   }
 
   /// Looks up the stream of the next two songs ahead of time, so skipping
-  /// to a YouTube song doesn't wait on yt-dlp. Cached, so repeats are free.
+  /// to a YouTube song doesn't wait. Cached, so repeats are free.
   void _prefetchNext() {
     final seq = player.sequenceState;
     final at = seq.currentIndex;
@@ -202,9 +203,9 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
-  /// Looks a song's stream up in advance (cached), so it starts right away.
-  static void _resolveAhead(String videoId) =>
-      (YtDlp.supported ? YtDlp.resolve(videoId) : YoutubeStream.resolve(videoId)).ignore();
+  /// Looks a song's stream up in advance and fetches its first seconds, so it
+  /// starts right away.
+  static void _resolveAhead(String videoId) => YoutubeAudioSource.preload(videoId).ignore();
 
   /// Whether the play button has something to start: the queue, or the local library.
   bool get canPlay => player.audioSources.isNotEmpty || _library.isNotEmpty;

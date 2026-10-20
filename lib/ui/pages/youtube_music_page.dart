@@ -224,68 +224,80 @@ class DiscoverShelves extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = PlayerScope.read(context);
     final text = Theme.of(context).textTheme;
-    return FutureBuilder<List<RemoteShelf>>(
-      future: c.ytMusic.discover(),
-      builder: (context, snap) {
-        if (snap.connectionState != ConnectionState.done) {
-          return const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.all(48),
-              child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
-            ),
-          );
-        }
-        if (snap.hasError) {
-          return SliverToBoxAdapter(
-            child: _Narrow(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 24),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Couldn\'t load YouTube Music: ${snap.error}',
-                      style: text.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.error),
+    return ListenableBuilder(
+      listenable: c.ytMusic,
+      builder: (context, _) {
+        // Last session's shelves (or today's) at once; no spinner on launch.
+        final now = c.ytMusic.discovered;
+        if (now != null) return _shelves(context, c, now);
+        return FutureBuilder<List<RemoteShelf>>(
+          future: c.ytMusic.discover(),
+          builder: (context, snap) {
+            if (snap.connectionState != ConnectionState.done) {
+              return const SliverToBoxAdapter(
+                child: Padding(
+                  padding: EdgeInsets.all(48),
+                  child: Center(child: CircularProgressIndicator(strokeWidth: 2.5)),
+                ),
+              );
+            }
+            if (snap.hasError) {
+              return SliverToBoxAdapter(
+                child: _Narrow(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 24),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Couldn\'t load YouTube Music: ${snap.error}',
+                          style: text.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.error),
+                        ),
+                        const SizedBox(height: 8),
+                        TextButton(onPressed: () => c.ytMusic.discover(refresh: true), child: const Text('Try again')),
+                      ],
                     ),
-                    const SizedBox(height: 8),
-                    TextButton(onPressed: () => c.ytMusic.discover(refresh: true), child: const Text('Try again')),
-                  ],
+                  ),
                 ),
-              ),
-            ),
-          );
-        }
-        return SliverList.list(
-          children: [
-            for (final (si, shelf) in snap.data!.indexed)
-              FadeIn(
-                delay: Duration(milliseconds: 70 * (si < 5 ? si : 5)),
-                child: Shelf(
-                  title: shelf.title,
-                  cards: [
-                    for (final (i, t) in shelf.tracks.indexed)
-                      MediaCard(
-                        track: t,
-                        title: t.title,
-                        subtitle: t.artist,
-                        online: !PlayerScope.read(context).isOffline(t),
-                        onTap: () => c.playList(shelf.tracks, i, from: shelf.title),
-                        onPlay: () => c.playList(shelf.tracks, i, from: shelf.title),
-                      ),
-                    for (final p in shelf.collections)
-                      MediaCard(
-                        track: playlistCover(p),
-                        title: p.title,
-                        subtitle: p.subtitle ?? 'Playlist',
-                        online: true,
-                        onTap: () => openRemotePlaylist(context, p),
-                      ),
-                  ],
-                ),
-              ),
-          ],
+              );
+            }
+            return _shelves(context, c, snap.data!);
+          },
         );
       },
+    );
+  }
+
+  Widget _shelves(BuildContext context, PlayerController c, List<RemoteShelf> shelves) {
+    return SliverList.list(
+      children: [
+        for (final (si, shelf) in shelves.indexed)
+          FadeIn(
+            delay: Duration(milliseconds: 70 * (si < 5 ? si : 5)),
+            child: Shelf(
+              title: shelf.title,
+              cards: [
+                for (final (i, t) in shelf.tracks.indexed)
+                  MediaCard(
+                    track: t,
+                    title: t.title,
+                    subtitle: t.artist,
+                    online: !PlayerScope.read(context).isOffline(t),
+                    onTap: () => c.playList(shelf.tracks, i, from: shelf.title),
+                    onPlay: () => c.playList(shelf.tracks, i, from: shelf.title),
+                  ),
+                for (final p in shelf.collections)
+                  MediaCard(
+                    track: playlistCover(p),
+                    title: p.title,
+                    subtitle: p.subtitle ?? 'Playlist',
+                    online: true,
+                    onTap: () => openRemotePlaylist(context, p),
+                  ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }
