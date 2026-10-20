@@ -56,9 +56,19 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 add_subdirectory("runner")
 
 
+# Plugins written before CMake 3.31 pass add_custom_command() arguments it now
+# warns about (CMP0175); keep the old behaviour without the noise.
+set(CMAKE_POLICY_DEFAULT_CMP0175 OLD)
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+
+# Third-party plugin code built at /W4: silence the warnings that aren't ours
+# to fix (shadowed members, int64 -> int in flutter_inappwebview).
+if(TARGET flutter_inappwebview_windows_plugin)
+  target_compile_options(flutter_inappwebview_windows_plugin PRIVATE /wd4458 /wd4244)
+endif()
 
 
 # === Installation ===
