@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=OpenMusic
+GenericName=Music Player
+Comment=Your own music and YouTube Music, with hi-fi audio
+Exec=openmusic %U
+Icon=openmusic
+Terminal=false
+Categories=AudioVideo;Audio;Player;
+Keywords=music;player;youtube;flac;hi-fi;
+StartupWMClass=dev.openmusic.openmusic
