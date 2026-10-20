@@ -77,7 +77,8 @@ class _PageScaffoldState extends State<PageScaffold> {
             slivers: [
               SliverToBoxAdapter(child: SizedBox(height: topInset + (showBar ? barHeight : 8))),
               ...widget.slivers,
-              const SliverToBoxAdapter(child: SizedBox(height: 32)),
+              // Clears the phone's floating player and tab bar.
+              SliverToBoxAdapter(child: SizedBox(height: 32 + MediaQuery.paddingOf(context).bottom)),
             ],
           ),
           // Sticky top bar.

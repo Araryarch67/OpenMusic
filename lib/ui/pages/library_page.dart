@@ -208,7 +208,7 @@ class _LibraryListState extends State<LibraryList> {
             child: SmoothScroll(
               builder: (context, scroll) => ListView(
                 controller: scroll,
-                padding: EdgeInsets.fromLTRB(8, 0, 8, widget.dense ? 8 : 16),
+                padding: EdgeInsets.fromLTRB(8, 0, 8, (widget.dense ? 8 : 16) + MediaQuery.paddingOf(context).bottom),
                 children: rows,
               ),
             ),

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../services/audio_engine.dart';
 import '../services/player_controller.dart';
 import 'shell_scope.dart';
 import 'theme.dart';
@@ -14,10 +15,67 @@ import 'widgets/track_row.dart';
 import 'widgets/smooth_scroll.dart';
 
 /// Floating bar above the bottom tabs on phones, tinted with the cover colour.
-class MiniPlayer extends StatelessWidget {
+/// Swipe sideways to change song, down to close; long-press for more.
+class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key, required this.onOpen});
 
   final VoidCallback onOpen;
+
+  @override
+  State<MiniPlayer> createState() => _MiniPlayerState();
+}
+
+class _MiniPlayerState extends State<MiniPlayer> {
+  /// How far the song is being dragged sideways.
+  final _drag = ValueNotifier<double>(0);
+
+  @override
+  void dispose() {
+    _drag.dispose();
+    super.dispose();
+  }
+
+  void _endDrag(PlayerController c, DragEndDetails d) {
+    final v = d.primaryVelocity ?? 0;
+    final dx = _drag.value;
+    _drag.value = 0;
+    if (dx < -72 || v < -600) {
+      c.next();
+    } else if (dx > 72 || v > 600) {
+      c.previous();
+    }
+  }
+
+  void _more(BuildContext context, PlayerController c) {
+    final shell = ShellScope.of(context);
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: AppColors.elevated,
+      showDragHandle: true,
+      builder: (sheet) {
+        Widget item(IconData icon, String label, VoidCallback onTap) => ListTile(
+          leading: Icon(icon),
+          title: Text(label),
+          onTap: () {
+            Navigator.of(sheet).pop();
+            onTap();
+          },
+        );
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              item(Icons.queue_music_rounded, 'Queue', shell.openQueue),
+              item(Icons.lyrics_outlined, 'Lyrics', shell.openLyrics),
+              if (AudioEngine.supported) item(Icons.graphic_eq_rounded, 'Signal path', () => showSignalPath(context)),
+              item(Icons.close_rounded, 'Close player', c.closePlayer),
+            ],
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -27,63 +85,100 @@ class MiniPlayer extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     return AccentBuilder(
       track: track,
-      // Swipe it sideways to close, like other music apps.
       builder: (context, accent) => Dismissible(
-        key: ValueKey('mini-${track.id}'),
-        direction: DismissDirection.horizontal,
+        key: const ValueKey('mini-player'),
+        direction: DismissDirection.down,
         onDismissed: (_) => c.closePlayer(),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
           child: Material(
-            color: Color.lerp(accent, Colors.black, 0.35),
+            color: Color.lerp(accent, Colors.black, 0.45),
             borderRadius: BorderRadius.circular(8),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
-              onTap: onOpen,
+              onTap: widget.onOpen,
+              onLongPress: () => _more(context, c),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(8, 8, 4, 6),
+                    padding: const EdgeInsets.fromLTRB(8, 8, 2, 6),
                     child: Row(
                       children: [
-                        Hero(
-                          tag: 'now-playing-art',
-                          child: Artwork(track: track, size: 40),
-                        ),
-                        const SizedBox(width: 10),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                track.title,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onHorizontalDragUpdate: (d) => _drag.value += d.delta.dx,
+                            onHorizontalDragEnd: (d) => _endDrag(c, d),
+                            onHorizontalDragCancel: () => _drag.value = 0,
+                            child: ValueListenableBuilder<double>(
+                              valueListenable: _drag,
+                              builder: (context, dx, child) => Transform.translate(
+                                offset: Offset(dx, 0),
+                                child: Opacity(opacity: (1 - dx.abs() / 240).clamp(0.3, 1), child: child),
                               ),
-                              Text(
-                                track.artist,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: text.bodySmall?.copyWith(color: Colors.white70),
+                              child: _TrackSwitcher(
+                                trackId: track.id,
+                                slide: false,
+                                child: Row(
+                                  key: ValueKey(track.id),
+                                  children: [
+                                    Hero(
+                                      tag: 'now-playing-art',
+                                      child: Artwork(track: track, size: 40, radius: 4),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            track.title,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: text.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
+                                          ),
+                                          Text(
+                                            track.artist,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: text.bodySmall?.copyWith(color: Colors.white70),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
-                            ],
+                            ),
                           ),
                         ),
-                        IconButton(
-                          tooltip: c.isPlaying ? 'Pause' : 'Play',
-                          color: Colors.white,
-                          iconSize: 30,
-                          onPressed: c.togglePlay,
-                          icon: Icon(c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                        LikeButton(track: track, size: 24, color: Colors.white),
+                        SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: c.isBuffering
+                              ? const Center(
+                                  child: SizedBox.square(
+                                    dimension: 22,
+                                    child: CircularProgressIndicator(strokeWidth: 2.2, color: Colors.white),
+                                  ),
+                                )
+                              : IconButton(
+                                  tooltip: c.isPlaying ? 'Pause' : 'Play',
+                                  color: Colors.white,
+                                  iconSize: 30,
+                                  padding: EdgeInsets.zero,
+                                  onPressed: c.togglePlay,
+                                  icon: Icon(c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded),
+                                ),
                         ),
                         IconButton(
-                          tooltip: 'Close player',
-                          color: Colors.white70,
-                          iconSize: 22,
-                          onPressed: c.closePlayer,
-                          icon: const Icon(Icons.close_rounded),
+                          tooltip: 'Next',
+                          color: Colors.white,
+                          iconSize: 26,
+                          onPressed: c.player.hasNext ? c.next : null,
+                          icon: const Icon(Icons.skip_next_rounded),
                         ),
                       ],
                     ),

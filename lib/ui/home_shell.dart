@@ -285,6 +285,8 @@ class _HomeShellState extends State<HomeShell> {
       _contentWidth = width;
       body = _scoped(
         Scaffold(
+          // Pages scroll on under the see-through tab bar; they pad their ends by its height.
+          extendBody: true,
           // The desktop history stays alive (hidden) while the window is narrow,
           // so widening it again returns to the same page.
           body: Stack(
