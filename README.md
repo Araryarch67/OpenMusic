@@ -19,7 +19,6 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 
 - [Features](#features)
 - [Screenshots](#screenshots)
-- [Install](#install)
 - [Build from source](#build-from-source)
 - [YouTube Music](#youtube-music)
 - [Audio](#audio)
@@ -30,20 +29,24 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 
 ## Features
 
-- **One library.** Files on your device, your playlists and YouTube Music show up together in Home, Search and Library. YouTube Music songs carry a small cloud (they stream). Everything else plays offline, including YouTube songs you've downloaded.
-- **Your music.** Reads tags and cover art from FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD (DSF/DFF) and more. Groups albums and artists, splits cue sheets and shows multi-disc albums. Includes a tag editor that keeps ReplayGain and custom tags.
-- **YouTube Music, no account needed.** Home, charts, search and radio work signed out. Press **Sign in with Google** to add your liked songs, playlists and history. You can like songs and create, rename and delete playlists, and add or remove their songs, right from the app.
-- **Search that answers while you type.** Suggestions and direct hits (artists, songs, albums) drop down under the search box, recent searches come back when it's empty, and results split into Songs, Artists, Albums and Playlists with a top result first.
-- **Follow artists.** Artists you follow on YouTube Music show up in your library; follow or unfollow from any artist page.
-- **Playlists.** OpenMusic playlists live on your device and can mix your own files with YouTube Music songs.
-- **Autoplay.** When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song.
-- **Synced lyrics** that follow the song line by line: YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net) or [Better Lyrics](https://betterlyrics.org). Click a line to jump to it.
-- **Hi-fi audio** with a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio).
-- **Downloads.** Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves.
-- **Made for every screen.** Bottom tabs and a mini player on phones, a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward, mouse side buttons, `Alt+←/→`.
-- **Full-screen and mini player** on desktop (`F11`, `Esc`), like Spotify's: the cover fills the screen, or the window shrinks to a small always-on-top player.
-- **System media controls**: the Android notification and lock screen, Control Center on iOS / macOS, and MPRIS on Linux (desktop media widgets, `playerctl`).
-- **Discord Rich Presence**, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+V` to import a copied YouTube link).
+| Feature | What you get |
+|---|---|
+| **One library** | Files on your device, your playlists and YouTube Music show up together in Home, Search and Library. YouTube Music songs carry a small cloud (they stream). Everything else plays offline, including YouTube songs you've downloaded. |
+| **Your music** | Reads tags and cover art from FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD (DSF/DFF) and more. Groups albums and artists, splits cue sheets and shows multi-disc albums. Includes a tag editor that keeps ReplayGain and custom tags. |
+| **YouTube Music, no account needed** | Home, charts, search and radio work signed out. Press **Sign in with Google** to add your liked songs, playlists and history. You can like songs and create, rename and delete playlists, and add or remove their songs, right from the app. |
+| **Search that answers while you type** | Suggestions and direct hits (artists, songs, albums) drop down under the search box, recent searches come back when it's empty, and results split into Songs, Artists, Albums and Playlists with a top result first. |
+| **Follow artists** | Artists you follow on YouTube Music show up in your library; follow or unfollow from any artist page. |
+| **Playlists** | OpenMusic playlists live on your device and can mix your own files with YouTube Music songs. |
+| **Autoplay** | When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song. |
+| **Synced lyrics** | Follow the song line by line, from YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net) or [Better Lyrics](https://betterlyrics.org). Click a line to jump to it. |
+| **Hi-fi audio** | On desktop and Android: a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio). |
+| **Fast** | YouTube songs start in about 0.3 s and the next one in the queue in under 20 ms (it's fetched ahead); Home appears at once on launch from the last session's shelves. Light on memory too: about 165 MB at rest on Linux. |
+| **Make it yours** | Pick an accent colour, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, set the text size, and on Linux make the window see-through so your compositor's blur shows behind it. |
+| **Downloads** | Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves. |
+| **Made for every screen** | Bottom tabs and a floating mini player on phones (swipe it to change song), a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward, mouse side buttons, `Alt+←/→`. |
+| **Full-screen and mini player** | On desktop (`F11`, `Esc`), like Spotify's: the cover fills the screen, or the window shrinks to a small always-on-top player. |
+| **System media controls** | The Android notification and lock screen, Control Center on iOS / macOS, and MPRIS on Linux (desktop media widgets, `playerctl`). |
+| **Discord, media keys, shortcuts** | Discord Rich Presence, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+V` to import a copied YouTube link). |
 
 ## Screenshots
 
@@ -56,27 +59,6 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 | ![Full-screen player](docs/screenshots/fullscreen.webp) | ![Settings](docs/screenshots/settings.webp) |
 | **Signal path** | **On a phone** |
 | ![Signal path](docs/screenshots/signal-path.webp) | <img src="docs/screenshots/phone.webp" alt="Phone" width="280"> |
-
-## Install
-
-Download the latest build from [Releases](https://github.com/Araryarch67/OpenMusic/releases/latest):
-
-| System | File |
-|---|---|
-| Android | `OpenMusic-android.apk` (or the smaller `-arm64` one for most phones) |
-| Windows | `OpenMusic-windows-x64-setup.exe` (installer), or `OpenMusic-windows-x64.zip` to run without installing |
-| Linux | `OpenMusic-linux-x86_64.AppImage` (any distro), `OpenMusic-linux-amd64.deb` (Debian / Ubuntu), or `OpenMusic-linux-x64.tar.gz` (needs the packages below) |
-
-iOS and macOS builds aren't published yet; [build from source](#build-from-source) there.
-
-### Linux runtime requirements
-
-| Package (Arch) | Debian / Ubuntu | What for |
-|---|---|---|
-| `mpv` | `libmpv2` | Audio playback |
-| `webkit2gtk-4.1` | `libwebkit2gtk-4.1-0` | The *Sign in with Google* window (optional) |
-| `yt-dlp` | `yt-dlp` | YouTube streaming (optional: downloaded automatically if missing) |
-| `ffmpeg` | `ffmpeg` | Editing tags of non-FLAC files (optional) |
 
 ## Build from source
 
