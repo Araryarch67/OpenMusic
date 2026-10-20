@@ -32,6 +32,16 @@ static void my_application_activate(GApplication* application) {
 
   gtk_window_set_default_size(window, 1280, 800);
 
+  // An alpha channel, so Settings › Appearance › Window opacity can let the
+  // desktop show through (and a compositor blur it). The app paints its own
+  // background, opaque unless that setting is below 100%.
+  GdkScreen* screen = gtk_window_get_screen(window);
+  GdkVisual* rgba = gdk_screen_get_rgba_visual(screen);
+  if (rgba != nullptr && gdk_screen_is_composited(screen)) {
+    gtk_widget_set_visual(GTK_WIDGET(window), rgba);
+    gtk_widget_set_app_paintable(GTK_WIDGET(window), TRUE);
+  }
+
   // App icon, installed next to the bundle's other data (linux/CMakeLists.txt).
   g_autofree gchar* exe = g_file_read_link("/proc/self/exe", nullptr);
   if (exe != nullptr) {
@@ -47,9 +57,8 @@ static void my_application_activate(GApplication* application) {
 
   FlView* view = fl_view_new(project);
   GdkRGBA background_color;
-  // Background defaults to black, override it here if necessary, e.g. #00000000
-  // for transparent.
-  gdk_rgba_parse(&background_color, "#000000");
+  // Transparent: Flutter paints the window background (see above).
+  gdk_rgba_parse(&background_color, "#00000000");
   fl_view_set_background_color(view, &background_color);
   gtk_widget_show(GTK_WIDGET(view));
   gtk_container_add(GTK_CONTAINER(window), GTK_WIDGET(view));

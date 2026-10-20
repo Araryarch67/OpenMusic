@@ -1,9 +1,11 @@
 import 'dart:typed_data';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
 import '../../models/track.dart';
+import '../../services/appearance.dart';
 import '../../services/metadata.dart';
 import '../../services/player_controller.dart';
 import '../theme.dart';
@@ -99,10 +101,14 @@ class AccentBuilder extends StatelessWidget {
   final Track? track;
   final Widget Function(BuildContext context, Color accent) builder;
 
+  /// Stands in for the cover's colour when cover colours are off.
+  static const neutral = Color(0xFF3A3A3A);
+
   @override
   Widget build(BuildContext context) {
     final t = track;
     if (t == null) return builder(context, AppColors.elevated);
+    if (!Appearance.instance.coverColors) return builder(context, neutral);
     final cached = Metadata.cachedAccent(t);
     if (cached != null) return builder(context, cached);
     return FutureBuilder<Color>(
@@ -114,11 +120,13 @@ class AccentBuilder extends StatelessWidget {
 
 /// Animated "now playing" bars.
 class EqualizerIcon extends StatefulWidget {
-  const EqualizerIcon({super.key, required this.playing, this.size = 16, this.color = AppColors.accent});
+  const EqualizerIcon({super.key, required this.playing, this.size = 16, this.color});
 
   final bool playing;
   final double size;
-  final Color color;
+
+  /// The accent colour when null.
+  final Color? color;
 
   @override
   State<EqualizerIcon> createState() => _EqualizerIconState();
@@ -161,7 +169,10 @@ class _EqualizerIconState extends State<EqualizerIcon> with SingleTickerProvider
               Container(
                 width: widget.size / 6,
                 height: widget.size * (widget.playing ? 0.25 + 0.75 * (((_anim.value + p) % 1) - 0.5).abs() * 2 : 0.3),
-                decoration: BoxDecoration(color: widget.color, borderRadius: BorderRadius.circular(1)),
+                decoration: BoxDecoration(
+                  color: widget.color ?? AppColors.accent,
+                  borderRadius: BorderRadius.circular(1),
+                ),
               ),
           ],
         ),
@@ -459,7 +470,7 @@ class ModeButton extends StatelessWidget {
             child: Container(
               width: 4,
               height: 4,
-              decoration: const BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
+              decoration: BoxDecoration(color: AppColors.accent, shape: BoxShape.circle),
             ),
           ),
       ],
@@ -711,4 +722,32 @@ class SourceMark extends StatelessWidget {
       color: online ? AppColors.textSecondary : AppColors.accent,
     ),
   );
+}
+
+/// A panel that turns to frosted glass when that's on in Settings ›
+/// Appearance: what scrolls behind shows through, blurred.
+class GlassPanel extends StatelessWidget {
+  const GlassPanel({super.key, required this.color, required this.child, this.borderRadius = BorderRadius.zero});
+
+  final Color color;
+  final BorderRadius borderRadius;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final look = Appearance.instance;
+    if (!look.glass) {
+      return Material(color: color, borderRadius: borderRadius, clipBehavior: Clip.antiAlias, child: child);
+    }
+    return ClipRRect(
+      borderRadius: borderRadius,
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: look.blur, sigmaY: look.blur),
+        child: Material(
+          color: color.withValues(alpha: color.a * 0.55),
+          child: child,
+        ),
+      ),
+    );
+  }
 }

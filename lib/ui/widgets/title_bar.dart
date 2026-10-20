@@ -73,7 +73,7 @@ class _AppTitleBarState extends State<AppTitleBar> with WindowListener {
                 padding: EdgeInsets.only(left: Platform.isMacOS ? 80 : 14),
                 child: Row(
                   children: [
-                    const Icon(Icons.graphic_eq_rounded, size: 16, color: AppColors.accent),
+                    Icon(Icons.graphic_eq_rounded, size: 16, color: AppColors.accent),
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(

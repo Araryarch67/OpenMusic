@@ -79,7 +79,7 @@ class OptionPicker<T> extends StatelessWidget {
             ),
             leadingIcon: SizedBox(
               width: 20,
-              child: v == value ? const Icon(Icons.check_rounded, size: 18, color: AppColors.accent) : null,
+              child: v == value ? Icon(Icons.check_rounded, size: 18, color: AppColors.accent) : null,
             ),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 300),

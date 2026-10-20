@@ -11,6 +11,7 @@ import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/page_scaffold.dart';
 import '../../services/audio_engine.dart';
+import 'appearance_settings.dart';
 import 'sound_settings.dart';
 import 'youtube_music_page.dart';
 
@@ -50,6 +51,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final muted = settingsMuted(context);
     final sections = [
       _Section.account,
+      _Section.appearance,
       _Section.playback,
       if (AudioEngine.supported) _Section.advanced,
       _Section.downloads,
@@ -89,6 +91,7 @@ class _SettingsPageState extends State<SettingsPage> {
           );
         },
       ),
+      _Section.appearance => const AppearanceSettings(),
       _Section.playback => const PlaybackSettings(),
       _Section.advanced => const AdvancedAudioSettings(),
       _Section.downloads => SettingsCard(
@@ -176,6 +179,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
 enum _Section {
   account('Account', Icons.person_outline_rounded),
+  appearance('Appearance', Icons.palette_outlined),
   playback('Playback', Icons.play_circle_outline_rounded),
   advanced('Hi-fi audio', Icons.tune_rounded),
   downloads('Downloads', Icons.download_rounded),

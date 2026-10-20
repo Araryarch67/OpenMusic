@@ -3,10 +3,14 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../services/appearance.dart';
+
 /// Colour tokens for the dark, streaming-app look.
 abstract final class AppColors {
-  static const background = Color(0xFF000000);
-  static const panel = Color(0xFF121212);
+  /// Window and panel backgrounds; see-through when the window opacity
+  /// setting is below 100%.
+  static Color get background => const Color(0xFF000000).withValues(alpha: Appearance.instance.windowOpacity);
+  static Color get panel => const Color(0xFF121212).withValues(alpha: Appearance.instance.windowOpacity);
   static const elevated = Color(0xFF1C1C1C);
   static const hover = Color(0xFF2A2A2A);
 
@@ -16,8 +20,8 @@ abstract final class AppColors {
   static const textPrimary = Color(0xFFFFFFFF);
   static const textSecondary = Color(0xFFA7A7A7);
   static const textMuted = Color(0xFF6E6E6E);
-  static const accent = Color(0xFF2EE6C5);
-  static const onAccent = Color(0xFF00201B);
+  static Color get accent => Appearance.instance.accent.color;
+  static Color get onAccent => Appearance.instance.accent.onColor;
 }
 
 bool get _desktop => Platform.isLinux || Platform.isWindows || Platform.isMacOS;

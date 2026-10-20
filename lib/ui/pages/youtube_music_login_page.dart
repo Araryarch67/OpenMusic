@@ -81,7 +81,7 @@ JSON.stringify((() => {
               ),
             ),
           ),
-          if (_loading) const LinearProgressIndicator(minHeight: 2, backgroundColor: AppColors.panel),
+          if (_loading) LinearProgressIndicator(minHeight: 2, backgroundColor: AppColors.panel),
           if (_error != null)
             Container(
               width: double.infinity,

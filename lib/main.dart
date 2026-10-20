@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
+import 'services/appearance.dart';
 import 'services/media_session.dart';
 import 'services/player_controller.dart';
 import 'ui/home_shell.dart';
@@ -22,14 +23,16 @@ Future<void> main() async {
   // Android too: libmpv gives it the equalizer, ReplayGain, gapless, the
   // signal path and decoders (ALAC, WavPack, DSD) that ExoPlayer lacks.
   JustAudioMediaKit.ensureInitialized(linux: true, windows: true, android: true);
+  await Appearance.instance.load();
 
   if (hasCustomTitleBar) {
     await windowManager.ensureInitialized();
     await windowManager.waitUntilReadyToShow(
-      const WindowOptions(
+      WindowOptions(
         title: 'OpenMusic',
-        minimumSize: Size(320, 420),
-        backgroundColor: AppColors.background,
+        minimumSize: const Size(320, 420),
+        // Linux: the window has an alpha channel; Flutter paints the background.
+        backgroundColor: Platform.isLinux ? Colors.transparent : AppColors.background,
         titleBarStyle: TitleBarStyle.hidden,
       ),
       () async {
@@ -61,7 +64,7 @@ Future<void> _logErrorsToFile() async {
   };
 }
 
-class OpenMusicApp extends StatelessWidget {
+class OpenMusicApp extends StatefulWidget {
   const OpenMusicApp({super.key, required this.controller, this.theme});
 
   final PlayerController controller;
@@ -70,18 +73,60 @@ class OpenMusicApp extends StatelessWidget {
   final ThemeData? theme;
 
   @override
+  State<OpenMusicApp> createState() => _OpenMusicAppState();
+}
+
+class _OpenMusicAppState extends State<OpenMusicApp> {
+  final _appearance = Appearance.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _appearance.addListener(_restyle);
+  }
+
+  @override
+  void dispose() {
+    _appearance.removeListener(_restyle);
+    super.dispose();
+  }
+
+  /// Widgets read [AppColors] directly rather than through an inherited
+  /// widget, so a new accent or opacity repaints the whole tree (state kept).
+  void _restyle() {
+    setState(() {});
+    void rebuild(Element e) {
+      e.markNeedsBuild();
+      e.visitChildren(rebuild);
+    }
+
+    (context as Element).visitChildren(rebuild);
+  }
+
+  @override
   Widget build(BuildContext context) {
     // Decoded images: covers are decoded at their on-screen size, so 40 MiB
     // still holds a few hundred (Flutter's default is 100 MiB).
     PaintingBinding.instance.imageCache.maximumSizeBytes = 40 << 20;
+    final theme = widget.theme ?? buildAppTheme();
     return PlayerScope(
-      controller: controller,
+      controller: widget.controller,
       child: MaterialApp(
         title: 'OpenMusic',
         debugShowCheckedModeBanner: false,
-        theme: theme ?? buildAppTheme(),
-        // The title bar sits above every route (including full-screen ones like Now Playing).
-        builder: hasCustomTitleBar ? (context, child) => _DesktopFrame(child: child!) : null,
+        // On desktop the frame paints the (maybe see-through) window
+        // background once; pages on top mustn't stack a second layer.
+        theme: hasCustomTitleBar ? theme.copyWith(scaffoldBackgroundColor: Colors.transparent) : theme,
+        builder: (context, child) {
+          final scaled = MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              textScaler: TextScaler.linear(MediaQuery.textScalerOf(context).scale(1) * _appearance.textScale),
+            ),
+            child: child!,
+          );
+          // The title bar sits above every route (including full-screen ones like Now Playing).
+          return hasCustomTitleBar ? _DesktopFrame(child: scaled) : scaled;
+        },
         home: const HomeShell(),
       ),
     );

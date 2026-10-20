@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../services/appearance.dart';
 import '../services/audio_engine.dart';
 import '../services/player_controller.dart';
 import 'shell_scope.dart';
@@ -91,10 +93,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
         onDismissed: (_) => c.closePlayer(),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 6),
-          child: Material(
-            color: Color.lerp(accent, Colors.black, 0.45),
+          child: GlassPanel(
+            color: Color.lerp(accent, Colors.black, 0.45)!,
             borderRadius: BorderRadius.circular(8),
-            clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: widget.onOpen,
               onLongPress: () => _more(context, c),
@@ -490,6 +491,7 @@ class NowPlayingPage extends StatelessWidget {
     final c = PlayerScope.of(context);
     final text = Theme.of(context).textTheme;
     final track = c.currentTrack;
+    final look = Appearance.instance.nowPlaying;
     return AccentBuilder(
       track: track,
       builder: (context, accent) => GestureDetector(
@@ -498,124 +500,152 @@ class NowPlayingPage extends StatelessWidget {
         },
         child: Scaffold(
           backgroundColor: AppColors.background,
-          body: AnimatedContainer(
-            duration: const Duration(milliseconds: 500),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [accent, Color.lerp(accent, Colors.black, 0.75)!, Colors.black],
-                stops: const [0, 0.6, 1],
-              ),
-            ),
-            child: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  // Leave room for the controls; never let the cover push them off-screen.
-                  // On very short windows the cover (then the quality badge) makes way.
-                  final showBadge = constraints.maxHeight >= 480;
-                  final room = constraints.maxHeight - (showBadge ? 376 : 340);
-                  final art = math.min(constraints.maxWidth - 48, room);
-                  final narrow = constraints.maxWidth < 320;
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            IconButton(
-                              tooltip: 'Close',
-                              color: Colors.white,
-                              onPressed: () => Navigator.of(context).pop(),
-                              icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
-                            ),
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  Text(
-                                    'PLAYING FROM',
-                                    style: text.labelSmall?.copyWith(letterSpacing: 1.2, color: Colors.white70),
-                                  ),
-                                  Text(
-                                    c.playingFrom ?? 'Your library',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            if (!narrow)
-                              IconButton(
-                                tooltip: 'Lyrics',
-                                color: Colors.white,
-                                onPressed: ShellScope.of(context).openLyrics,
-                                icon: const Icon(Icons.lyrics_outlined),
-                              ),
-                            IconButton(
-                              tooltip: 'Queue',
-                              color: Colors.white,
-                              onPressed: ShellScope.of(context).openQueue,
-                              icon: const Icon(Icons.queue_music_rounded),
-                            ),
-                          ],
-                        ),
-                        const Spacer(),
-                        if (art >= 96)
-                          Hero(
-                            tag: 'now-playing-art',
-                            child: DecoratedBox(
-                              decoration: const BoxDecoration(
-                                boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12))],
-                              ),
-                              child: Artwork(track: track, size: art, radius: 8),
-                            ),
-                          ),
-                        const Spacer(),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    track?.title ?? 'Nothing playing',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: text.headlineSmall?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      letterSpacing: -0.5,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    track?.artist ?? '',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: text.titleMedium?.copyWith(color: Colors.white70),
-                                  ),
-                                  if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
-                                ],
-                              ),
-                            ),
-                            if (track != null) ...[
-                              DownloadButton(track: track, size: 26, color: Colors.white),
-                              LikeButton(track: track, size: 28, color: Colors.white),
-                              TrackMenuButton(track: track, color: Colors.white),
-                            ],
-                          ],
-                        ),
-                        const SizedBox(height: 16),
-                        const SeekBar(),
-                        const SizedBox(height: 8),
-                        const TransportControls(large: true),
-                        const SizedBox(height: 24),
-                      ],
+          body: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (look == NowPlayingBackground.blurredCover && track != null)
+                // A small decode is plenty under this much blur.
+                ImageFiltered(
+                  imageFilter: ImageFilter.blur(sigmaX: 48, sigmaY: 48, tileMode: TileMode.clamp),
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    clipBehavior: Clip.hardEdge,
+                    child: Artwork(track: track, size: 160, radius: 0),
+                  ),
+                ),
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 500),
+                decoration: BoxDecoration(
+                  color: look == NowPlayingBackground.black ? Colors.black : null,
+                  gradient: switch (look) {
+                    NowPlayingBackground.color => LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [accent, Color.lerp(accent, Colors.black, 0.75)!, Colors.black],
+                      stops: const [0, 0.6, 1],
                     ),
-                  );
-                },
+                    // Darkens the blurred cover towards the controls, so text stays readable.
+                    NowPlayingBackground.blurredCover => const LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [Color(0x40000000), Color(0xA6000000), Colors.black],
+                      stops: [0, 0.6, 1],
+                    ),
+                    NowPlayingBackground.black => null,
+                  },
+                ),
+                child: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Leave room for the controls; never let the cover push them off-screen.
+                      // On very short windows the cover (then the quality badge) makes way.
+                      final showBadge = constraints.maxHeight >= 480;
+                      final room = constraints.maxHeight - (showBadge ? 376 : 340);
+                      final art = math.min(constraints.maxWidth - 48, room);
+                      final narrow = constraints.maxWidth < 320;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Column(
+                          children: [
+                            Row(
+                              children: [
+                                IconButton(
+                                  tooltip: 'Close',
+                                  color: Colors.white,
+                                  onPressed: () => Navigator.of(context).pop(),
+                                  icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+                                ),
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      Text(
+                                        'PLAYING FROM',
+                                        style: text.labelSmall?.copyWith(letterSpacing: 1.2, color: Colors.white70),
+                                      ),
+                                      Text(
+                                        c.playingFrom ?? 'Your library',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (!narrow)
+                                  IconButton(
+                                    tooltip: 'Lyrics',
+                                    color: Colors.white,
+                                    onPressed: ShellScope.of(context).openLyrics,
+                                    icon: const Icon(Icons.lyrics_outlined),
+                                  ),
+                                IconButton(
+                                  tooltip: 'Queue',
+                                  color: Colors.white,
+                                  onPressed: ShellScope.of(context).openQueue,
+                                  icon: const Icon(Icons.queue_music_rounded),
+                                ),
+                              ],
+                            ),
+                            const Spacer(),
+                            if (art >= 96)
+                              Hero(
+                                tag: 'now-playing-art',
+                                child: DecoratedBox(
+                                  decoration: const BoxDecoration(
+                                    boxShadow: [
+                                      BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12)),
+                                    ],
+                                  ),
+                                  child: Artwork(track: track, size: art, radius: 8),
+                                ),
+                              ),
+                            const Spacer(),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        track?.title ?? 'Nothing playing',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: text.headlineSmall?.copyWith(
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: -0.5,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        track?.artist ?? '',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: text.titleMedium?.copyWith(color: Colors.white70),
+                                      ),
+                                      if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
+                                    ],
+                                  ),
+                                ),
+                                if (track != null) ...[
+                                  DownloadButton(track: track, size: 26, color: Colors.white),
+                                  LikeButton(track: track, size: 28, color: Colors.white),
+                                  TrackMenuButton(track: track, color: Colors.white),
+                                ],
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            const SeekBar(),
+                            const SizedBox(height: 8),
+                            const TransportControls(large: true),
+                            const SizedBox(height: 24),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),

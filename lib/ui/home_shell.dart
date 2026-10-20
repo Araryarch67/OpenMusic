@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/track.dart';
+import '../services/appearance.dart';
 import '../services/player_controller.dart';
 import 'pages/collection_page.dart';
 import 'pages/downloads_page.dart';
@@ -707,6 +709,56 @@ class _BottomBar extends StatelessWidget {
         label: 'Your Library',
       ),
     ];
+    final glass = Appearance.instance.glass;
+    final bar = SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          mini,
+          Row(
+            children: [
+              for (final i in items)
+                Expanded(
+                  child: InkResponse(
+                    onTap: () => onSelect(i.tab),
+                    radius: 36,
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8, bottom: 6),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            tab == i.tab ? i.selected : i.icon,
+                            color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            i.label,
+                            style: text.labelSmall?.copyWith(
+                              color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+    if (glass) {
+      // Frosted: the page shows through, blurred, behind both the mini player and the tabs.
+      return ClipRect(
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: Appearance.instance.blur, sigmaY: Appearance.instance.blur),
+          child: ColoredBox(color: const Color(0x8C000000), child: bar),
+        ),
+      );
+    }
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -716,46 +768,7 @@ class _BottomBar extends StatelessWidget {
           stops: [0, 0.35, 1],
         ),
       ),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            mini,
-            Row(
-              children: [
-                for (final i in items)
-                  Expanded(
-                    child: InkResponse(
-                      onTap: () => onSelect(i.tab),
-                      radius: 36,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 8, bottom: 6),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              tab == i.tab ? i.selected : i.icon,
-                              color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              i.label,
-                              style: text.labelSmall?.copyWith(
-                                color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
+      child: bar,
     );
   }
 }
