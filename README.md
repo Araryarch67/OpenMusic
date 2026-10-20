@@ -64,8 +64,8 @@ Download the latest build from [Releases](https://github.com/Araryarch67/OpenMus
 | System | File |
 |---|---|
 | Android | `OpenMusic-android.apk` (or the smaller `-arm64` one for most phones) |
-| Windows | `OpenMusic-windows-x64.zip`: unzip and run `openmusic.exe` |
-| Linux | `OpenMusic-linux-x64.tar.gz`: unpack and run `OpenMusic/openmusic` (needs the packages below) |
+| Windows | `OpenMusic-windows-x64-setup.exe` (installer), or `OpenMusic-windows-x64.zip` to run without installing |
+| Linux | `OpenMusic-linux-x86_64.AppImage` (any distro), `OpenMusic-linux-amd64.deb` (Debian / Ubuntu), or `OpenMusic-linux-x64.tar.gz` (needs the packages below) |
 
 iOS and macOS builds aren't published yet; [build from source](#build-from-source) there.
 
