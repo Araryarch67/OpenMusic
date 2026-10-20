@@ -203,9 +203,9 @@ class SignalPath {
 /// Everything here goes through mpv properties on the player behind just_audio:
 /// equalizer and crossfeed are lavfi filters, leveling is mpv's ReplayGain,
 /// output/exclusive/rate/resampler are AO options. On platforms where
-/// just_audio uses its own native backend (Android/iOS/macOS) [supported] is
-/// false and the settings UI hides itself. Where libmpv lacks a filter or a
-/// device choice, the `has…` flags say so.
+/// just_audio uses its own native backend (iOS/macOS) [supported] is false and
+/// the settings UI hides itself. Android plays through libmpv too, but its
+/// build has fewer FFmpeg filters and no device choice: see the `has…` flags.
 class AudioEngine extends ChangeNotifier {
   AudioEngine() {
     // Pitch control makes media_kit own the `af` property (scaletempo); the app needs it for EQ.
@@ -214,7 +214,7 @@ class AudioEngine extends ChangeNotifier {
     JustAudioMediaKit.onPlayerCreated = (p) => unawaited(_applyAll(p));
   }
 
-  static bool get supported => Platform.isLinux || Platform.isWindows;
+  static bool get supported => Platform.isLinux || Platform.isWindows || Platform.isAndroid;
 
   /// media_kit's Android libmpv is built without FFmpeg's `crossfeed`, `afir`
   /// and `amovie` filters, and Android offers no exclusive or raw device output.

@@ -19,7 +19,9 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kDebugMode) await _logErrorsToFile();
   // just_audio has no native Linux/Windows backend; route those through libmpv.
-  JustAudioMediaKit.ensureInitialized(linux: true, windows: true);
+  // Android too: libmpv gives it the equalizer, ReplayGain, gapless, the
+  // signal path and decoders (ALAC, WavPack, DSD) that ExoPlayer lacks.
+  JustAudioMediaKit.ensureInitialized(linux: true, windows: true, android: true);
 
   if (hasCustomTitleBar) {
     await windowManager.ensureInitialized();
