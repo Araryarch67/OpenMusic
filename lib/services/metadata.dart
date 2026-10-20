@@ -30,7 +30,10 @@ class TagEdit {
 
 /// Reads embedded tags / cover art off the UI thread and caches the results.
 abstract final class Metadata {
-  static const _maxCachedArtwork = 120;
+  /// Encoded covers kept in memory, newest last. Capped by size: an embedded
+  /// hi-res cover can be several MB, so a count alone could hold hundreds.
+  static const _maxCachedArtworkBytes = 16 << 20;
+  static var _cachedArtworkBytes = 0;
 
   static final _artwork = <String, Uint8List?>{};
   static final _pendingArtwork = <String, Future<Uint8List?>>{};
@@ -126,10 +129,10 @@ abstract final class Metadata {
     } finally {
       if (temp.existsSync()) temp.deleteSync();
     }
-    _artwork.remove(_artKey(track));
+    _forgetArtwork(_artKey(track));
     _accents.remove(_artKey(track));
     final updated = await enrich(track.copyWith(tagged: false));
-    _artwork.remove(_artKey(updated));
+    _forgetArtwork(_artKey(updated));
     _accents.remove(_artKey(updated));
     return updated;
   }
@@ -199,13 +202,18 @@ abstract final class Metadata {
   /// Tracks on the same album share one cover lookup.
   static String _artKey(Track t) => t.albumKey ?? t.id;
 
+  static void _forgetArtwork(String key) => _cachedArtworkBytes -= _artwork.remove(key)?.length ?? 0;
+
   static Future<Uint8List?> artwork(Track track) {
     final key = _artKey(track);
     if (_artwork.containsKey(key)) return Future.value(_artwork[key]);
     return _pendingArtwork[key] ??= _loadArtwork(track).then((bytes) {
       _pendingArtwork.remove(key);
       _artwork[key] = bytes;
-      if (_artwork.length > _maxCachedArtwork) _artwork.remove(_artwork.keys.first);
+      _cachedArtworkBytes += bytes?.length ?? 0;
+      while (_cachedArtworkBytes > _maxCachedArtworkBytes && _artwork.length > 1) {
+        _forgetArtwork(_artwork.keys.first);
+      }
       return bytes;
     });
   }

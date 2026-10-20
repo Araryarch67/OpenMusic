@@ -14,6 +14,7 @@ import 'audio_engine.dart';
 import 'cue_sheet.dart';
 import 'discord_presence.dart';
 import 'metadata.dart';
+import 'memory_trim.dart';
 import 'youtube_audio_source.dart';
 import 'youtube_music_account.dart';
 import 'youtube_importer.dart';
@@ -40,6 +41,7 @@ class PlayerController extends ChangeNotifier {
             _prefetchNext();
             _recordRecent();
             _updatePresence();
+            MemoryTrim.schedule();
             notifyListeners();
           }),
     );
@@ -797,6 +799,7 @@ class PlayerController extends ChangeNotifier {
 
   @override
   void dispose() {
+    MemoryTrim.stop();
     for (final s in _subs) {
       s.cancel();
     }

@@ -71,6 +71,9 @@ class OpenMusicApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Decoded images: covers are decoded at their on-screen size, so 40 MiB
+    // still holds a few hundred (Flutter's default is 100 MiB).
+    PaintingBinding.instance.imageCache.maximumSizeBytes = 40 << 20;
     return PlayerScope(
       controller: controller,
       child: MaterialApp(

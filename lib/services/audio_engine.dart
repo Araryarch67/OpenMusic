@@ -210,6 +210,9 @@ class AudioEngine extends ChangeNotifier {
   AudioEngine() {
     // Pitch control makes media_kit own the `af` property (scaletempo); the app needs it for EQ.
     JustAudioMediaKit.pitch = false;
+    // mpv's read-ahead (media_kit: 32 MiB ahead and 32 MiB behind, per open
+    // file). 8 MiB is a whole YouTube song, or 15 s of 24/192 FLAC from disk.
+    JustAudioMediaKit.bufferSize = 8 << 20;
     JustAudioMediaKit.volumeOverride = _setVolume;
     JustAudioMediaKit.onPlayerCreated = (p) => unawaited(_applyAll(p));
   }
@@ -476,6 +479,9 @@ class AudioEngine extends ChangeNotifier {
       // media_kit turns on mpv's disk cache, which fails ("Failed to create file
       // cache") without a writable cache dir. Audio needs no more than the RAM cache.
       'cache-on-disk': 'no',
+      // Seeking back a few seconds stays instant; further back re-reads the file.
+      'demuxer-max-bytes': '${JustAudioMediaKit.bufferSize}',
+      'demuxer-max-back-bytes': '${2 << 20}',
       'gapless-audio': gapless ? 'weak' : 'no',
       'prefetch-playlist': gapless ? 'yes' : 'no',
       'replaygain': effectiveLeveling.mpv,

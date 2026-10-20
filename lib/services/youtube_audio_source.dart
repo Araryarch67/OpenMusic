@@ -96,7 +96,15 @@ class YoutubeAudioSource extends StreamAudioSource {
     );
   }
 
-  Stream<List<int>> _ranged(Uri url, int from, int to, int total) async* {
+  /// just_audio's proxy drops stream errors without a word (playback just
+  /// stops), so say what went wrong here.
+  Stream<List<int>> _ranged(Uri url, int from, int to, int total) =>
+      _fetchRange(url, from, to, total).handleError((Object e, StackTrace st) {
+        debugPrint('YouTube stream $videoId failed at bytes $from-$to: $e');
+        Error.throwWithStackTrace(e, st);
+      });
+
+  Stream<List<int>> _fetchRange(Uri url, int from, int to, int total) async* {
     var source = url;
     var retried = false;
     var pos = from;

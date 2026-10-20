@@ -70,6 +70,14 @@ void main() {
           }(),
       ]);
     }
+    // Plus one long hi-res song that doesn't compress away (noise, not a sine),
+    // so mpv's read-ahead buffer fills the way it does with real music.
+    final hires = '${dir.path}/a0_hires.flac';
+    await _ffmpeg([
+      '-f', 'lavfi', '-i', 'anoisesrc=c=pink:a=0.3:d=240:r=96000', '-ac', '2', '-sample_fmt', 's32', //
+      '-metadata', 'title=Hi-res song', '-metadata', 'artist=Artist 0', '-metadata', 'album=Album 0', hires,
+    ]);
+    files.add(hires);
     SharedPreferences.setMockInitialValues({
       'library.v1': jsonEncode([for (final f in files..sort()) Track.fromUri(Uri.file(f)).toJson()]),
     });
@@ -107,9 +115,10 @@ void main() {
     await run(const Duration(seconds: 8)); // covers decoded, home settled
     await sample('idle');
 
-    await c.playCollection(c.allSongs);
+    final songs = c.allSongs;
+    await c.playCollection(songs, index: songs.tracks.indexWhere((t) => t.path == hires));
     await run(const Duration(seconds: 15));
-    await sample('playing local FLAC');
+    await sample('playing 24/96 FLAC');
 
     final yt = await tester.runAsync(() => c.searchYoutube('codfish beatbox'));
     if (yt != null && yt.isNotEmpty) {
