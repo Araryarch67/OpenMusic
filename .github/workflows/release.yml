@@ -1,0 +1,133 @@
+# Builds OpenMusic for Android, Windows and Linux and attaches the files to a
+# GitHub release. Runs when a version tag is pushed (`git tag v1.2.0 && git
+# push origin v1.2.0`), or by hand from the Actions tab (then the files are
+# only kept as workflow artifacts, no release is made).
+#
+# Android signing: add these repository secrets so every release is signed with
+# the same key (otherwise phones refuse to update over an earlier version):
+#   ANDROID_KEYSTORE_BASE64   base64 of the .jks file
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+# Without them the APK is signed with a throwaway debug key.
+#
+# iOS / macOS: not built yet.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  FLUTTER_VERSION: '3.47.7'
+
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    env:
+      KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Version from the tag
+        shell: bash
+        run: echo "BUILD_ARGS=$(tool/ci_version.sh)" >> "$GITHUB_ENV"
+      - name: Release key
+        if: env.KEYSTORE != ''
+        run: |
+          echo "$KEYSTORE" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+      - name: Build APKs
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          flutter build apk --release $BUILD_ARGS
+          flutter build apk --release --split-per-abi $BUILD_ARGS
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/OpenMusic-android.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/OpenMusic-android-arm64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk dist/OpenMusic-android-arm32.apk
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk dist/OpenMusic-android-x86_64.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: dist/*
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Version from the tag
+        shell: bash
+        run: echo "BUILD_ARGS=$(tool/ci_version.sh)" >> "$GITHUB_ENV"
+      - name: Build
+        shell: bash
+        run: flutter build windows --release $BUILD_ARGS
+      - name: Zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/OpenMusic-windows-x64.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build tools and libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - name: Version from the tag
+        run: echo "BUILD_ARGS=$(tool/ci_version.sh)" >> "$GITHUB_ENV"
+      - name: Build
+        run: flutter build linux --release $BUILD_ARGS
+      - name: Archive
+        run: |
+          mkdir -p dist
+          tar -C build/linux/x64/release -czf dist/OpenMusic-linux-x64.tar.gz --transform 's,^bundle,OpenMusic,' bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, windows, linux]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

@@ -59,7 +59,15 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 
 ## Install
 
-There are no prebuilt packages yet. [Build from source](#build-from-source) for now (it takes a few minutes).
+Download the latest build from [Releases](https://github.com/Araryarch67/OpenMusic/releases/latest):
+
+| System | File |
+|---|---|
+| Android | `OpenMusic-android.apk` (or the smaller `-arm64` one for most phones) |
+| Windows | `OpenMusic-windows-x64.zip`: unzip and run `openmusic.exe` |
+| Linux | `OpenMusic-linux-x64.tar.gz`: unpack and run `OpenMusic/openmusic` (needs the packages below) |
+
+iOS and macOS builds aren't published yet; [build from source](#build-from-source) there.
 
 ### Linux runtime requirements
 
@@ -106,12 +114,13 @@ What's still missing (native DSD / DoP, DLNA, AirPlay, …) and how it could be 
 
 | Platform | Playback | YouTube streaming / downloads |
 |---|---|---|
-| Linux | libmpv | yt-dlp (system one, or the official binary downloaded automatically) |
-| Windows | libmpv (bundled) | yt-dlp (downloaded automatically) |
+| Linux | libmpv | YouTube's player API; yt-dlp as a fallback (system one, or the official binary downloaded automatically) |
+| Windows | libmpv (bundled) | YouTube's player API; yt-dlp as a fallback (downloaded automatically) |
 | macOS | AVPlayer | yt-dlp, AAC only (AVPlayer can't play Opus/WebM) |
-| Android / iOS | ExoPlayer / AVPlayer | Built-in extractor |
+| Android | libmpv (bundled) | YouTube's player API, built-in extractor as a fallback |
+| iOS | AVPlayer | YouTube's player API, built-in extractor as a fallback |
 
-The equalizer, crossfeed, leveling, output device and signal path currently need libmpv (Linux and Windows). yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
+The equalizer, leveling and signal path need libmpv (Linux, Windows, Android); crossfeed, room correction and the output device choice are Linux and Windows only. yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
 
 Debug builds append every Flutter error with its full stack trace to `<app support dir>/errors.log` (on Linux, `~/.local/share/dev.openmusic.openmusic/errors.log`).
 
