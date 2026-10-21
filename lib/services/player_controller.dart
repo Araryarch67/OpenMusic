@@ -13,6 +13,7 @@ import '../models/track.dart';
 import 'audio_engine.dart';
 import 'cue_sheet.dart';
 import 'discord_presence.dart';
+import 'lyrics_translation.dart';
 import 'metadata.dart';
 import 'memory_trim.dart';
 import 'youtube_audio_source.dart';
@@ -506,6 +507,7 @@ class PlayerController extends ChangeNotifier {
     await ytMusic.load();
     await audio.load();
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
+    unawaited(LyricsTranslation.load());
     audio.addListener(notifyListeners);
     notifyListeners();
     unawaited(_enrichUntagged());

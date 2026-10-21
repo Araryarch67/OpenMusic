@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../models/track.dart';
 import '../../services/lyrics.dart';
+import '../../services/lyrics_translation.dart';
 import '../../services/player_controller.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
@@ -66,6 +67,7 @@ class LyricsPage extends StatelessWidget {
                         ],
                       ),
                     ),
+                    if (track != null) _ExtrasButtons(key: ValueKey(track.id), track: track),
                   ],
                 ),
               ),
@@ -134,6 +136,110 @@ class _LyricsLoaderState extends State<_LyricsLoader> {
   );
 }
 
+/// "Pronunciation" and "Translation" toggles, shown once the song has lyrics.
+class _ExtrasButtons extends StatefulWidget {
+  const _ExtrasButtons({super.key, required this.track});
+
+  final Track track;
+
+  @override
+  State<_ExtrasButtons> createState() => _ExtrasButtonsState();
+}
+
+class _ExtrasButtonsState extends State<_ExtrasButtons> {
+  late final Future<Lyrics> _lyrics = LyricsService.forTrack(widget.track);
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Lyrics>(
+    future: _lyrics,
+    builder: (context, snap) {
+      final l = snap.data;
+      if (l == null || l.isEmpty || l.instrumental) return const SizedBox.shrink();
+      Widget toggle(ValueNotifier<bool> option, IconData icon, String tooltip) => ValueListenableBuilder(
+        valueListenable: option,
+        builder: (context, on, _) => IconButton(
+          tooltip: tooltip,
+          isSelected: on,
+          color: Colors.white70,
+          selectedIcon: Icon(icon, color: Colors.black),
+          style: IconButton.styleFrom(backgroundColor: on ? Colors.white : null),
+          onPressed: () => option.value = !on,
+          icon: Icon(icon),
+        ),
+      );
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (LyricsTranslation.hasNonLatin(_lyricLines(l).join('\n')))
+            toggle(LyricsTranslation.romanize, Icons.abc_rounded, 'Pronunciation'),
+          const SizedBox(width: 4),
+          toggle(LyricsTranslation.translate, Icons.translate_rounded, 'Translation'),
+        ],
+      );
+    },
+  );
+}
+
+List<String> _lyricLines(Lyrics l) => l.synced ? [for (final line in l.lines) line.text] : l.plain!.split('\n');
+
+/// Fetches pronunciation / translation for [lyrics] once either is switched on.
+mixin _Extras<T extends StatefulWidget> on State<T> {
+  Lyrics get lyrics;
+  List<LineExtras>? extras;
+  bool _asked = false;
+
+  bool get showRomanized => LyricsTranslation.romanize.value;
+  bool get showTranslation => LyricsTranslation.translate.value;
+
+  @override
+  void initState() {
+    super.initState();
+    LyricsTranslation.romanize.addListener(_changed);
+    LyricsTranslation.translate.addListener(_changed);
+    _fetch();
+  }
+
+  @override
+  void dispose() {
+    LyricsTranslation.romanize.removeListener(_changed);
+    LyricsTranslation.translate.removeListener(_changed);
+    super.dispose();
+  }
+
+  void _changed() {
+    setState(() {});
+    _fetch();
+  }
+
+  void _fetch() {
+    if (_asked || !(showRomanized || showTranslation)) return;
+    _asked = true;
+    LyricsTranslation.of(_lyricLines(lyrics)).then(
+      (e) {
+        if (mounted) setState(() => extras = e);
+      },
+      onError: (Object _) {
+        _asked = false; // switching it off and on again retries
+        if (!mounted) return;
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(content: Text('Couldn\'t translate these lyrics. Check your internet connection.')),
+        );
+      },
+    );
+  }
+
+  /// The lines to show under line [i], or null.
+  String? extraFor(int i) {
+    final e = extras;
+    if (e == null || i >= e.length) return null;
+    final parts = [if (showRomanized) e[i].romanized, if (showTranslation) e[i].translation].nonNulls;
+    return parts.isEmpty ? null : parts.join('\n');
+  }
+}
+
+TextStyle? _extraStyle(BuildContext context) =>
+    Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600, height: 1.3);
+
 class _Message extends StatelessWidget {
   const _Message(this.message, {this.action});
 
@@ -183,22 +289,44 @@ class _Source extends StatelessWidget {
   );
 }
 
-class _PlainLyrics extends StatelessWidget {
+class _PlainLyrics extends StatefulWidget {
   const _PlainLyrics({required this.lyrics});
 
   final Lyrics lyrics;
 
   @override
-  Widget build(BuildContext context) => SmoothScroll(
-    builder: (context, scroll) => ListView(
-      controller: scroll,
-      padding: EdgeInsets.symmetric(horizontal: ShellScope.of(context).compact ? 24 : 40, vertical: 24),
-      children: [
-        Text(lyrics.plain!, style: _lineStyle(context)?.copyWith(color: Colors.white)),
-        _Source(lyrics),
-      ],
-    ),
-  );
+  State<_PlainLyrics> createState() => _PlainLyricsState();
+}
+
+class _PlainLyricsState extends State<_PlainLyrics> with _Extras {
+  @override
+  Lyrics get lyrics => widget.lyrics;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = _lineStyle(context)?.copyWith(color: Colors.white);
+    final lines = lyrics.plain!.split('\n');
+    return SmoothScroll(
+      builder: (context, scroll) => ListView(
+        controller: scroll,
+        padding: EdgeInsets.symmetric(horizontal: ShellScope.of(context).compact ? 24 : 40, vertical: 24),
+        children: [
+          if (extras == null)
+            Text(lyrics.plain!, style: style)
+          else
+            for (var i = 0; i < lines.length; i++) ...[
+              Text(lines[i], style: style),
+              if (extraFor(i) case final extra?)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(extra, style: _extraStyle(context)?.copyWith(color: Colors.white70)),
+                ),
+            ],
+          _Source(lyrics),
+        ],
+      ),
+    );
+  }
 }
 
 class _SyncedLyrics extends StatefulWidget {
@@ -210,7 +338,10 @@ class _SyncedLyrics extends StatefulWidget {
   State<_SyncedLyrics> createState() => _SyncedLyricsState();
 }
 
-class _SyncedLyricsState extends State<_SyncedLyrics> {
+class _SyncedLyricsState extends State<_SyncedLyrics> with _Extras {
+  @override
+  Lyrics get lyrics => widget.lyrics;
+
   late final List<GlobalKey> _keys = [for (final _ in widget.lyrics.lines) GlobalKey()];
   final _scroll = SmoothScrollController();
 
@@ -269,6 +400,7 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
                   _Line(
                     key: _keys[i],
                     text: lines[i].text.isEmpty ? '♪' : lines[i].text,
+                    extra: extraFor(i),
                     style: style,
                     color: i == at
                         ? Colors.white
@@ -292,9 +424,19 @@ class _SyncedLyricsState extends State<_SyncedLyrics> {
 }
 
 class _Line extends StatefulWidget {
-  const _Line({super.key, required this.text, required this.style, required this.color, required this.onTap});
+  const _Line({
+    super.key,
+    required this.text,
+    this.extra,
+    required this.style,
+    required this.color,
+    required this.onTap,
+  });
 
   final String text;
+
+  /// Pronunciation / translation, smaller, under the line.
+  final String? extra;
   final TextStyle? style;
   final Color color;
   final VoidCallback onTap;
@@ -316,10 +458,23 @@ class _LineState extends State<_Line> {
       onTap: widget.onTap,
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        child: AnimatedDefaultTextStyle(
-          duration: const Duration(milliseconds: 200),
-          style: (widget.style ?? const TextStyle()).copyWith(color: _hover ? Colors.white : widget.color),
-          child: Text(widget.text),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 200),
+              style: (widget.style ?? const TextStyle()).copyWith(color: _hover ? Colors.white : widget.color),
+              child: Text(widget.text),
+            ),
+            if (widget.extra case final extra?)
+              AnimatedDefaultTextStyle(
+                duration: const Duration(milliseconds: 200),
+                style: (_extraStyle(context) ?? const TextStyle()).copyWith(
+                  color: (_hover ? Colors.white : widget.color).withValues(alpha: 0.8),
+                ),
+                child: Padding(padding: const EdgeInsets.only(top: 2), child: Text(extra)),
+              ),
+          ],
         ),
       ),
     ),
