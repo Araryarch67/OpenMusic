@@ -432,6 +432,9 @@ class AudioEngine extends ChangeNotifier {
         await p.command(['af-command', 'volume', 'volume', _volume.toStringAsFixed(6), 'volume']);
       } else if (was != _volumeActive) {
         await p.setProperty('af', filterChain);
+        // Back at 100%: the output still runs in the volume filter's 64-bit float
+        // until it reopens, so bit-perfect mode would stay not bit-perfect.
+        if (bitPerfect && !_volumeActive) await p.command(['ao-reload']);
       }
     }
   }
