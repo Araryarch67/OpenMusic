@@ -21,7 +21,7 @@ import 'ytdlp.dart';
 /// Byte ranges are fetched in chunks because googlevideo rejects very large
 /// single ranges.
 class YoutubeAudioSource extends StreamAudioSource {
-  YoutubeAudioSource(this.videoId, {required this.yt, super.tag});
+  YoutubeAudioSource(this.videoId, {required this.yt, this.aac = false, super.tag});
 
   static const _chunkSize = 1 << 20;
 
@@ -59,13 +59,16 @@ class YoutubeAudioSource extends StreamAudioSource {
 
   final String videoId;
   final YoutubeExplode yt;
+
+  /// AAC instead of Opus (casting: most network players can't decode Opus).
+  final bool aac;
   final _http = http.Client();
 
   /// YouTube's player API (yt-dlp on desktop if refused), with
   /// youtube_explode as a last resort on phones.
   Future<({Uri url, int total, String mime})> _resolve() async {
     try {
-      final r = await YoutubeStream.best(videoId);
+      final r = await YoutubeStream.best(videoId, aac: aac);
       if (r.size case final size?) return (url: r.url, total: size, mime: r.mimeType);
       if (YtDlp.supported) throw StateError('Unknown stream size for $videoId');
     } catch (e) {
@@ -73,7 +76,7 @@ class YoutubeAudioSource extends StreamAudioSource {
       debugPrint('YouTube stream lookup failed, trying youtube_explode: $e');
     }
     final manifest = await yt.videos.streams.getManifest(videoId);
-    final best = YoutubeImporter.pickBestAudio(manifest.audioOnly);
+    final best = YoutubeImporter.pickBestAudio(manifest.audioOnly, appleOnly: aac ? true : null);
     if (best == null) throw StateError('No audio stream for $videoId');
     return (
       url: best.url,
@@ -109,7 +112,7 @@ class YoutubeAudioSource extends StreamAudioSource {
     var retried = false;
     var pos = from;
     // From memory as far as the preloaded start of the file reaches.
-    final head = _heads[videoId];
+    final head = aac ? null : _heads[videoId];
     if (head != null && head.total == total && pos < head.bytes.length) {
       final end = head.bytes.length < to ? head.bytes.length : to;
       yield Uint8List.sublistView(head.bytes, pos, end);

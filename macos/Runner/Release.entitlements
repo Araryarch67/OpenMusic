@@ -8,5 +8,8 @@
 	<true/>
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- Casting: TVs and speakers fetch the music from the app. -->
+	<key>com.apple.security.network.server</key>
+	<true/>
 </dict>
 </plist>

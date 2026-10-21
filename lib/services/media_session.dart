@@ -56,7 +56,7 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
 
   void _onController() {
     if (_c.currentTrack?.id != _shownId) _publishItem();
-    if (_c.player.playing != _shownPlaying) _publishState();
+    if (_c.isPlaying != _shownPlaying) _publishState();
   }
 
   Future<void> _publishItem() async {
@@ -68,7 +68,7 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
       title: t.title,
       artist: t.artist,
       album: t.album,
-      duration: _c.player.duration ?? t.duration,
+      duration: _c.duration ?? t.duration,
       artUri: t.isRemote && t.artworkUrl != null ? Uri.tryParse(t.artworkUrl!) : null,
     );
     mediaItem.add(item);
@@ -81,25 +81,28 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
 
   void _publishState() {
     final p = _c.player;
-    _shownPlaying = p.playing;
+    final playing = _c.isPlaying;
+    _shownPlaying = playing;
     playbackState.add(
       PlaybackState(
         controls: [
           MediaControl.skipToPrevious,
-          if (p.playing) MediaControl.pause else MediaControl.play,
+          if (playing) MediaControl.pause else MediaControl.play,
           MediaControl.skipToNext,
         ],
         systemActions: const {MediaAction.seek},
         androidCompactActionIndices: const [0, 1, 2],
-        processingState: switch (p.processingState) {
-          ProcessingState.idle => AudioProcessingState.idle,
-          ProcessingState.loading => AudioProcessingState.loading,
-          ProcessingState.buffering => AudioProcessingState.buffering,
-          ProcessingState.ready => AudioProcessingState.ready,
-          ProcessingState.completed => AudioProcessingState.completed,
-        },
-        playing: p.playing,
-        updatePosition: p.position,
+        processingState: _c.casting
+            ? (_c.isBuffering ? AudioProcessingState.buffering : AudioProcessingState.ready)
+            : switch (p.processingState) {
+                ProcessingState.idle => AudioProcessingState.idle,
+                ProcessingState.loading => AudioProcessingState.loading,
+                ProcessingState.buffering => AudioProcessingState.buffering,
+                ProcessingState.ready => AudioProcessingState.ready,
+                ProcessingState.completed => AudioProcessingState.completed,
+              },
+        playing: playing,
+        updatePosition: _c.position,
         bufferedPosition: p.bufferedPosition,
         speed: p.speed,
       ),
@@ -121,16 +124,16 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
   }
 
   @override
-  Future<void> play() => _c.player.play();
+  Future<void> play() => _c.play();
 
   @override
-  Future<void> pause() => _c.player.pause();
+  Future<void> pause() => _c.pause();
 
   @override
-  Future<void> stop() => _c.player.pause();
+  Future<void> stop() => _c.pause();
 
   @override
-  Future<void> seek(Duration position) => _c.player.seek(position);
+  Future<void> seek(Duration position) => _c.seek(position);
 
   @override
   Future<void> skipToNext() => _c.next();

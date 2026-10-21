@@ -87,6 +87,9 @@ abstract final class Metadata {
     }
   }
 
+  /// Whether the `ffmpeg` command is installed ([probeTagTools] must have run).
+  static bool get hasFfmpeg => _ffmpeg;
+
   static String _ext(String path) => path.split('.').last.toLowerCase();
 
   static bool canEditTags(Track t) {

@@ -10,6 +10,7 @@ import '../services/appearance.dart';
 import '../services/audio_engine.dart';
 import '../services/player_controller.dart';
 import 'shell_scope.dart';
+import 'cast_picker.dart';
 import 'theme.dart';
 import 'widgets/controls.dart';
 import 'widgets/signal_path.dart';
@@ -72,6 +73,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
             children: [
               item(Icons.queue_music_rounded, 'Queue', shell.openQueue),
               item(Icons.lyrics_outlined, 'Lyrics', shell.openLyrics),
+              item(Icons.cast_rounded, 'Play on a device', () => showCastPicker(context)),
               if (AudioEngine.supported) item(Icons.graphic_eq_rounded, 'Signal path', () => showSignalPath(context)),
               item(Icons.close_rounded, 'Close player', c.closePlayer),
             ],
@@ -188,7 +190,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                   ),
                   _MiniProgress(
                     builder: (context, snap) {
-                      final total = c.player.duration?.inMilliseconds ?? 0;
+                      final total = c.duration?.inMilliseconds ?? 0;
                       final pos = snap.data?.inMilliseconds ?? 0;
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -327,6 +329,7 @@ class DesktopPlayerBar extends StatelessWidget {
                       onPressed: shell.openQueue,
                       icon: const Icon(Icons.queue_music_rounded, size: 20),
                     ),
+                    const CastButton(size: 20),
                     // The bar spans the whole window, so its own width decides (not the content area's).
                     if (MediaQuery.sizeOf(context).width > 860) const VolumeSlider(),
                     IconButton(
@@ -607,6 +610,7 @@ class NowPlayingPage extends StatelessWidget {
                                   onPressed: ShellScope.of(context).openQueue,
                                   icon: const Icon(Icons.queue_music_rounded),
                                 ),
+                                const CastButton(color: Colors.white),
                               ],
                             ),
                             const Spacer(),
@@ -719,7 +723,7 @@ class _MiniProgressState extends State<_MiniProgress> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _position ??= smoothPosition(PlayerScope.read(context).player);
+    _position ??= PlayerScope.read(context).smoothPosition();
   }
 
   @override
@@ -1068,7 +1072,7 @@ class _MiniPlayerWindowState extends State<MiniPlayerWindow> {
                     ),
                     _MiniProgress(
                       builder: (context, snap) {
-                        final total = c.player.duration?.inMilliseconds ?? 0;
+                        final total = c.duration?.inMilliseconds ?? 0;
                         final pos = snap.data?.inMilliseconds ?? 0;
                         return LinearProgressIndicator(
                           value: total == 0 ? 0 : (pos / total).clamp(0, 1),

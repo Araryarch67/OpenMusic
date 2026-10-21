@@ -142,35 +142,39 @@ abstract final class YtDlp {
   }();
 
   /// Resolves (and caches for a few hours) the best audio stream of a video.
-  static Future<ResolvedAudio> resolve(String videoId) {
-    final cached = _resolved[videoId];
+  /// [aac] takes AAC over Opus, for players that can't decode Opus.
+  static Future<ResolvedAudio> resolve(String videoId, {bool aac = false}) {
+    final cached = _resolved[aac ? 'aac:$videoId' : videoId];
     if (cached != null) {
-      return cached.then((r) => r.isFresh ? r : _refresh(videoId));
+      return cached.then((r) => r.isFresh ? r : _refresh(videoId, aac));
     }
-    return _refresh(videoId);
+    return _refresh(videoId, aac);
   }
 
-  static Future<ResolvedAudio> _refresh(String videoId) {
+  static Future<ResolvedAudio> _refresh(String videoId, bool aac) {
+    final key = aac ? 'aac:$videoId' : videoId;
     // One retry: YouTube sometimes refuses a burst of lookups, then serves the next one.
-    final future = _run(videoId).catchError((Object _) async {
+    final future = _run(videoId, aac).catchError((Object _) async {
       await Future<void>.delayed(const Duration(seconds: 2));
-      return _run(videoId);
+      return _run(videoId, aac);
     });
-    _resolved[videoId] = future;
+    _resolved[key] = future;
     // Don't cache failures.
     future.then<void>(
       (_) {},
       onError: (Object _) {
-        _resolved.remove(videoId);
+        _resolved.remove(key);
       },
     );
     return future;
   }
 
   /// Forget a cached URL (e.g. after the server rejected it).
-  static void invalidate(String videoId) => _resolved.remove(videoId);
+  static void invalidate(String videoId) => _resolved
+    ..remove(videoId)
+    ..remove('aac:$videoId');
 
-  static Future<ResolvedAudio> _run(String videoId) async {
+  static Future<ResolvedAudio> _run(String videoId, bool aac) async {
     final exe = await executable();
     if (exe == null) throw StateError('yt-dlp is not available on this device.');
     final r = await Process.run(exe, [
@@ -178,7 +182,7 @@ abstract final class YtDlp {
       '--no-playlist',
       ..._cookieArgs,
       '-f',
-      _format,
+      aac ? 'ba[acodec^=mp4a][format_id!*=drc]/ba[ext=m4a]/ba' : _format,
       '-O',
       '%(format_id)s|%(ext)s|%(acodec)s|%(abr)s|%(filesize,filesize_approx)s',
       '-O',

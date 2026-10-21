@@ -111,13 +111,16 @@ abstract final class YoutubeStream {
   /// The stream to play or download: the player API first, then yt-dlp where
   /// there is one (much slower: a process per song, but it keeps up with
   /// YouTube's changes). Both are cached while the URL is fresh.
-  static Future<ResolvedAudio> best(String videoId) async {
+  ///
+  /// [aac] asks for AAC even where Opus would be better, for players that
+  /// can't decode Opus (most TVs and speakers on the network).
+  static Future<ResolvedAudio> best(String videoId, {bool aac = false}) async {
     try {
-      return await resolve(videoId);
+      return await resolve(videoId, aac: aac);
     } catch (e) {
       if (!YtDlp.supported) rethrow;
       debugPrint('YouTube player API failed for $videoId, using yt-dlp: $e');
-      return YtDlp.resolve(videoId);
+      return YtDlp.resolve(videoId, aac: aac);
     }
   }
 
@@ -130,23 +133,26 @@ abstract final class YoutubeStream {
   static final _resolved = <String, Future<ResolvedAudio>>{};
 
   /// The best original audio stream of [videoId], cached while its URL is fresh.
-  static Future<ResolvedAudio> resolve(String videoId) {
-    final cached = _resolved[videoId];
-    if (cached != null) return cached.then((r) => r.isFresh ? r : _refresh(videoId));
-    return _refresh(videoId);
+  static Future<ResolvedAudio> resolve(String videoId, {bool aac = false}) {
+    final cached = _resolved[aac ? 'aac:$videoId' : videoId];
+    if (cached != null) return cached.then((r) => r.isFresh ? r : _refresh(videoId, aac));
+    return _refresh(videoId, aac);
   }
 
   /// Forget a cached URL (e.g. after the server rejected it).
-  static void invalidate(String videoId) => _resolved.remove(videoId);
+  static void invalidate(String videoId) => _resolved
+    ..remove(videoId)
+    ..remove('aac:$videoId');
 
-  static Future<ResolvedAudio> _refresh(String videoId) {
-    final future = _player(videoId).catchError((Object _) => _player(videoId, freshVisitor: true));
-    _resolved[videoId] = future;
-    future.then<void>((_) {}, onError: (Object _) => _resolved.remove(videoId));
+  static Future<ResolvedAudio> _refresh(String videoId, bool aac) {
+    final key = aac ? 'aac:$videoId' : videoId;
+    final future = _player(videoId, aac: aac).catchError((Object _) => _player(videoId, aac: aac, freshVisitor: true));
+    _resolved[key] = future;
+    future.then<void>((_) {}, onError: (Object _) => _resolved.remove(key));
     return future;
   }
 
-  static Future<ResolvedAudio> _player(String videoId, {bool freshVisitor = false}) async {
+  static Future<ResolvedAudio> _player(String videoId, {bool aac = false, bool freshVisitor = false}) async {
     final visitor = await _visitorData(videoId, fresh: freshVisitor);
     final res = await _http
         .post(
@@ -179,7 +185,7 @@ abstract final class YoutubeStream {
     }
     final formats = ((j['streamingData'] as Map<String, dynamic>?)?['adaptiveFormats'] as List? ?? const [])
         .cast<Map<String, dynamic>>();
-    final best = pickBest(formats, apple: Platform.isIOS || Platform.isMacOS);
+    final best = pickBest(formats, apple: aac || Platform.isIOS || Platform.isMacOS);
     if (best == null) throw StateError('No audio stream for this song.');
     final url = Uri.parse(best['url'] as String);
     final mime = best['mimeType'] as String;

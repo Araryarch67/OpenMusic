@@ -11,8 +11,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/track.dart';
 import 'audio_engine.dart';
+import 'cast.dart';
 import 'cue_sheet.dart';
 import 'discord_presence.dart';
+import 'dlna.dart';
 import 'lyrics.dart';
 import 'lyrics_translation.dart';
 import 'metadata.dart';
@@ -40,6 +42,7 @@ class PlayerController extends ChangeNotifier {
           )
           .listen((_) {
             _maybeAutoplay();
+            _castFollow();
             _prefetchNext();
             _recordRecent();
             _updatePresence();
@@ -136,10 +139,10 @@ class PlayerController extends ChangeNotifier {
   void _updatePresence({bool force = false}) {
     final track = currentTrack;
     // Skip no-op updates (playerStateStream fires on every buffering change).
-    final key = '${track?.id}|${player.playing}|${player.duration}';
+    final key = '${track?.id}|$isPlaying|$duration';
     if (key == _presenceKey && !force) return;
     _presenceKey = key;
-    discord.update(track: track, playing: player.playing, position: player.position, duration: player.duration);
+    discord.update(track: track, playing: isPlaying, position: position, duration: duration);
   }
 
   static const _libraryKey = 'library.v1';
@@ -191,7 +194,7 @@ class PlayerController extends ChangeNotifier {
     final title = currentTrack?.title;
     _errors.add('Couldn\'t play ${title ?? 'this song'}${e.message == null ? '' : ': ${e.message}'}');
     if (player.hasNext) {
-      player.seekToNext().then((_) => player.play(), onError: (Object _) {});
+      player.seekToNext().then((_) => _play(), onError: (Object _) {});
     }
   }
 
@@ -214,9 +217,70 @@ class PlayerController extends ChangeNotifier {
   /// Whether the play button has something to start: the queue, or the local library.
   bool get canPlay => player.audioSources.isNotEmpty || _library.isNotEmpty;
 
-  bool get isPlaying => player.playing;
-  bool get isBuffering =>
-      player.processingState == ProcessingState.loading || player.processingState == ProcessingState.buffering;
+  bool get isPlaying => casting ? cast.playing : player.playing;
+  bool get isBuffering => casting
+      ? cast.loading
+      : player.processingState == ProcessingState.loading || player.processingState == ProcessingState.buffering;
+
+  /// Where the current song is, here or on the cast device.
+  Duration get position => casting ? cast.position : player.position;
+
+  Duration? get duration => casting ? cast.duration ?? player.duration : player.duration;
+
+  Future<void> seek(Duration to) => casting ? cast.seek(to) : player.seek(to);
+
+  Future<void> play() => _play();
+
+  Future<void> pause() => casting ? cast.pause() : player.pause();
+
+  /// 0-1: this device's volume, or the cast device's.
+  double get volume => casting ? (cast.volume ?? 0) / 100 : player.volume;
+
+  bool get canSetVolume => !casting || (cast.target?.hasVolume ?? false);
+
+  Future<void> setVolume(double v) => casting ? cast.setVolume((v * 100).round()) : player.setVolume(v);
+
+  /// [position], updated every frame while playing (here or on the cast
+  /// device), so a seek bar glides instead of ticking.
+  Stream<Duration> smoothPosition() => _positionStream(smooth: true);
+
+  /// [position] a few times a second, for views that rebuild a lot per tick.
+  Stream<Duration> positionUpdates() => _positionStream(smooth: false);
+
+  Stream<Duration> _positionStream({required bool smooth}) {
+    StreamSubscription<Duration>? sub;
+    bool? wasCasting;
+    late final StreamController<Duration> out;
+    void attach() {
+      if (wasCasting == casting) return;
+      wasCasting = casting;
+      sub?.cancel();
+      sub =
+          (casting
+                  ? cast.positionTicks(every: Duration(milliseconds: smooth ? 33 : 200))
+                  : smooth
+                  ? player.createPositionStream(
+                      steps: 100000,
+                      minPeriod: const Duration(milliseconds: 16),
+                      maxPeriod: const Duration(milliseconds: 33),
+                    )
+                  : player.positionStream)
+              .listen(out.add);
+    }
+
+    out = StreamController<Duration>(
+      onListen: () {
+        attach();
+        cast.addListener(attach);
+      },
+      onCancel: () {
+        cast.removeListener(attach);
+        return sub?.cancel();
+      },
+    );
+    return out.stream;
+  }
+
   bool get shuffle => _shuffled;
   LoopMode get loopMode => player.loopMode;
 
@@ -523,7 +587,7 @@ class PlayerController extends ChangeNotifier {
   /// Only counts tracks that actually start playing, not ones the queue passes through while loading.
   void _recordRecent() {
     final id = currentTrack?.id;
-    if (id == null || !player.playing || (_recentIds.isNotEmpty && _recentIds.first == id)) return;
+    if (id == null || !isPlaying || (_recentIds.isNotEmpty && _recentIds.first == id)) return;
     _recentIds = [id, ..._recentIds.where((r) => r != id)].take(_maxRecent).toList();
     final current = currentTrack;
     if (current != null && current.isRemote) {
@@ -699,7 +763,7 @@ class PlayerController extends ChangeNotifier {
     _shuffled = shuffled;
     try {
       await _load(shuffled ? _shuffledFrom(tracks, index) : tracks, shuffled ? 0 : index);
-      unawaited(player.play());
+      unawaited(_play(restart: true));
     } on PlayerException catch (e) {
       debugPrint('Playback failed: ${e.message}');
       _errors.add('Couldn\'t play ${tracks[index].title}${e.message == null ? '' : ': ${e.message}'}');
@@ -717,7 +781,7 @@ class PlayerController extends ChangeNotifier {
     final index = player.sequenceState.sequence.indexWhere((s) => (s.tag as Track).id == track.id);
     if (index < 0) return;
     await player.seek(Duration.zero, index: index);
-    unawaited(player.play());
+    unawaited(_play(restart: true));
   }
 
   /// Puts [tracks] right after the current song ("Play next").
@@ -753,6 +817,8 @@ class PlayerController extends ChangeNotifier {
   Future<void> togglePlay() async {
     if (player.audioSources.isEmpty) {
       if (canPlay) await playCollection(allSongs);
+    } else if (casting) {
+      await (cast.playing ? cast.pause() : _play());
     } else if (player.playing && player.processingState != ProcessingState.completed) {
       await player.pause();
     } else {
@@ -762,12 +828,23 @@ class PlayerController extends ChangeNotifier {
     }
   }
 
+  /// Plays here, or on the cast device. [restart]: the song was just chosen,
+  /// so start it from the top even if it's the one already on the device.
+  Future<void> _play({bool restart = false}) async {
+    if (!casting) return player.play();
+    if (cast.loadedKey != currentTrack?.id) return _castCurrent(play: true);
+    // Already sent (the queue change just did it).
+    if (cast.loading) return;
+    if (restart) await cast.seek(Duration.zero);
+    return cast.play();
+  }
+
   Future<void> next() => player.seekToNext();
 
   /// Restarts the current track unless we're near the beginning.
   Future<void> previous() async {
-    if (player.position > const Duration(seconds: 3) || !player.hasPrevious) {
-      await player.seek(Duration.zero);
+    if (position > const Duration(seconds: 3) || !player.hasPrevious) {
+      await seek(Duration.zero);
     } else {
       await player.seekToPrevious();
     }
@@ -780,6 +857,7 @@ class PlayerController extends ChangeNotifier {
     final enable = !_shuffled;
     final at = _ordered.indexWhere((t) => t.id == current.id);
     if (at < 0) return;
+    // While casting the device keeps playing; only the order here changes.
     final wasPlaying = player.playing;
     final position = player.position;
     _shuffled = enable;
@@ -794,9 +872,116 @@ class PlayerController extends ChangeNotifier {
     LoopMode.one => LoopMode.off,
   });
 
+  // ── Casting (DLNA / UPnP) ───────────────────────────────────────────────
+  //
+  // The queue stays in [player], paused, while a TV or speaker plays: next,
+  // previous and queue picks move it, and [_castFollow] sends the new song.
+
+  late final Cast cast = Cast(
+    onEnded: _castEnded,
+    onError: (message) {
+      _errors.add(message);
+      // The device went away: carry on here, from where it was.
+      if (!casting) _updatePresence(force: true);
+    },
+  )..addListener(notifyListeners);
+
+  bool get casting => cast.active;
+
+  /// Plays on [renderer] from where this device is, or back here (null).
+  Future<void> castTo(DlnaRenderer? renderer) async {
+    if (renderer == null) return _stopCasting();
+    if (cast.target == renderer) return;
+    final from = position;
+    final wasPlaying = isPlaying;
+    try {
+      await cast.connect(renderer);
+    } catch (e) {
+      _errors.add(e is DlnaException ? e.message : 'Can\'t reach ${renderer.name}');
+      return;
+    }
+    await player.pause();
+    if (currentTrack != null) await _castCurrent(from: from, play: wasPlaying);
+    _updatePresence(force: true);
+  }
+
+  Future<void> _stopCasting() async {
+    if (!casting) return;
+    final from = cast.position;
+    final wasPlaying = cast.playing;
+    final onDevice = cast.loadedKey;
+    await cast.disconnect();
+    if (onDevice != null && onDevice == currentTrack?.id) await player.seek(from);
+    if (wasPlaying) unawaited(player.play());
+    _updatePresence(force: true);
+  }
+
+  /// Sends the current song to the cast device when the queue moves on.
+  void _castFollow() {
+    if (!casting || currentTrack == null || cast.loadedKey == currentTrack!.id) return;
+    _castCurrent(play: true);
+  }
+
+  Future<void> _castCurrent({Duration from = Duration.zero, bool play = true}) async {
+    final t = currentTrack;
+    if (t == null || !casting) return;
+    await cast.load(_castItem(t), from: from, play: play);
+  }
+
+  void _castEnded() {
+    if (player.loopMode == LoopMode.one) {
+      _castCurrent(play: true);
+    } else if (player.hasNext) {
+      player.seekToNext().then((_) => _castFollow(), onError: (Object _) {});
+    }
+    _updatePresence(force: true);
+  }
+
+  /// Formats nearly every renderer plays as they are.
+  static const _castMimes = {
+    'mp3': 'audio/mpeg',
+    'flac': 'audio/flac',
+    'm4a': 'audio/mp4',
+    'mp4': 'audio/mp4',
+    'aac': 'audio/mp4',
+    'wav': 'audio/wav',
+  };
+
+  CastItem _castItem(Track t) {
+    final local = t.isRemote ? downloadedCopy(t) : t;
+    final path = local?.path;
+    final CastMedia Function(Duration) media;
+    if (path == null) {
+      // Most TVs and speakers can't decode Opus, so YouTube songs go as AAC.
+      final source = YoutubeAudioSource(t.videoId!, yt: youtube.client, aac: true);
+      media = (_) => CastStream(source, 'audio/mp4');
+    } else {
+      final ext = path.split('.').last.toLowerCase();
+      final direct = _castMimes[ext];
+      if ((direct != null && !t.isCueTrack) || !Metadata.hasFfmpeg) {
+        // Without ffmpeg, the device may still know the format.
+        media = (_) => CastFile(path, direct ?? 'audio/${ext == 'ogg' || ext == 'oga' ? 'ogg' : ext}');
+      } else {
+        final dsd = ext == 'dsf' || ext == 'dff';
+        media = (from) =>
+            CastTranscode(path, start: (t.start ?? Duration.zero) + from, end: t.end, maxRate: dsd ? 176400 : 192000);
+      }
+    }
+    return CastItem(
+      key: t.id,
+      media: media,
+      title: t.title,
+      artist: t.artist,
+      album: t.album,
+      duration: t.isCueTrack && t.end != null ? t.end! - t.start! : t.duration ?? player.duration,
+      art: () => Metadata.artwork(t),
+    );
+  }
+
   @override
   void dispose() {
     MemoryTrim.stop();
+    cast.dispose();
     for (final s in _subs) {
       s.cancel();
     }

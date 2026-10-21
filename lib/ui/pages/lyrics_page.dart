@@ -376,6 +376,13 @@ class _SyncedLyricsState extends State<_SyncedLyrics> with _Extras {
 
   late final List<GlobalKey> _keys = [for (final _ in widget.lyrics.lines) GlobalKey()];
   final _scroll = SmoothScrollController();
+  Stream<Duration>? _position;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _position ??= PlayerScope.read(context).positionUpdates();
+  }
 
   @override
   void dispose() {
@@ -417,10 +424,10 @@ class _SyncedLyricsState extends State<_SyncedLyrics> with _Extras {
         return false;
       },
       child: StreamBuilder<Duration>(
-        stream: c.player.positionStream,
+        stream: _position,
         builder: (context, snap) {
           // A little early: a line should light up as it starts, not after.
-          final at = widget.lyrics.lineAt((snap.data ?? c.player.position) + const Duration(milliseconds: 150));
+          final at = widget.lyrics.lineAt((snap.data ?? c.position) + const Duration(milliseconds: 150));
           _follow(at);
           return SingleChildScrollView(
             controller: _scroll,
@@ -441,8 +448,8 @@ class _SyncedLyricsState extends State<_SyncedLyrics> with _Extras {
                         : Colors.black.withValues(alpha: 0.55),
                     onTap: () {
                       _userScrolledAt = DateTime(0);
-                      c.player.seek(lines[i].time);
-                      if (!c.player.playing) c.player.play();
+                      c.seek(lines[i].time);
+                      if (!c.isPlaying) c.play();
                     },
                   ),
                 _Source(widget.lyrics),

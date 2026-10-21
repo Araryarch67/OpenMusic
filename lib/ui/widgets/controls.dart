@@ -183,12 +183,6 @@ class _EqualizerIconState extends State<EqualizerIcon> with SingleTickerProvider
 
 /// Seek slider with elapsed / total labels; drags locally and seeks on release.
 /// Playback position at display rate (just_audio interpolates between engine updates).
-Stream<Duration> smoothPosition(AudioPlayer player) => player.createPositionStream(
-  steps: 100000,
-  minPeriod: const Duration(milliseconds: 16),
-  maxPeriod: const Duration(milliseconds: 33),
-);
-
 class SeekBar extends StatefulWidget {
   const SeekBar({super.key, this.inline = false});
 
@@ -208,12 +202,12 @@ class _SeekBarState extends State<SeekBar> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     // Every frame instead of every ~200 ms: the bar glides rather than ticks.
-    _position ??= smoothPosition(PlayerScope.read(context).player);
+    _position ??= PlayerScope.read(context).smoothPosition();
   }
 
   @override
   Widget build(BuildContext context) {
-    final player = PlayerScope.read(context).player;
+    final player = PlayerScope.read(context);
     final style = Theme.of(context).textTheme.labelSmall
         ?.copyWith(color: AppColors.textSecondary, fontFeatures: const [FontFeature.tabularFigures()]);
     return StreamBuilder<Duration>(
@@ -483,18 +477,21 @@ class VolumeSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final player = PlayerScope.of(context).player;
+    final c = PlayerScope.of(context);
+    final player = c.player;
+    // While casting, the device's volume (the controller rebuilds this on change).
     return StreamBuilder<double>(
-      stream: player.volumeStream,
+      stream: c.casting ? null : player.volumeStream,
       builder: (context, snapshot) {
-        final volume = snapshot.data ?? player.volume;
+        final volume = c.casting ? c.volume : snapshot.data ?? player.volume;
+        final setVolume = c.canSetVolume ? c.setVolume : null;
         return Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
               tooltip: volume == 0 ? 'Unmute' : 'Mute',
               iconSize: 20,
-              onPressed: () => player.setVolume(volume == 0 ? 1 : 0),
+              onPressed: setVolume == null ? null : () => setVolume(volume == 0 ? 1 : 0),
               icon: Icon(
                 volume == 0
                     ? Icons.volume_off_rounded
@@ -508,7 +505,7 @@ class VolumeSlider extends StatelessWidget {
               child: SliderTheme(
                 // Horizontal padding keeps the thumb (and its hover halo) off the window edge at 100%.
                 data: SliderTheme.of(context).copyWith(padding: const EdgeInsets.symmetric(horizontal: 8)),
-                child: Slider(value: volume, onChanged: player.setVolume),
+                child: Slider(value: volume.clamp(0, 1), onChanged: setVolume),
               ),
             ),
           ],

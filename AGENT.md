@@ -25,7 +25,9 @@ lib/
     player_controller.dart     Queue, shuffle (done in Dart, see below), autoplay, library
     audio_engine.dart          Every mpv audio setting + SignalPath read-back
     lyrics.dart                LRC parser; .lrc file → embedded tag → LRCLIB
-    metadata.dart              Tag reading, cover art, tag editor (FLAC in-process, others via ffmpeg)
+    metadata.dart              Tag reading, cover art, tag editor (FLAC and MP4 in-process, others via ffmpeg)
+    dlna.dart                  DLNA / UPnP: SSDP search, AVTransport control, the LAN server the TV fetches from
+    cast.dart                  A cast session: polls the TV, follows its position, notices a song's end
     cue_sheet.dart             Splits whole-album rips into tracks
     ytmusic_web.dart           YouTube Music InnerTube client (WEB_REMIX), public + signed in
     youtube_music_account.dart Session, library, discover pages, playlist edits, likes, radio
@@ -98,6 +100,11 @@ test/                          Unit and widget tests
 
 - An output device that isn't plugged in (a USB DAC) falls back to the
   system default with a note under Output device; the choice stays saved.
+- **Casting** (`PlayerController.castTo`): the queue stays in `player`, paused,
+  while a TV plays; `_castFollow` sends each new current song. UI must use
+  the controller's `position`, `duration`, `seek`, `play`, `pause`, `volume`
+  and `smoothPosition()` / `positionUpdates()`, never `player.*` directly,
+  or it shows this device's paused player instead of the TV.
 - `services/media_session.dart` (audio_service) mirrors the player to the
   Android notification / lock screen, Control Center and Linux MPRIS.
 
@@ -122,7 +129,7 @@ test/                          Unit and widget tests
 | Package | Why |
 |---|---|
 | `just_audio_media_kit` | Exposes the libmpv player (hook + `activePlayer`) |
-| `audio_metadata_reader` | Its FLAC writer dropped ReplayGain, lyrics, disc numbers and unknown tags on every save; ours keeps them |
+| `audio_metadata_reader` | Its FLAC and MP4 writers dropped ReplayGain, lyrics, disc numbers and unknown tags (MP4 freeform `----` atoms) on every save; ours keep them |
 | `flutter_inappwebview_linux` | Stub: the real one links WPE WebKit; Linux sign-in uses `linux/login_helper` instead |
 
 Mark every change in vendored code with an `OpenMusic:` comment.
