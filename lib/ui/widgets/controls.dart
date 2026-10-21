@@ -483,9 +483,11 @@ class VolumeSlider extends StatelessWidget {
     return StreamBuilder<double>(
       stream: c.casting ? null : player.volumeStream,
       builder: (context, snapshot) {
-        final volume = c.casting ? c.volume : snapshot.data ?? player.volume;
-        final setVolume = c.canSetVolume ? c.setVolume : null;
-        return Row(
+        // DoP must reach the DAC untouched: its volume is the one to use.
+        final dop = !c.casting && c.audio.dopPlaying != null;
+        final volume = dop ? 1.0 : (c.casting ? c.volume : snapshot.data ?? player.volume);
+        final setVolume = c.canSetVolume && !dop ? c.setVolume : null;
+        final row = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
@@ -510,6 +512,7 @@ class VolumeSlider extends StatelessWidget {
             ),
           ],
         );
+        return dop ? Tooltip(message: 'DSD goes to your DAC as it is: use the DAC\'s volume', child: row) : row;
       },
     );
   }

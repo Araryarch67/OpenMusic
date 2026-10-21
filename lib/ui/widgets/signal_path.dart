@@ -42,19 +42,21 @@ class _SignalPathBuilderState extends State<_SignalPathBuilder> {
   Widget build(BuildContext context) => widget.builder(context, _path);
 }
 
-String _codecName(SignalPath p) => switch (p.codec) {
-  'flac' => 'FLAC',
-  'alac' => 'ALAC',
-  'opus' => 'Opus',
-  'vorbis' => 'Vorbis',
-  'aac' => 'AAC',
-  'mp3' || 'mp3float' => 'MP3',
-  'wavpack' => 'WavPack',
-  'ape' => "Monkey's Audio",
-  final c when c.startsWith('pcm_') => p.container == 'aiff' ? 'AIFF' : 'WAV',
-  final c when c.startsWith('dsd_') => 'DSD${p.inRate * 8 ~/ 44100}',
-  final c => c.toUpperCase(),
-};
+String _codecName(SignalPath p) => p.isDop
+    ? 'DSD${p.dopBitRate! ~/ 44100}'
+    : switch (p.codec) {
+        'flac' => 'FLAC',
+        'alac' => 'ALAC',
+        'opus' => 'Opus',
+        'vorbis' => 'Vorbis',
+        'aac' => 'AAC',
+        'mp3' || 'mp3float' => 'MP3',
+        'wavpack' => 'WavPack',
+        'ape' => "Monkey's Audio",
+        final c when c.startsWith('pcm_') => p.container == 'aiff' ? 'AIFF' : 'WAV',
+        final c when c.startsWith('dsd_') => 'DSD${p.inRate * 8 ~/ 44100}',
+        final c => c.toUpperCase(),
+      };
 
 /// Small "FLAC · 24-bit / 96 kHz" label; tap for the full signal path.
 class QualityBadge extends StatelessWidget {
@@ -69,7 +71,9 @@ class QualityBadge extends StatelessWidget {
     return _SignalPathBuilder(
       builder: (context, p) {
         if (p == null) return const SizedBox(height: 28);
-        final label = p.lossless && !p.isDsd
+        final label = p.isDop
+            ? '${_codecName(p)} · DoP'
+            : p.lossless && !p.isDsd
             ? '${_codecName(p)} · ${SignalPath.describe(p.inFormat, p.inRate, stored: p.sourceBits)}'
             : p.isDsd
             ? '${_codecName(p)} → PCM ${SignalPath.formatRate(p.inRate)}'
@@ -138,7 +142,21 @@ class _SignalPathSheet extends StatelessWidget {
         if (p == null) {
           return const Padding(padding: EdgeInsets.all(32), child: Text('Nothing is playing.'));
         }
-        final (verdict, verdictColor, detail) = p.bitPerfect
+        final (verdict, verdictColor, detail) = p.isDop && p.bitPerfect
+            ? (
+                'Native DSD',
+                AppColors.accent,
+                'The DSD stream reaches your DAC as it is, packed as DoP. A DAC that supports DoP '
+                    'shows DSD; one that doesn\'t plays a faint hiss (then turn off Native DSD).',
+              )
+            : p.isDop
+            ? (
+                'DoP is being changed',
+                Theme.of(context).colorScheme.error,
+                'Something between OpenMusic and your DAC changes the samples, so the DAC can\'t see the DSD. '
+                    'Choose a direct output in Settings › Advanced audio.',
+              )
+            : p.bitPerfect
             ? ('Bit-perfect', AppColors.accent, 'Every sample reaches your DAC exactly as it is stored in the file.')
             : p.untouched && p.mixerResamples
             ? (
@@ -159,7 +177,7 @@ class _SignalPathSheet extends StatelessWidget {
             ? (
                 'DSD converted to PCM',
                 Colors.white,
-                'DSD is decoded to high-rate PCM; native DSD / DoP output is not supported.',
+                'DSD is decoded to high-rate PCM. To send it to your DAC as DSD, turn on Bit-perfect mode and Native DSD (DoP) in Settings › Advanced audio.',
               )
             : (
                 'Processed',

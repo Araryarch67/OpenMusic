@@ -185,6 +185,21 @@ class AdvancedAudioSettings extends StatelessWidget {
                         value: audio.bitPerfect,
                         onChanged: audio.setBitPerfect,
                       ),
+                    if (AudioEngine.hasOutputChoice)
+                      SwitchListTile(
+                        secondary: const Icon(Icons.graphic_eq_rounded),
+                        title: const Text('Native DSD (DoP)'),
+                        subtitle: Text(
+                          audio.bitPerfect
+                              ? 'Sends DSD files to your DAC as DSD instead of converting them. '
+                                    'Only for DACs that support DoP: others play a faint hiss, so turn it off then. '
+                                    'The volume stays at 100% for DSD songs; use your DAC\'s.'
+                              : 'Needs Bit-perfect mode',
+                          style: muted,
+                        ),
+                        value: audio.nativeDsd && audio.bitPerfect,
+                        onChanged: audio.bitPerfect ? audio.setNativeDsd : null,
+                      ),
                     if (AudioEngine.hasExclusiveMode)
                       SwitchListTile(
                         secondary: const Icon(Icons.lock_outline_rounded),

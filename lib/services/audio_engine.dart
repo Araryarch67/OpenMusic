@@ -82,6 +82,14 @@ class OutputDevice {
   final bool direct;
 }
 
+/// A DSD file being sent as DoP.
+class DsdPlayback {
+  const DsdPlayback(this.bitRate);
+
+  /// 1-bit samples per second: 2822400 for DSD64.
+  final int bitRate;
+}
+
 /// What is actually happening to the sound right now, read back from mpv.
 class SignalPath {
   const SignalPath({
@@ -102,6 +110,7 @@ class SignalPath {
     this.sourceBits,
     this.dac,
     this.dacName,
+    this.dopBitRate,
   });
 
   final String codec;
@@ -125,6 +134,12 @@ class SignalPath {
 
   /// Bit depth stored in the file (24 for a 24-bit FLAC that decodes to `s32`), when known.
   final int? sourceBits;
+
+  /// Set while a DSD file goes out as DoP: its 1-bit rate (2822400 for DSD64).
+  /// mpv then sees 24-bit PCM, and only bit-perfect output keeps it DSD.
+  final int? dopBitRate;
+
+  bool get isDop => dopBitRate != null;
 
   /// What the sound card is really being fed (Linux reads it from the kernel).
   final HwParams? dac;
@@ -259,6 +274,36 @@ class AudioEngine extends ChangeNotifier {
   /// volume still works (the DAC may have none): untouched at 100%, 64-bit float below.
   bool bitPerfect = false;
 
+  /// DSD files go to the DAC as DSD, packed as DoP, instead of being
+  /// converted to PCM. Needs [bitPerfect] (any change to the samples destroys
+  /// DoP) and a DAC that understands DoP; others play it as faint hiss.
+  bool nativeDsd = false;
+
+  /// Whether DSD files are sent as DoP right now.
+  bool get dopActive => nativeDsd && bitPerfect && hasOutputChoice;
+
+  DsdPlayback? _dop;
+
+  /// The DSD file playing as DoP, if one is (set by the player). Volume is
+  /// held at 100% meanwhile: scaling the samples would destroy the DSD.
+  DsdPlayback? get dopPlaying => _dop;
+
+  set dopPlaying(DsdPlayback? v) {
+    if (v?.bitRate == _dop?.bitRate) {
+      _dop = v;
+      return;
+    }
+    final volumeWasOn = _volumeActive;
+    _dop = v;
+    notifyListeners();
+    if (_native case final p?) {
+      p.setProperty('af', filterChain).then((_) {
+        // The output would otherwise stay in the volume filter's float format.
+        if (v != null && volumeWasOn) return p.command(['ao-reload']);
+      }).ignore();
+    }
+  }
+
   List<OutputDevice> devices = const [OutputDevice('auto', 'System default')];
 
   /// Why the chosen output couldn't be used as asked (shown under Output device).
@@ -295,6 +340,7 @@ class AudioEngine extends ChangeNotifier {
       outputRate = j['outputRate'] as int?;
       hqResampler = j['hqResampler'] as bool? ?? hqResampler;
       bitPerfect = j['bitPerfect'] as bool? ?? bitPerfect;
+      nativeDsd = j['nativeDsd'] as bool? ?? nativeDsd;
       impulsePath = j['impulsePath'] as String?;
       impulseName = j['impulseName'] as String?;
       convolution = (j['convolution'] as bool? ?? false) && impulsePath != null && File(impulsePath!).existsSync();
@@ -323,6 +369,7 @@ class AudioEngine extends ChangeNotifier {
       'outputRate': outputRate,
       'hqResampler': hqResampler,
       'bitPerfect': bitPerfect,
+      'nativeDsd': nativeDsd,
       'impulsePath': impulsePath,
       'impulseName': impulseName,
       'convolution': convolution,
@@ -373,6 +420,7 @@ class AudioEngine extends ChangeNotifier {
   Future<void> setOutputRate(int? v) => _set(() => outputRate = v, reopen: true);
   Future<void> setHqResampler(bool v) => _set(() => hqResampler = v);
   Future<void> setBitPerfect(bool v) => _set(() => bitPerfect = v, reopen: true);
+  Future<void> setNativeDsd(bool v) => _set(() => nativeDsd = v, reopen: true);
 
   Future<void> setEqEnabled(bool v) => _set(() => eqEnabled = v);
 
@@ -418,7 +466,7 @@ class AudioEngine extends ChangeNotifier {
   /// The player's volume, applied by [filterChain] in 64-bit float (mpv stays at 100%).
   double _volume = 1;
 
-  bool get _volumeActive => _volume < 0.99999;
+  bool get _volumeActive => _volume < 0.99999 && _dop == null;
 
   @visibleForTesting
   set debugVolume(double v) => _volume = v;
@@ -426,6 +474,7 @@ class AudioEngine extends ChangeNotifier {
   Future<void> _setVolume(Player player, double v) async {
     final was = _volumeActive;
     _volume = v.clamp(0, 1);
+    if (_dop != null) return; // held at 100% while DoP plays; applied when it ends
     if (player.platform case final NativePlayer p) {
       if (was && _volumeActive) {
         // Just a new level: tell the running filter instead of rebuilding the chain (no click).
@@ -778,9 +827,11 @@ class AudioEngine extends ChangeNotifier {
             final other => other!,
           },
       ],
-      volume: (double.tryParse(await g('volume')) ?? 100) * _volume,
+      // DoP holds the volume at 100% (the filter is left out).
+      volume: (double.tryParse(await g('volume')) ?? 100) * (_dop == null ? _volume : 1),
       leveling: effectiveLeveling != VolumeLeveling.off,
       bitrate: int.tryParse(await g('audio-bitrate')),
+      dopBitRate: _dop?.bitRate,
     );
   }
 }

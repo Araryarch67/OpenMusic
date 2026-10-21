@@ -15,6 +15,7 @@ import 'cast.dart';
 import 'cue_sheet.dart';
 import 'discord_presence.dart';
 import 'dlna.dart';
+import 'dop.dart';
 import 'lyrics.dart';
 import 'lyrics_translation.dart';
 import 'metadata.dart';
@@ -43,6 +44,7 @@ class PlayerController extends ChangeNotifier {
           .listen((_) {
             _maybeAutoplay();
             _castFollow();
+            _followDop();
             _prefetchNext();
             _recordRecent();
             _updatePresence();
@@ -575,6 +577,8 @@ class PlayerController extends ChangeNotifier {
     unawaited(LyricsTranslation.load());
     unawaited(LyricsService.loadBetterLyricsKey());
     audio.addListener(notifyListeners);
+    _dopWasActive = audio.dopActive;
+    audio.addListener(_onAudioSettings);
     notifyListeners();
     unawaited(_enrichUntagged());
   }
@@ -734,6 +738,10 @@ class PlayerController extends ChangeNotifier {
   final _random = math.Random();
 
   AudioSource _sourceFor(Track t) {
+    if (audio.dopActive && !t.isCueTrack && t.path != null && DsdFile.isDsdPath(t.path!)) {
+      final dsd = DsdFile.read(t.path!);
+      if (dsd != null) return DopAudioSource(dsd, tag: t);
+    }
     if (t.isRemote) {
       final local = downloadedCopy(t);
       if (local != null) return AudioSource.uri(local.uri, tag: t);
@@ -742,6 +750,33 @@ class PlayerController extends ChangeNotifier {
     return t.isCueTrack
         ? ClippingAudioSource(child: AudioSource.uri(t.uri), start: t.start, end: t.end, tag: t)
         : AudioSource.uri(t.uri, tag: t);
+  }
+
+  bool _dopWasActive = false;
+
+  /// DoP switched on or off: rebuild the queue so DSD songs change over,
+  /// from where the current one is.
+  void _onAudioSettings() {
+    if (audio.dopActive == _dopWasActive) return;
+    _dopWasActive = audio.dopActive;
+    final seq = player.sequenceState;
+    final at = seq.currentIndex;
+    final hasDsd = seq.sequence.any((s) {
+      final path = (s.tag as Track).path;
+      return path != null && DsdFile.isDsdPath(path);
+    });
+    if (at == null || !hasDsd) return;
+    final wasPlaying = player.playing;
+    final position = player.position;
+    _load([for (final s in seq.sequence) s.tag as Track], at, position: position).then((_) {
+      if (wasPlaying) unawaited(player.play());
+    }, onError: (Object e) => debugPrint('Reloading for DoP failed: $e'));
+  }
+
+  /// Tells the engine when a DoP stream plays (it holds volume at 100%).
+  void _followDop() {
+    final source = player.sequenceState.currentSource;
+    audio.dopPlaying = source is DopAudioSource ? DsdPlayback(source.dsd.bitRate) : null;
   }
 
   /// [first] followed by everything else in random order.
