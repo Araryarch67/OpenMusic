@@ -398,7 +398,7 @@ class TransportControls extends StatelessWidget {
           tooltip: 'Next',
           iconSize: skipSize,
           color: AppColors.textPrimary,
-          onPressed: c.player.hasNext ? c.next : null,
+          onPressed: c.hasNext ? c.next : null,
           icon: const Icon(Icons.skip_next_rounded),
         ),
         if (!large) const SizedBox(width: 8),

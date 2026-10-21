@@ -182,7 +182,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                           tooltip: 'Next',
                           color: Colors.white,
                           iconSize: 26,
-                          onPressed: c.player.hasNext ? c.next : null,
+                          onPressed: c.hasNext ? c.next : null,
                           icon: const Icon(Icons.skip_next_rounded),
                         ),
                       ],

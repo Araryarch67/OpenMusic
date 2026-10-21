@@ -193,12 +193,29 @@ class PlayerController extends ChangeNotifier {
   /// Human-readable playback failures (a stream that wouldn't resolve, a file that's gone).
   Stream<String> get errors => _errors.stream;
 
+  String? _lastError;
+  DateTime _lastErrorAt = DateTime(0);
+
   /// A stream that fails to resolve shouldn't stall the whole queue: report it and move on.
   void _onPlaybackError(PlayerException e) {
-    final title = currentTrack?.title;
+    // mpv reports one failure in several lines ("cannot open file", "failed
+    // to open"): handle it once, or the queue would skip past good songs too.
+    final now = DateTime.now();
+    if (e.message == _lastError && now.difference(_lastErrorAt) < const Duration(seconds: 3)) return;
+    _lastError = e.message;
+    _lastErrorAt = now;
+    // The player's current index can still be the song before (it fails while
+    // opening): mpv names the file it couldn't open, so go by that.
+    final seq = player.sequenceState.sequence;
+    final failed = RegExp(r"'([^']+)'|open (.+)\.$").firstMatch(e.message ?? '');
+    final path = failed?.group(1) ?? failed?.group(2);
+    final at = path == null ? -1 : seq.indexWhere((s) => (s.tag as Track).path == path);
+    final title = at >= 0 ? (seq[at].tag as Track).title : currentTrack?.title;
     _errors.add('Couldn\'t play ${title ?? 'this song'}${e.message == null ? '' : ': ${e.message}'}');
-    if (player.hasNext) {
-      player.seekToNext().then((_) => _play(), onError: (Object _) {});
+    // Repeat-one would retry the same broken song forever: skip it all the same.
+    final next = _neighbour(1, from: at >= 0 ? at : null);
+    if (next != null) {
+      player.seek(Duration.zero, index: next).then((_) => _play(), onError: (Object _) {});
     }
   }
 
@@ -573,6 +590,8 @@ class PlayerController extends ChangeNotifier {
     }
     discord.enabled = prefs.getBool(_discordKey) ?? true;
     _autoplay = prefs.getBool(_autoplayKey) ?? true;
+    final loop = LoopMode.values.asNameMap()[prefs.getString(_loopKey)];
+    if (loop != null && loop != LoopMode.off) await player.setLoopMode(loop);
     await ytMusic.load();
     await audio.load();
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
@@ -811,8 +830,17 @@ class PlayerController extends ChangeNotifier {
     ...([...tracks]..removeAt(first))..shuffle(_random),
   ];
 
-  Future<void> _load(List<Track> order, int index, {Duration? position}) =>
-      player.setAudioSources([for (final t in order) _sourceFor(t)], initialIndex: index, initialPosition: position);
+  Future<void> _load(List<Track> order, int index, {Duration? position}) async {
+    try {
+      await player.setAudioSources(
+        [for (final t in order) _sourceFor(t)],
+        initialIndex: index,
+        initialPosition: position,
+      );
+    } on PlayerInterruptedException {
+      // Something newer took over (another song picked, or a broken one skipped): fine.
+    }
+  }
 
   /// Replaces the queue with [tracks] and starts playing at [index].
   Future<void> playList(List<Track> tracks, int index, {String? from, bool shuffled = false}) async {
@@ -823,8 +851,15 @@ class PlayerController extends ChangeNotifier {
     _ordered = List.of(tracks);
     _shuffled = shuffled;
     try {
-      await _load(shuffled ? _shuffledFrom(tracks, index) : tracks, shuffled ? 0 : index);
-      unawaited(_play(restart: true));
+      // A song that fails to open never finishes loading: stop waiting once
+      // the player reports it ([_onPlaybackError] moves on from there).
+      final failed = Completer<bool>();
+      final sub = player.errorStream.listen((_) => failed.isCompleted ? null : failed.complete(false));
+      final loaded = await Future.any([
+        _load(shuffled ? _shuffledFrom(tracks, index) : tracks, shuffled ? 0 : index).then((_) => true),
+        failed.future,
+      ]).whenComplete(sub.cancel);
+      if (loaded) unawaited(_play(restart: true));
     } on PlayerException catch (e) {
       debugPrint('Playback failed: ${e.message}');
       _errors.add('Couldn\'t play ${tracks[index].title}${e.message == null ? '' : ': ${e.message}'}');
@@ -900,14 +935,36 @@ class PlayerController extends ChangeNotifier {
     return cast.play();
   }
 
-  Future<void> next() => player.seekToNext();
+  /// The song [offset] steps away in play order (the queue is already in
+  /// shuffled order when shuffling). Wraps around in repeat-all.
+  ///
+  /// Not just_audio's next/previous index: in repeat-one those point back at
+  /// the current song, so Next and Previous would only restart it.
+  int? _neighbour(int offset, {int? from}) {
+    final seq = player.sequenceState;
+    final at = from ?? seq.currentIndex;
+    final n = seq.sequence.length;
+    if (at == null || n == 0) return null;
+    final i = at + offset;
+    if (i >= 0 && i < n) return i;
+    return player.loopMode == LoopMode.all ? (i % n + n) % n : null;
+  }
+
+  bool get hasNext => _neighbour(1) != null;
+  bool get hasPrevious => _neighbour(-1) != null;
+
+  Future<void> next() async {
+    final i = _neighbour(1);
+    if (i != null) await player.seek(Duration.zero, index: i);
+  }
 
   /// Restarts the current track unless we're near the beginning.
   Future<void> previous() async {
-    if (position > const Duration(seconds: 3) || !player.hasPrevious) {
+    final i = _neighbour(-1);
+    if (position > const Duration(seconds: 3) || i == null) {
       await seek(Duration.zero);
     } else {
-      await player.seekToPrevious();
+      await player.seek(Duration.zero, index: i);
     }
   }
 
@@ -927,11 +984,21 @@ class PlayerController extends ChangeNotifier {
     if (wasPlaying) unawaited(player.play());
   }
 
-  Future<void> cycleLoopMode() => player.setLoopMode(switch (player.loopMode) {
-    LoopMode.off => LoopMode.all,
-    LoopMode.all => LoopMode.one,
-    LoopMode.one => LoopMode.off,
-  });
+  static const _loopKey = 'loop.v1';
+
+  /// Off → repeat all → repeat one → off. Remembered, like shuffle in the
+  /// streaming apps.
+  Future<void> cycleLoopMode() async {
+    final mode = switch (player.loopMode) {
+      LoopMode.off => LoopMode.all,
+      LoopMode.all => LoopMode.one,
+      LoopMode.one => LoopMode.off,
+    };
+    await player.setLoopMode(mode);
+    // Repeat stops autoplay from adding songs; off lets it pick up again.
+    if (mode == LoopMode.off) _maybeAutoplay();
+    await (await SharedPreferences.getInstance()).setString(_loopKey, mode.name);
+  }
 
   // ── Casting (DLNA / UPnP, AirPlay) ────────────────────────────────────────────
   //
@@ -993,8 +1060,8 @@ class PlayerController extends ChangeNotifier {
   void _castEnded() {
     if (player.loopMode == LoopMode.one) {
       _castCurrent(play: true);
-    } else if (player.hasNext) {
-      player.seekToNext().then((_) => _castFollow(), onError: (Object _) {});
+    } else if (_neighbour(1) case final next?) {
+      player.seek(Duration.zero, index: next).then((_) => _castFollow(), onError: (Object _) {});
     }
     _updatePresence(force: true);
   }

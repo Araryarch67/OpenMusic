@@ -708,7 +708,14 @@ class _SearchBoxState extends State<SearchBox> {
 
   Color get _ink => widget.onBar ? AppColors.textPrimary : Colors.black;
 
-  int get _count => _text.isEmpty ? _recent.length : _queries.length + _hits.length;
+  /// In the title bar the results page updates as you type (like the
+  /// streaming apps), so suggestions would only cover it: just recent
+  /// searches, while the box is empty.
+  int get _count => _text.isEmpty
+      ? _recent.length
+      : widget.onBar
+      ? 0
+      : _queries.length + _hits.length;
 
   /// Shows the dropdown when there's something in it and the field has focus.
   void _sync() {
