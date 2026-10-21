@@ -59,6 +59,8 @@ add_subdirectory("runner")
 
 # Optional YouTube Music sign-in window; see login_helper/CMakeLists.txt.
 add_subdirectory("login_helper")
+# Audio plugins through Carla; see carla_bridge/openmusic_carla.cc.
+add_subdirectory("carla_bridge")
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
@@ -102,6 +104,8 @@ if(TARGET openmusic_login)
   install(TARGETS openmusic_login RUNTIME DESTINATION "${CMAKE_INSTALL_PREFIX}"
     COMPONENT Runtime)
 endif()
+install(TARGETS openmusic_carla LIBRARY DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
 
 install(FILES "runner/openmusic.png" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   COMPONENT Runtime)

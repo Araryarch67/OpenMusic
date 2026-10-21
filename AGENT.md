@@ -43,6 +43,7 @@ lib/
     pages/                     One file per screen; sound_settings.dart, equalizer_page.dart…
     widgets/                   Shared widgets: controls, page_scaffold, smooth_scroll, signal_path
 linux/login_helper/            C++ GTK3 + webkit2gtk-4.1 sign-in helper
+linux/carla_bridge/            LADSPA plugin that runs a Carla project in mpv's filter chain (audio plugins)
 third_party/                   Vendored packages (see below)
 integration_test/              Real-engine tests, run in headless Weston
 test/                          Unit and widget tests

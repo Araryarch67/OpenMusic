@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE CARLA-PROJECT>
+<CARLA-PROJECT VERSION='2.5'>
+ <!-- LSP Limiter (LV2) used as a plain -6 dB gain: threshold 0 dB, no boost or level regulation. -->
+ <Plugin>
+  <Info>
+   <Type>LV2</Type>
+   <Name>LSP Limiter Stereo</Name>
+   <URI>http://lsp-plug.in/plugins/lv2/limiter_stereo</URI>
+  </Info>
+  <Data>
+   <Active>Yes</Active>
+   <Parameter><Index>6</Index><Symbol>g_out</Symbol><Value>0.5</Value></Parameter>
+   <Parameter><Index>8</Index><Symbol>alr</Symbol><Value>0</Value></Parameter>
+   <Parameter><Index>12</Index><Symbol>th</Symbol><Value>1</Value></Parameter>
+   <Parameter><Index>14</Index><Symbol>boost</Symbol><Value>0</Value></Parameter>
+  </Data>
+ </Plugin>
+</CARLA-PROJECT>

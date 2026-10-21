@@ -212,6 +212,25 @@ class AdvancedAudioSettings extends StatelessWidget {
                         value: audio.exclusive || locked,
                         onChanged: locked ? null : audio.setExclusive,
                       ),
+                    if (AudioEngine.hasPlugins)
+                      SettingTile(
+                        icon: Icons.extension_outlined,
+                        title: const Text('Audio plugins'),
+                        subtitle: Text(
+                          locked ? 'Off while bit-perfect mode is on' : 'VST, LV2 and CLAP plugins, set up in Carla: add them there and save, and they play here',
+                          style: muted,
+                        ),
+                        control: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            TextButton(
+                              onPressed: locked ? null : audio.editPlugins,
+                              child: const Text('Edit in Carla'),
+                            ),
+                            Switch(value: audio.plugins && !locked, onChanged: locked ? null : audio.setPlugins),
+                          ],
+                        ),
+                      ),
                     if (AudioEngine.hasRoomCorrection)
                       SettingTile(
                         icon: Icons.surround_sound_rounded,

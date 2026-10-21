@@ -275,6 +275,60 @@ class AudioEngine extends ChangeNotifier {
   /// volume still works (the DAC may have none): untouched at 100%, 64-bit float below.
   bool bitPerfect = false;
 
+  /// Audio plugins (VST2, LV2, CLAP, LADSPA...) set up in Carla's window and
+  /// run in the filter chain through the bundled LADSPA bridge.
+  bool plugins = false;
+
+  /// The bridge in the app bundle (Linux): `lib/libopenmusic_carla.so`.
+  static String? get pluginBridge {
+    if (!Platform.isLinux) return null;
+    final path = '${File(Platform.resolvedExecutable).parent.path}/lib/libopenmusic_carla.so';
+    return File(path).existsSync() ? path : null;
+  }
+
+  static const _carlaDirs = [
+    '/usr/lib/carla',
+    '/usr/lib64/carla',
+    '/usr/local/lib/carla',
+    '/usr/lib/x86_64-linux-gnu/carla',
+  ];
+
+  /// Whether Carla is installed (the bridge loads it when a song starts).
+  static bool get carlaInstalled => _carlaDirs.any((d) => File('$d/libcarla_native-plugin.so').existsSync());
+
+  /// Plugins can be offered: Linux, the bridge in the bundle and Carla installed.
+  static bool get hasPlugins => pluginBridge != null && carlaInstalled;
+
+  /// The Carla project the bridge loads (it reads the same place).
+  static String get pluginsProject {
+    final env = Platform.environment;
+    final config = (env['XDG_CONFIG_HOME'] ?? '').isNotEmpty ? env['XDG_CONFIG_HOME']! : '${env['HOME']}/.config';
+    return '$config/openmusic/plugins.carxp';
+  }
+
+  bool get pluginsActive => plugins && !bitPerfect && hasPlugins && File(pluginsProject).existsSync();
+
+  Future<void> setPlugins(bool v) => _set(() => plugins = v);
+
+  StreamSubscription<FileSystemEvent>? _projectWatch;
+
+  /// Opens Carla on the plugins project (made empty the first time). Saving
+  /// there applies the plugins: a new filter instance loads the project.
+  Future<void> editPlugins() async {
+    final project = File(pluginsProject);
+    if (!project.existsSync()) {
+      await project.parent.create(recursive: true);
+      await project.writeAsString(
+        "<?xml version='1.0' encoding='UTF-8'?>\n<!DOCTYPE CARLA-PROJECT>\n<CARLA-PROJECT VERSION='2.5'>\n</CARLA-PROJECT>\n",
+      );
+    }
+    _projectWatch ??= project.parent.watch().where((e) => e.path == project.path).listen((_) {
+      if (pluginsActive) _changed();
+    });
+    await Process.start('carla', [project.path], mode: ProcessStartMode.detached);
+    if (!plugins) await setPlugins(true);
+  }
+
   /// DSD files go to the DAC as DSD, packed as DoP, instead of being
   /// converted to PCM. Needs [bitPerfect] (any change to the samples destroys
   /// DoP) and a DAC that understands DoP; others play it as faint hiss.
@@ -342,6 +396,7 @@ class AudioEngine extends ChangeNotifier {
       hqResampler = j['hqResampler'] as bool? ?? hqResampler;
       bitPerfect = j['bitPerfect'] as bool? ?? bitPerfect;
       nativeDsd = j['nativeDsd'] as bool? ?? nativeDsd;
+      plugins = j['plugins'] as bool? ?? plugins;
       impulsePath = j['impulsePath'] as String?;
       impulseName = j['impulseName'] as String?;
       convolution = (j['convolution'] as bool? ?? false) && impulsePath != null && File(impulsePath!).existsSync();
@@ -371,6 +426,7 @@ class AudioEngine extends ChangeNotifier {
       'hqResampler': hqResampler,
       'bitPerfect': bitPerfect,
       'nativeDsd': nativeDsd,
+      'plugins': plugins,
       'impulsePath': impulsePath,
       'impulseName': impulseName,
       'convolution': convolution,
@@ -513,6 +569,7 @@ class AudioEngine extends ChangeNotifier {
         if (preamp < 0) '@preamp:lavfi=[volume=volume=${n(preamp)}dB]',
         '@eq:lavfi=[${bands.where((b) => b.gain.abs() > 0.05).map((b) => 'equalizer=f=${n(b.frequency)}:t=q:w=${n(b.q)}:g=${n(b.gain)}').join(',')}]',
       ],
+      if (pluginsActive) '@plugins:lavfi=[ladspa=file=${pluginBridge!.replaceAll(':', '\\:')}:plugin=openmusic_carla]',
       if (crossfeedActive) '@crossfeed:lavfi=[crossfeed=strength=${n(0.1 + crossfeed * 0.6)}:range=0.5]',
       // Last, so nothing after it can clip what it lowered.
       if (_volumeActive) '@volume:lavfi=[volume=volume=${_volume.toStringAsFixed(6)}:precision=double]',
@@ -636,6 +693,7 @@ class AudioEngine extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _projectWatch?.cancel();
     _releaseCard();
     super.dispose();
   }
@@ -825,6 +883,7 @@ class AudioEngine extends ChangeNotifier {
             'preamp' => 'Equalizer headroom',
             'crossfeed' => 'Headphone crossfeed',
             'convolution' => 'Room correction (${impulseName ?? 'convolution'})',
+            'plugins' => 'Audio plugins (Carla)',
             final other => other!,
           },
       ],
