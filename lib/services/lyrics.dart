@@ -125,7 +125,8 @@ class Lyrics {
 
 /// Finds lyrics: a `.lrc` next to the file, then tags, then online. Online,
 /// timed lyrics win over plain ones, in this order: YouTube Music (its own
-/// Lyrics tab), LRCLIB, then Better Lyrics; plain text in the same order.
+/// Lyrics tab), LRCLIB, Better Lyrics, then NetEase Cloud Music; plain text
+/// in the same order, and lyrics.ovh when no one else has any.
 abstract final class LyricsService {
   static final _cache = <String, Future<Lyrics>>{};
 
@@ -156,17 +157,24 @@ abstract final class LyricsService {
       }
     }
 
-    // The two main sources at once; Better Lyrics only if neither has them timed.
+    // The two main sources at once; the next two only if neither has them timed.
     final found = [
       ...await Future.wait([attempt(() => _youtube(track)), attempt(() => _lrclib(track))]),
     ];
     if (found.firstWhere(_timed, orElse: () => null) case final timed?) return timed;
-    found.add(await attempt(() => _betterLyrics(track)));
+    found.addAll(await Future.wait([attempt(() => _betterLyrics(track)), attempt(() => netease(track))]));
     if (found.firstWhere(_timed, orElse: () => null) case final timed?) return timed;
-    for (final l in found) {
-      if (l == null) continue;
-      if (l.plain != null || l.instrumental) return l.synced ? Lyrics(plain: l.plain, source: l.source) : l;
+    Lyrics? plain() {
+      for (final l in found) {
+        if (l == null) continue;
+        if (l.plain != null || l.instrumental) return l.synced ? Lyrics(plain: l.plain, source: l.source) : l;
+      }
+      return null;
     }
+
+    if (plain() case final l?) return l;
+    found.add(await attempt(() => lyricsOvh(track)));
+    if (plain() case final l?) return l;
     if (errors.length == found.length) throw errors.first; // nothing could be asked
     return Lyrics.none;
   }
@@ -212,6 +220,81 @@ abstract final class LyricsService {
     if (ttml is! String || ttml.trim().isEmpty) return null;
     final l = Lyrics.parseTtml(ttml, source: 'Better Lyrics');
     return l.synced ? l : null;
+  }
+
+  static final _http = http.Client();
+
+  /// Lowercase letters and digits only, so "Hati-Hati di Jalan" matches "hati hati di jalan".
+  static String _norm(String s) => s.toLowerCase().replaceAll(RegExp(r'[^\p{L}\p{N}]', unicode: true), '');
+
+  /// NetEase's songwriter and producer credits, given as the first timed lines.
+  static final _credit = RegExp(r'^\s*(\[[^\]]*\])*\s*(作词|作曲|编曲|制作人|监制|混音|录音|和声|母带|词|曲)\s*[:：]');
+
+  /// NetEase Cloud Music: a large catalogue of timed lyrics, including many
+  /// songs LRCLIB lacks. Free and keyless; the same endpoints open-source
+  /// players (LyricsX, YesPlayMusic) use.
+  @visibleForTesting
+  static Future<Lyrics?> netease(Track track, {http.Client? client}) async {
+    final artist = track.artist == Track.unknownArtist ? '' : track.artist;
+    if (artist.isEmpty) return null;
+    final c = client ?? _http;
+    final title = _cleanTitle(track.title);
+    // Without the desktop client's cookie many songs come back with empty lyrics.
+    const headers = {'User-Agent': 'Mozilla/5.0', 'Referer': 'https://music.163.com', 'Cookie': 'os=pc'};
+    final res = await c.get(
+      Uri.https('music.163.com', '/api/cloudsearch/pc', {'s': '$artist $title', 'type': '1', 'limit': '10'}),
+      headers: headers,
+    );
+    if (res.statusCode != 200) throw HttpException('NetEase ${res.statusCode}');
+    final result = (jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>)['result'];
+    final songs = ((result is Map ? result['songs'] : null) as List? ?? const []).cast<Map<String, dynamic>>();
+    final want = _norm(title), who = _norm(artist), seconds = track.duration?.inSeconds;
+    // Same title, a shared artist and the same length: covers and remixes share titles.
+    // The same song is often listed more than once, not every copy with lyrics.
+    final matches = songs.where((s) {
+      final artists = [for (final a in (s['ar'] as List? ?? const [])) _norm((a as Map)['name'] as String? ?? '')];
+      final ms = (s['dt'] as num?)?.toInt();
+      return _norm(_cleanTitle(s['name'] as String? ?? '')) == want &&
+          artists.any((a) => a.isNotEmpty && (who.contains(a) || a.contains(who))) &&
+          (seconds == null || ms == null || (ms / 1000 - seconds).abs() <= 3);
+    });
+    for (final song in matches.take(3)) {
+      final lr = await c.get(
+        Uri.https('music.163.com', '/api/song/lyric', {'id': '${song['id']}', 'lv': '-1'}),
+        headers: headers,
+      );
+      if (lr.statusCode != 200) throw HttpException('NetEase ${lr.statusCode}');
+      final text = ((jsonDecode(utf8.decode(lr.bodyBytes)) as Map<String, dynamic>)['lrc'] as Map?)?['lyric'];
+      if (text is! String || text.trim().isEmpty) continue;
+      if (text.contains('纯音乐')) return const Lyrics(instrumental: true, source: 'NetEase Cloud Music');
+      final l = Lyrics.parse(
+        text.split('\n').where((line) => !_credit.hasMatch(line)).join('\n'),
+        source: 'NetEase Cloud Music',
+      );
+      if (!l.isEmpty) return l;
+    }
+    return null;
+  }
+
+  /// lyrics.ovh (open source): plain text only, so it is asked last.
+  @visibleForTesting
+  static Future<Lyrics?> lyricsOvh(Track track, {http.Client? client}) async {
+    final artist = track.artist == Track.unknownArtist ? '' : track.artist;
+    if (artist.isEmpty) return null;
+    final res = await (client ?? _http)
+        .get(
+          Uri(scheme: 'https', host: 'api.lyrics.ovh', pathSegments: ['v1', artist, _cleanTitle(track.title)]),
+          headers: _headers,
+        )
+        // It is often slow; a lyrics view shouldn't wait on it for long.
+        .timeout(const Duration(seconds: 8));
+    if (res.statusCode == 404) return null;
+    if (res.statusCode != 200) throw HttpException('lyrics.ovh ${res.statusCode}');
+    final text = (jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>)['lyrics'];
+    if (text is! String) return null;
+    // Some entries start with a French "Paroles de la chanson … par …" heading.
+    final plain = text.replaceFirst(RegExp(r'^Paroles de la chanson[^\n]*\n'), '').replaceAll('\r', '').trim();
+    return plain.isEmpty ? null : Lyrics(plain: plain, source: 'lyrics.ovh');
   }
 
   static Lyrics? _local(String path) {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/lyrics.dart';
 import 'package:openmusic/services/ytmusic_web.dart';
 
@@ -161,5 +162,127 @@ void main() {
       (62500, 'Bertemu'),
       (70250, 'denganku'),
     ]);
+  });
+
+  Track song(String file, int seconds) =>
+      Track.fromUri(Uri.file('/m/$file.mp3')).copyWith(duration: Duration(seconds: seconds));
+  http.Response json(Object o) => http.Response.bytes(utf8.encode(jsonEncode(o)), 200);
+
+  test('NetEase: picks the same song by the same artist and drops the credits', () async {
+    final l = (await LyricsService.netease(
+      song('Tulus - Hati-Hati di Jalan', 242),
+      client: MockClient((req) async {
+        if (req.url.path == '/api/cloudsearch/pc') {
+          return json({
+            'result': {
+              'songs': [
+                {
+                  'id': 1,
+                  'name': 'Tulus - Hati-Hati Di Jalan (Hyperpop)',
+                  'ar': [
+                    {'name': 'Marshal'},
+                  ],
+                  'dt': 106422,
+                },
+                {
+                  'id': 2,
+                  'name': 'Hati-Hati di Jalan',
+                  'ar': [
+                    {'name': 'Tulus'},
+                  ],
+                  'dt': 300000,
+                },
+                {
+                  'id': 3,
+                  'name': 'Hati-Hati di Jalan',
+                  'ar': [
+                    {'name': 'Tulus'},
+                  ],
+                  'dt': 242187,
+                },
+                {
+                  'id': 4,
+                  'name': 'Hati-Hati di Jalan',
+                  'ar': [
+                    {'name': 'Tulus'},
+                  ],
+                  'dt': 242000,
+                },
+              ],
+            },
+          });
+        }
+        expect(req.headers['Cookie'], 'os=pc');
+        if (req.url.queryParameters['id'] == '2') fail('wrong length, should be skipped');
+        if (req.url.queryParameters['id'] == '3') {
+          return json({
+            'lrc': {'lyric': ''},
+          });
+        }
+        return json({
+          'lrc': {
+            'lyric':
+                '[00:00.000] 作词 : Tulus\n[00:01.000] 作曲 : Tulus\n[00:12.110]Perjalanan membawamu\n'
+                '[00:17.190]Bertemu denganku',
+          },
+        });
+      }),
+    ))!;
+    expect(l.source, 'NetEase Cloud Music');
+    expect(l.lines.map((x) => x.text).where((t) => t.isNotEmpty), ['Perjalanan membawamu', 'Bertemu denganku']);
+  });
+
+  test('NetEase: no match by title and artist, no lyrics', () async {
+    final l = await LyricsService.netease(
+      song('Tulus - Hati-Hati di Jalan', 242),
+      client: MockClient((req) async {
+        if (req.url.path == '/api/cloudsearch/pc') {
+          return json({
+            'result': {
+              'songs': [
+                {
+                  'id': 1,
+                  'name': 'Hati-Hati di Jalan',
+                  'ar': [
+                    {'name': 'Someone Else'},
+                  ],
+                  'dt': 242000,
+                },
+              ],
+            },
+          });
+        }
+        fail('should not fetch lyrics without a match');
+      }),
+    );
+    expect(l, isNull);
+  });
+
+  test('lyrics.ovh: plain text, French heading removed, 404 is no lyrics', () async {
+    final l = (await LyricsService.lyricsOvh(
+      song('Coldplay - Yellow', 269),
+      client: MockClient((req) async {
+        expect(req.url.pathSegments, ['v1', 'Coldplay', 'Yellow']);
+        return json({'lyrics': 'Paroles de la chanson Yellow par Coldplay\r\nLook at the stars\nLook how they shine'});
+      }),
+    ))!;
+    expect(l.plain, 'Look at the stars\nLook how they shine');
+    expect(l.source, 'lyrics.ovh');
+    final none = await LyricsService.lyricsOvh(
+      song('Coldplay - Yellow', 269),
+      client: MockClient((_) async => http.Response('{"error":"No lyrics found"}', 404)),
+    );
+    expect(none, isNull);
+  });
+
+  test('live: NetEase has timed lyrics for an Indonesian song', () async {
+    final l = await LyricsService.netease(song('Tulus - Hati-Hati di Jalan', 242));
+    expect(l?.synced, isTrue);
+    expect(l!.lines.any((x) => x.text.contains('作')), isFalse, reason: 'credits left in');
+  });
+
+  test('live: lyrics.ovh answers', () async {
+    final l = await LyricsService.lyricsOvh(song('Coldplay - Yellow', 269));
+    expect(l?.plain, contains('Look at the stars'));
   });
 }
