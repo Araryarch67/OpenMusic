@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../services/discord_presence.dart';
+import '../../services/lyrics.dart';
 import '../../services/player_controller.dart';
 import '../../services/youtube_importer.dart';
 import '../../services/ytdlp.dart';
@@ -55,7 +56,7 @@ class _SettingsPageState extends State<SettingsPage> {
       _Section.playback,
       if (AudioEngine.supported) _Section.advanced,
       _Section.downloads,
-      if (DiscordPresence.supported) _Section.integrations,
+      _Section.integrations,
     ];
 
     Widget body(_Section s) => switch (s) {
@@ -129,12 +130,30 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       _Section.integrations => SettingsCard(
         children: [
-          SwitchListTile(
-            secondary: const Icon(Icons.discord),
-            title: const Text('Discord Rich Presence'),
-            subtitle: Text('Show what you\'re listening to on your Discord profile', style: muted),
-            value: c.discordEnabled,
-            onChanged: c.setDiscordEnabled,
+          if (DiscordPresence.supported)
+            SwitchListTile(
+              secondary: const Icon(Icons.discord),
+              title: const Text('Discord Rich Presence'),
+              subtitle: Text('Show what you\'re listening to on your Discord profile', style: muted),
+              value: c.discordEnabled,
+              onChanged: c.setDiscordEnabled,
+            ),
+          ListTile(
+            leading: const Icon(Icons.key_rounded),
+            title: const Text('Better Lyrics API key'),
+            subtitle: Text(
+              LyricsService.betterLyricsKey == null
+                  ? 'Optional. Lets Better Lyrics find lyrics it hasn\'t saved yet, if you have a key.'
+                  : 'Added. Better Lyrics can find lyrics it hasn\'t saved yet.',
+              style: muted,
+            ),
+            trailing: TextButton(
+              onPressed: () async {
+                await showDialog<void>(context: context, builder: (_) => const _BetterLyricsKeyDialog());
+                if (mounted) setState(() {});
+              },
+              child: Text(LyricsService.betterLyricsKey == null ? 'Add' : 'Change'),
+            ),
           ),
         ],
       ),
@@ -188,4 +207,87 @@ enum _Section {
   const _Section(this.label, this.icon);
   final String label;
   final IconData icon;
+}
+
+/// Paste, check and save (or remove) a Better Lyrics API key.
+class _BetterLyricsKeyDialog extends StatefulWidget {
+  const _BetterLyricsKeyDialog();
+
+  @override
+  State<_BetterLyricsKeyDialog> createState() => _BetterLyricsKeyDialogState();
+}
+
+class _BetterLyricsKeyDialogState extends State<_BetterLyricsKeyDialog> {
+  late final _key = TextEditingController(text: LyricsService.betterLyricsKey ?? '');
+  bool _checking = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _key.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save(String? key) async {
+    setState(() {
+      _checking = true;
+      _error = null;
+    });
+    try {
+      final ok = await LyricsService.setBetterLyricsKey(key);
+      if (!mounted) return;
+      if (ok) return Navigator.pop(context);
+      setState(() => _error = 'Better Lyrics says this key isn\'t valid.');
+    } catch (_) {
+      if (mounted) setState(() => _error = 'Couldn\'t reach Better Lyrics to check the key. Try again.');
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Better Lyrics API key'),
+    content: SizedBox(
+      width: 420,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Without a key, lyrics from Better Lyrics still work for every song it has saved. '
+            'Better Lyrics isn\'t giving out new keys right now.',
+            style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _key,
+            autofocus: true,
+            obscureText: true,
+            enabled: !_checking,
+            decoration: InputDecoration(
+              labelText: 'API key',
+              border: const OutlineInputBorder(),
+              isDense: true,
+              errorText: _error,
+              errorMaxLines: 2,
+            ),
+            onSubmitted: (v) => _save(v),
+          ),
+        ],
+      ),
+    ),
+    actions: [
+      if (LyricsService.betterLyricsKey != null)
+        TextButton(onPressed: _checking ? null : () => _save(null), child: const Text('Remove')),
+      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+      ListenableBuilder(
+        listenable: _key,
+        builder: (context, _) => FilledButton(
+          onPressed: _checking || _key.text.trim().isEmpty ? null : () => _save(_key.text),
+          child: Text(_checking ? 'Checking…' : 'Save'),
+        ),
+      ),
+    ],
+  );
 }

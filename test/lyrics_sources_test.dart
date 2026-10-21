@@ -6,6 +6,7 @@ import 'package:http/testing.dart';
 import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/lyrics.dart';
 import 'package:openmusic/services/ytmusic_web.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 // Trimmed from real replies (2026-10, "Hati-Hati di Jalan" by Tulus).
 Map<String, dynamic> _next() => {
@@ -284,5 +285,25 @@ void main() {
   test('live: lyrics.ovh answers', () async {
     final l = await LyricsService.lyricsOvh(song('Coldplay - Yellow', 269));
     expect(l?.plain, contains('Look at the stars'));
+  });
+
+  test('Better Lyrics key: a key Better Lyrics rejects is not saved, a good one is', () async {
+    SharedPreferences.setMockInitialValues({});
+    // A bad key only gets a 401 on a cache miss; a cached song is served to anyone.
+    MockClient server(int status, String mode) => MockClient((req) async {
+      expect(req.headers['X-API-Key'], isNotNull);
+      expect(req.url.queryParameters['s'], contains('key check'), reason: 'must not be a cached song');
+      return http.Response('{}', status, headers: {'x-auth-mode': mode});
+    });
+    expect(await LyricsService.setBetterLyricsKey('wrong', client: server(401, 'invalid')), isFalse);
+    expect(LyricsService.betterLyricsKey, isNull);
+    expect(await LyricsService.setBetterLyricsKey('  good-key ', client: server(404, 'authenticated')), isTrue);
+    expect(LyricsService.betterLyricsKey, 'good-key');
+    LyricsService.betterLyricsKey = null;
+    await LyricsService.loadBetterLyricsKey();
+    expect(LyricsService.betterLyricsKey, 'good-key', reason: 'kept across restarts');
+    expect(await LyricsService.setBetterLyricsKey(null), isTrue);
+    expect(LyricsService.betterLyricsKey, isNull);
+    expect((await SharedPreferences.getInstance()).getString('lyrics.betterLyricsKey'), isNull);
   });
 }

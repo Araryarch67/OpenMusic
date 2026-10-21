@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'package:audio_metadata_reader/audio_metadata_reader.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:xml/xml.dart';
 
 import '../models/track.dart';
@@ -200,6 +201,44 @@ abstract final class LyricsService {
     }
   }
 
+  /// The user's own Better Lyrics API key, if they have one: it lets Better
+  /// Lyrics fetch songs it hasn't cached yet. Optional; keys aren't handed out
+  /// to everyone.
+  static String? betterLyricsKey;
+
+  static Future<void> loadBetterLyricsKey() async {
+    betterLyricsKey = (await SharedPreferences.getInstance()).getString('lyrics.betterLyricsKey');
+  }
+
+  /// Saves [key] (null removes it) after Better Lyrics accepts it. Returns
+  /// false when Better Lyrics says the key isn't valid; throws when it can't
+  /// be reached.
+  static Future<bool> setBetterLyricsKey(String? key, {http.Client? client}) async {
+    key = key?.trim();
+    if (key != null && key.isEmpty) key = null;
+    if (key != null) {
+      // Better Lyrics only checks the key on a cache miss (a cached song is
+      // served to anyone), so ask for a song that can't be cached.
+      final res = await (client ?? _http).get(
+        Uri.https('api.betterlyrics.org', '/getLyrics', {
+          's': 'openmusic key check ${DateTime.now().microsecondsSinceEpoch}',
+          'a': 'openmusic',
+          'd': '1',
+        }),
+        headers: {..._headers, 'X-API-Key': key},
+      );
+      final mode = res.headers['x-auth-mode'];
+      if (mode == 'invalid' || res.statusCode == 401 || res.statusCode == 403) return false;
+      if (mode == null && res.statusCode >= 500) throw HttpException('Better Lyrics ${res.statusCode}');
+    }
+    final prefs = await SharedPreferences.getInstance();
+    key == null ? await prefs.remove('lyrics.betterLyricsKey') : await prefs.setString('lyrics.betterLyricsKey', key);
+    betterLyricsKey = key;
+    // Songs that came up empty may have lyrics now.
+    _cache.clear();
+    return true;
+  }
+
   /// Better Lyrics (api.betterlyrics.org): word-timed lyrics. Without an API
   /// key it only serves songs it has already cached; a miss is no lyrics.
   static Future<Lyrics?> _betterLyrics(Track track) async {
@@ -213,7 +252,7 @@ abstract final class LyricsService {
         if (track.duration case final d?) 'd': '${d.inSeconds}',
         'videoId': ?track.videoId,
       }),
-      headers: _headers,
+      headers: {..._headers, 'X-API-Key': ?betterLyricsKey},
     );
     if (res.statusCode != 200) return null; // 401 (not cached), 404, 429...
     final ttml = (jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>)['ttml'];

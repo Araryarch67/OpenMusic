@@ -13,6 +13,7 @@ import '../models/track.dart';
 import 'audio_engine.dart';
 import 'cue_sheet.dart';
 import 'discord_presence.dart';
+import 'lyrics.dart';
 import 'lyrics_translation.dart';
 import 'metadata.dart';
 import 'memory_trim.dart';
@@ -508,6 +509,7 @@ class PlayerController extends ChangeNotifier {
     await audio.load();
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
     unawaited(LyricsTranslation.load());
+    unawaited(LyricsService.loadBetterLyricsKey());
     audio.addListener(notifyListeners);
     notifyListeners();
     unawaited(_enrichUntagged());
