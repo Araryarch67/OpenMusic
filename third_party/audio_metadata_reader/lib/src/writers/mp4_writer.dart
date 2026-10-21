@@ -103,7 +103,7 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
       _wroteIlst = false;
       Uint8List processedData = _processBox(box.data);
       if (!_wroteIlst) {
-        // No udta/meta/ilst yet: add the whole chain.
+        // OpenMusic: no udta/meta/ilst yet: add the whole chain.
         processedData = Uint8List.fromList(
             [...processedData, ..._serializeBox("udta", _newMetaBox())]);
       }
@@ -155,7 +155,7 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
       offset += boxDataLength;
 
       if (box.type == "ilst") {
-        // Only the first ilst is edited; readers ignore any others.
+        // OpenMusic: only the first ilst is edited; readers ignore any others.
         byteBuilder.add(_serializeBox(
             box.type, _wroteIlst ? boxData : _replaceMetadata(boxData)));
         _wroteIlst = true;
@@ -171,7 +171,7 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
           }
           metaBuilder.add(recursiveBoxData);
           if (!_wroteIlst) {
-            // meta without an ilst: add one.
+            // OpenMusic: meta without an ilst: add one.
             metaBuilder.add(_serializeBox("ilst", _replaceMetadata(null)));
             _wroteIlst = true;
           }
@@ -179,7 +179,7 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
         } else {
           Uint8List recursiveBoxData = _processBox(boxData);
           if (box.type == "udta" && !_wroteIlst) {
-            // udta without a meta box: the meta goes inside it.
+            // OpenMusic: udta without a meta box: the meta goes inside it.
             recursiveBoxData =
                 Uint8List.fromList([...recursiveBoxData, ..._newMetaBox()]);
           }
@@ -362,10 +362,10 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
     return builder.toBytes();
   }
 
-  /// Set once the `ilst` of the current `moov` has been written.
+  /// OpenMusic: set once the `ilst` of the current `moov` has been written.
   bool _wroteIlst = false;
 
-  /// Items this writer owns. Every other `ilst` item (freeform `----` atoms
+  /// OpenMusic: items this writer owns. Every other `ilst` item (freeform `----` atoms
   /// such as ReplayGain and MusicBrainz IDs, `aART`, `cpil`, ...) is copied
   /// through unchanged.
   static const Set<String> _ownedItems = <String>{
@@ -380,7 +380,7 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
     "disk",
   };
 
-  /// A `meta` box with the iTunes handler and the new `ilst`.
+  /// OpenMusic: a `meta` box with the iTunes handler and the new `ilst`.
   Uint8List _newMetaBox() {
     final hdlr = Uint8List(25); // version/flags, pre_defined, type, reserved, name
     hdlr.setRange(8, 16, "mdirappl".codeUnits);
@@ -401,14 +401,14 @@ class Mp4Writer extends BaseMetadataWriter<Mp4Metadata> {
 
     int offset = 0;
     while (data != null && offset < data.length) {
-      // Not _readBox: items under a `keys` table are named by binary index.
+      // OpenMusic: not _readBox: items under a `keys` table are named by binary index.
       final Uint8List header = _readBytes(data, offset, 8);
       final int size = getUint32(header.sublist(0, 4));
       if (size < 8 || size > data.length - offset) {
         throw const FormatException("MP4 ilst item extends beyond ilst");
       }
       final String type = String.fromCharCodes(header.sublist(4));
-      // The cover is only replaced when a new one is given.
+      // OpenMusic: the cover is only replaced when a new one is given.
       final owned = _ownedItems.contains(type) ||
           (type == "covr" && mp4metadata.picture != null);
       if (!owned) ilstBuilder.add(data.sublist(offset, offset + size));
