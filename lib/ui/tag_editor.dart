@@ -73,6 +73,29 @@ class _TagEditorDialogState extends State<_TagEditorDialog> {
     });
   }
 
+  bool _searching = false;
+
+  Future<void> _findCover() async {
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _searching = true);
+    try {
+      final found = await Metadata.findCoverOnline(_artist.text.trim(), _album.text.trim());
+      if (!mounted) return;
+      if (found == null) {
+        messenger.showSnackBar(const SnackBar(content: Text('No cover found for this album')));
+      } else {
+        setState(() {
+          _cover = found.bytes;
+          _coverMime = found.mime;
+        });
+      }
+    } catch (_) {
+      messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t reach the Cover Art Archive')));
+    } finally {
+      if (mounted) setState(() => _searching = false);
+    }
+  }
+
   String? _text(TextEditingController c) => c.text.trim().isEmpty ? null : c.text.trim();
   int? _int(TextEditingController c) => int.tryParse(c.text.trim());
 
@@ -110,9 +133,28 @@ class _TagEditorDialogState extends State<_TagEditorDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        OutlinedButton(
-                          onPressed: Metadata.canEditCover(widget.track) ? _pickCover : null,
-                          child: const Text('Change cover'),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            OutlinedButton(
+                              onPressed: Metadata.canEditCover(widget.track) ? _pickCover : null,
+                              child: const Text('Change cover'),
+                            ),
+                            ListenableBuilder(
+                              listenable: Listenable.merge([_artist, _album]),
+                              builder: (context, _) => OutlinedButton(
+                                onPressed:
+                                    Metadata.canEditCover(widget.track) &&
+                                        !_searching &&
+                                        _artist.text.trim().isNotEmpty &&
+                                        _album.text.trim().isNotEmpty
+                                    ? _findCover
+                                    : null,
+                                child: Text(_searching ? 'Searching…' : 'Find online'),
+                              ),
+                            ),
+                          ],
                         ),
                         const SizedBox(height: 4),
                         Text(

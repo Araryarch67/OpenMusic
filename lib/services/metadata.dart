@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:typed_data';
@@ -274,6 +275,48 @@ abstract final class Metadata {
     } catch (_) {
       return null;
     }
+  }
+
+  static const _coverHeaders = {'User-Agent': 'OpenMusic (https://github.com/Araryarch67/openmusic)'};
+
+  /// Looks up the front cover of [album] by [artist] on MusicBrainz and
+  /// downloads it from the Cover Art Archive. Null when nothing is found;
+  /// throws when the services can't be reached.
+  ///
+  /// Takes the 1200 px rendition: sharp on any screen, while originals are
+  /// often 20 MB+ scans that would be embedded into every song of the album.
+  static Future<({Uint8List bytes, String mime})?> findCoverOnline(
+    String artist,
+    String album, {
+    http.Client? client,
+  }) async {
+    final http.Client c = client ?? _artHttp;
+    String quote(String s) => '"${s.replaceAllMapped(RegExp(r'["\\]'), (m) => '\\${m[0]}')}"';
+    final res = await c.get(
+      Uri.https('musicbrainz.org', '/ws/2/release-group/', {
+        'query': 'releasegroup:${quote(album)} AND artist:${quote(artist)}',
+        'fmt': 'json',
+        'limit': '5',
+      }),
+      headers: _coverHeaders,
+    );
+    if (res.statusCode != 200) throw HttpException('MusicBrainz ${res.statusCode}');
+    final groups = ((jsonDecode(utf8.decode(res.bodyBytes)) as Map)['release-groups'] as List? ?? const [])
+        .cast<Map<String, dynamic>>()
+        // Low scores are other albums that only share a word.
+        .where((g) => ((g['score'] as num?) ?? 0) >= 90)
+        .take(3);
+    for (final g in groups) {
+      final art = await c.get(
+        Uri.https('coverartarchive.org', '/release-group/${g['id']}/front-1200'),
+        headers: _coverHeaders,
+      );
+      if (art.statusCode == 404) continue;
+      if (art.statusCode != 200) throw HttpException('Cover Art Archive ${art.statusCode}');
+      final png = art.headers['content-type']?.contains('png') ?? false;
+      return (bytes: art.bodyBytes, mime: png ? 'image/png' : 'image/jpeg');
+    }
+    return null;
   }
 
   static Uint8List? _embeddedPicture(String path) {
