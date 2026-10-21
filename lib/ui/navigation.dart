@@ -117,7 +117,7 @@ class HistoryButtons extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         _Arrow(icon: Icons.chevron_left_rounded, tooltip: 'Back', onPressed: history.canGoBack ? history.back : null),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
         _Arrow(
           icon: Icons.chevron_right_rounded,
           tooltip: 'Forward',
@@ -139,16 +139,15 @@ class _Arrow extends StatelessWidget {
   Widget build(BuildContext context) => IconButton(
     tooltip: tooltip,
     onPressed: onPressed,
+    // Plain chevrons in the title bar, like a browser's.
     style: IconButton.styleFrom(
-      backgroundColor: Colors.black.withValues(alpha: 0.55),
-      disabledBackgroundColor: Colors.black.withValues(alpha: 0.3),
       foregroundColor: AppColors.textPrimary,
       disabledForegroundColor: AppColors.textMuted,
-      minimumSize: const Size(32, 32),
-      fixedSize: const Size(32, 32),
+      minimumSize: const Size(36, 36),
+      fixedSize: const Size(36, 36),
       padding: EdgeInsets.zero,
     ),
-    icon: Icon(icon, size: 24),
+    icon: Icon(icon, size: 28),
   );
 }
 

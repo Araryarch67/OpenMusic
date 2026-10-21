@@ -8,7 +8,6 @@ import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/controls.dart';
 import '../widgets/smooth_scroll.dart';
-import '../navigation.dart';
 
 /// Lyrics of whatever is playing, following the song line by line.
 ///
@@ -40,8 +39,8 @@ class LyricsPage extends StatelessWidget {
                 padding: const EdgeInsets.fromLTRB(8, 8, 16, 0),
                 child: Row(
                   children: [
-                    if (ShellScope.of(context).history case final history? when !fullScreen)
-                      HistoryButtons(history: history)
+                    if (ShellScope.of(context).history != null && !fullScreen)
+                      const SizedBox(width: 8)
                     else if (canPop)
                       IconButton(
                         tooltip: fullScreen ? 'Close' : 'Back',

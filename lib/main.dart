@@ -147,9 +147,9 @@ class _DesktopFrame extends StatelessWidget {
       child: Column(
         children: [
           // Hidden while the player fills the screen.
-          ValueListenableBuilder(
-            valueListenable: fullScreenPlayer,
-            builder: (context, full, bar) => full ? const SizedBox.shrink() : bar!,
+          ListenableBuilder(
+            listenable: Listenable.merge([fullScreenPlayer, titleBarInShell]),
+            builder: (context, bar) => fullScreenPlayer.value || titleBarInShell.value ? const SizedBox.shrink() : bar!,
             child: const AppTitleBar(),
           ),
           Expanded(

@@ -8,13 +8,27 @@ import '../theme.dart';
 /// Desktop platforms draw their own title bar; mobile has none.
 bool get hasCustomTitleBar => Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
+/// True while the desktop layout draws the title bar itself (with Back /
+/// Forward, Home and search in it); the app frame then leaves its plain one out.
+final titleBarInShell = ValueNotifier<bool>(false);
+
 /// Draggable app-coloured title bar with window buttons.
 /// macOS keeps its native traffic lights (TitleBarStyle.hidden overlays them),
 /// so we only reserve room for them there.
+///
+/// [leading] and [center] fill it in the desktop layout; without them it shows
+/// the app's name. The empty space around them drags the window.
 class AppTitleBar extends StatefulWidget {
-  const AppTitleBar({super.key});
+  const AppTitleBar({super.key, this.leading, this.center, this.height = AppTitleBar.plainHeight});
 
-  static const height = 36.0;
+  static const plainHeight = 36.0;
+
+  /// With Back / Forward and the search box in it.
+  static const tallHeight = 64.0;
+
+  final Widget? leading;
+  final Widget? center;
+  final double height;
 
   @override
   State<AppTitleBar> createState() => _AppTitleBarState();
@@ -60,8 +74,39 @@ class _AppTitleBarState extends State<AppTitleBar> with WindowListener {
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
+    Widget drag(Widget child) => GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      onPanStart: (_) => windowManager.startDragging(),
+      onDoubleTap: _toggleMaximize,
+      child: child,
+    );
+    if (widget.center != null || widget.leading != null) {
+      // The centre piece sits in the middle of the window, whatever the sides hold.
+      return SizedBox(
+        height: widget.height,
+        child: Stack(
+          children: [
+            Positioned.fill(child: drag(const SizedBox.expand())),
+            Positioned.fill(
+              child: Row(
+                children: [
+                  SizedBox(width: Platform.isMacOS ? 80 : 12),
+                  ?widget.leading,
+                  const Spacer(),
+                  if (!Platform.isMacOS) ..._windowButtons(),
+                ],
+              ),
+            ),
+            if (widget.center != null)
+              Center(
+                child: FractionallySizedBox(widthFactor: 0.5, child: Center(child: widget.center)),
+              ),
+          ],
+        ),
+      );
+    }
     return SizedBox(
-      height: AppTitleBar.height,
+      height: widget.height,
       child: Row(
         children: [
           Expanded(
@@ -88,20 +133,22 @@ class _AppTitleBarState extends State<AppTitleBar> with WindowListener {
               ),
             ),
           ),
-          if (!Platform.isMacOS) ...[
-            _WindowButton(tooltip: 'Minimize', icon: Icons.remove_rounded, onPressed: windowManager.minimize),
-            _WindowButton(
-              tooltip: _maximized ? 'Restore' : 'Maximize',
-              icon: _maximized ? Icons.filter_none_rounded : Icons.crop_square_rounded,
-              iconSize: _maximized ? 13 : 15,
-              onPressed: _toggleMaximize,
-            ),
-            _WindowButton(tooltip: 'Close', icon: Icons.close_rounded, onPressed: windowManager.close, danger: true),
-          ],
+          if (!Platform.isMacOS) ..._windowButtons(),
         ],
       ),
     );
   }
+
+  List<Widget> _windowButtons() => [
+    _WindowButton(tooltip: 'Minimize', icon: Icons.remove_rounded, onPressed: windowManager.minimize),
+    _WindowButton(
+      tooltip: _maximized ? 'Restore' : 'Maximize',
+      icon: _maximized ? Icons.filter_none_rounded : Icons.crop_square_rounded,
+      iconSize: _maximized ? 13 : 15,
+      onPressed: _toggleMaximize,
+    ),
+    _WindowButton(tooltip: 'Close', icon: Icons.close_rounded, onPressed: windowManager.close, danger: true),
+  ];
 }
 
 class _WindowButton extends StatefulWidget {
@@ -139,7 +186,7 @@ class _WindowButtonState extends State<_WindowButton> {
           onTap: widget.onPressed,
           child: Container(
             width: 46,
-            height: AppTitleBar.height,
+            height: AppTitleBar.plainHeight,
             color: _hover ? (widget.danger ? const Color(0xFFC42B1C) : AppColors.hover) : Colors.transparent,
             child: Icon(
               widget.icon,

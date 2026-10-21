@@ -23,6 +23,7 @@ import 'theme.dart';
 import 'youtube_import.dart';
 import '../services/youtube_importer.dart';
 import 'widgets/smooth_scroll.dart';
+import 'widgets/title_bar.dart';
 
 enum _Tab { home, search, library }
 
@@ -42,8 +43,8 @@ class _HomeShellState extends State<HomeShell> {
   bool _sidePanel = true;
   final _searchFocus = FocusNode();
 
-  /// The desktop history's search box (the phone tab has its own; both stay mounted).
-  final _desktopSearchFocus = FocusNode();
+  /// The title bar's search box (desktop); the phone tab has its own.
+  final _search = SearchInput();
   final _navigators = {for (final t in _Tab.values) t: GlobalKey<NavigatorState>()};
 
   NavigatorState? get _nav => _navigators[_tab]!.currentState;
@@ -65,7 +66,8 @@ class _HomeShellState extends State<HomeShell> {
   void dispose() {
     _errors?.cancel();
     _searchFocus.dispose();
-    _desktopSearchFocus.dispose();
+    _search.dispose();
+    if (titleBarInShell.value) titleBarInShell.value = false;
     super.dispose();
   }
 
@@ -96,11 +98,63 @@ class _HomeShellState extends State<HomeShell> {
 
   void _goSearch() {
     if (_compact) return _selectTab(_Tab.search);
-    if (_history.location != Locations.search) {
-      _history.open(SearchPage(focusNode: _desktopSearchFocus), Locations.search);
-    }
-    WidgetsBinding.instance.addPostFrameCallback((_) => _desktopSearchFocus.requestFocus());
+    _showSearchResults();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _search.focus.requestFocus());
   }
+
+  /// The search page, fed by the title bar's box (opened as soon as you type).
+  void _showSearchResults() {
+    if (_history.location == Locations.search) return;
+    final typing = _search.focus.hasFocus;
+    _history.open(SearchPage(input: _search), Locations.search);
+    // The new page takes keyboard focus once it's built; the next keystrokes belong in the box.
+    if (typing) WidgetsBinding.instance.addPostFrameCallback((_) => _search.focus.requestFocus());
+  }
+
+  /// Back / Forward, Home and search, in the desktop title bar.
+  Widget _titleBar() => AppTitleBar(
+    height: AppTitleBar.tallHeight,
+    leading: HistoryButtons(history: _history),
+    center: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 560),
+      child: Row(
+        children: [
+          ListenableBuilder(
+            listenable: _history,
+            builder: (context, _) {
+              final home = _history.location == Locations.home;
+              return IconButton.filled(
+                tooltip: 'Home',
+                onPressed: _goHome,
+                style: IconButton.styleFrom(
+                  backgroundColor: AppColors.tile,
+                  hoverColor: AppColors.hover,
+                  foregroundColor: home ? AppColors.textPrimary : AppColors.textSecondary,
+                  fixedSize: const Size(48, 48),
+                ),
+                icon: Icon(home ? Icons.home_rounded : Icons.home_outlined, size: 26),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: SearchBox(
+              onBar: true,
+              controller: _search.controller,
+              focusNode: _search.focus,
+              onChanged: (q) {
+                if (q.trim().isNotEmpty) _showSearchResults();
+              },
+              onSubmitted: (q) {
+                _showSearchResults();
+                _search.submit(q);
+              },
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
 
   static Route<void> _route(Widget page, {String? location}) => PageRouteBuilder(
     // The page rides along so Forward can rebuild it after Back.
@@ -257,6 +311,13 @@ class _HomeShellState extends State<HomeShell> {
     final expanded = width >= 1200;
 
     _compact = compact;
+    // The frame's plain title bar steps aside while this layout draws the full one.
+    final ownBar = !compact && hasCustomTitleBar;
+    if (titleBarInShell.value != ownBar) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) titleBarInShell.value = ownBar;
+      });
+    }
 
     final shortcuts = <ShortcutActivator, VoidCallback>{
       const SingleActivator(LogicalKeyboardKey.space): c.togglePlay,
@@ -325,6 +386,12 @@ class _HomeShellState extends State<HomeShell> {
             bottom: false,
             child: Column(
               children: [
+                if (hasCustomTitleBar)
+                  ValueListenableBuilder(
+                    valueListenable: fullScreenPlayer,
+                    builder: (context, full, bar) => full ? const SizedBox.shrink() : bar!,
+                    child: _titleBar(),
+                  ),
                 Expanded(
                   // Full-screen player on top; the pages stay alive (and their history) underneath.
                   child: ValueListenableBuilder(
@@ -338,7 +405,7 @@ class _HomeShellState extends State<HomeShell> {
                       ],
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+                      padding: EdgeInsets.fromLTRB(8, hasCustomTitleBar ? 0 : 8, 8, 0),
                       child: Row(
                         children: [
                           SizedBox(
@@ -350,6 +417,8 @@ class _HomeShellState extends State<HomeShell> {
                                 location: _history.location,
                                 onHome: _goHome,
                                 onSearch: _goSearch,
+                                // Home and search sit in the title bar instead.
+                                inTitleBar: hasCustomTitleBar,
                               ),
                             ),
                           ),
@@ -381,7 +450,8 @@ class _HomeShellState extends State<HomeShell> {
         if (e.buttons & kBackMouseButton != 0) _history.back();
         if (e.buttons & kForwardMouseButton != 0) _history.forward();
       },
-      child: Focus(autofocus: true, onKeyEvent: (node, event) => _handleShortcut(event, shortcuts), child: body),
+      // A scope, so focus leaving the title bar's search box lands here (where Space plays) and not above.
+      child: FocusScope(autofocus: true, onKeyEvent: (node, event) => _handleShortcut(event, shortcuts), child: body),
     );
   }
 
@@ -487,9 +557,16 @@ class _Panel extends StatelessWidget {
 }
 
 class _Sidebar extends StatelessWidget {
-  const _Sidebar({required this.collapsed, required this.location, required this.onHome, required this.onSearch});
+  const _Sidebar({
+    required this.collapsed,
+    required this.location,
+    required this.onHome,
+    required this.onSearch,
+    this.inTitleBar = false,
+  });
 
   final bool collapsed;
+  final bool inTitleBar;
 
   /// What's on screen, so its entry can be highlighted.
   final String location;
@@ -527,8 +604,10 @@ class _Sidebar extends StatelessWidget {
     }
 
     final navItems = [
-      item(Locations.home, Icons.home_outlined, Icons.home_rounded, 'Home', onHome),
-      item(Locations.search, Icons.search_rounded, Icons.manage_search_rounded, 'Search', onSearch),
+      if (!inTitleBar) ...[
+        item(Locations.home, Icons.home_outlined, Icons.home_rounded, 'Home', onHome),
+        item(Locations.search, Icons.search_rounded, Icons.manage_search_rounded, 'Search', onSearch),
+      ],
       _DownloadsLink(collapsed: collapsed, selected: location == Locations.downloads),
       item(Locations.settings, Icons.settings_outlined, Icons.settings_rounded, 'Settings', () {
         if (location != Locations.settings) ShellScope.of(context).open(const SettingsPage());

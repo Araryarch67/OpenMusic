@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../navigation.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import 'smooth_scroll.dart';
@@ -43,7 +42,7 @@ class _PageScaffoldState extends State<PageScaffold> {
     final color = widget.gradientColor ?? AppColors.elevated;
     // Pages below this one, not above: Navigator.canPop() goes stale on a root page rebuilt while covered.
     final canPop = ModalRoute.of(context)?.canPop ?? false;
-    // Desktop: Back / Forward always sit in the same spot, greyed out when there's nowhere to go.
+    // Desktop: Back / Forward live in the title bar; the bar here only carries the title.
     final history = shell.history;
     final showBar = history != null || canPop || widget.actions.isNotEmpty;
     final barOpacity = ((_offset - 180) / 80).clamp(0.0, 1.0);
@@ -100,9 +99,7 @@ class _PageScaffoldState extends State<PageScaffold> {
                   padding: EdgeInsets.only(top: topInset, left: 8, right: 8),
                   child: Row(
                     children: [
-                      if (history != null)
-                        HistoryButtons(history: history)
-                      else if (canPop)
+                      if (history == null && canPop)
                         IconButton.filled(
                           tooltip: 'Back',
                           style: IconButton.styleFrom(backgroundColor: Colors.black45, foregroundColor: Colors.white),

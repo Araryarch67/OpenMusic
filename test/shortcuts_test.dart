@@ -19,9 +19,9 @@ void main() {
 
     await tester.pumpWidget(OpenMusicApp(controller: PlayerController()));
     await tester.pump();
-    await tester.tap(find.text('Search').first);
-    await tester.pump(const Duration(milliseconds: 400));
-    final field = find.byType(TextField).first;
+    // The search box in the desktop title bar.
+    final field = find.widgetWithText(TextField, 'What do you want to play?').first;
+    final controller = tester.widget<TextField>(field).controller!;
     await tester.tap(field);
     await tester.pump();
 
@@ -34,7 +34,7 @@ void main() {
     await tester.pump();
     expect(spaceHandled, isFalse);
 
-    final text = tester.widget<TextField>(field).controller!.text;
+    final text = controller.text;
     expect(text, startsWith('pasted-client-id'));
     clipboard = null;
 

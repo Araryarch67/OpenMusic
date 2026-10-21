@@ -18,17 +18,59 @@ import '../widgets/shelf.dart';
 import '../widgets/track_row.dart';
 import '../widgets/smooth_scroll.dart';
 
+/// The desktop title bar's search box, shared with the search page: typing
+/// there drives the page's results.
+class SearchInput {
+  final controller = TextEditingController();
+  final focus = FocusNode();
+
+  /// Enter (or a picked suggestion): search now, with this text.
+  final submitted = ValueNotifier<(String, int)>(('', 0));
+
+  void submit(String query) => submitted.value = (query, submitted.value.$2 + 1);
+
+  void dispose() {
+    controller.dispose();
+    focus.dispose();
+    submitted.dispose();
+  }
+}
+
 class SearchPage extends StatefulWidget {
-  const SearchPage({super.key, this.focusNode});
+  const SearchPage({super.key, this.focusNode, this.input});
 
   final FocusNode? focusNode;
+
+  /// Desktop: the title bar's search box types into this page, which then
+  /// shows no box of its own.
+  final SearchInput? input;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
 }
 
 class _SearchPageState extends State<SearchPage> {
-  final _controller = TextEditingController();
+  late final TextEditingController _controller = widget.input?.controller ?? TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.input case final input?) {
+      input.controller.addListener(_fromBar);
+      input.submitted.addListener(_submittedFromBar);
+      // Opened by typing: pick up what's there already.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _fromBar());
+    }
+  }
+
+  void _fromBar() {
+    if (mounted && _controller.text != _query) _onQuery(_controller.text);
+  }
+
+  void _submittedFromBar() {
+    if (mounted) _submit(widget.input!.submitted.value.$1);
+  }
+
   String _query = '';
   Timer? _debounce;
   Future<List<Track>>? _youtube;
@@ -44,7 +86,12 @@ class _SearchPageState extends State<SearchPage> {
   @override
   void dispose() {
     _debounce?.cancel();
-    _controller.dispose();
+    if (widget.input case final input?) {
+      input.controller.removeListener(_fromBar);
+      input.submitted.removeListener(_submittedFromBar);
+    } else {
+      _controller.dispose();
+    }
     super.dispose();
   }
 
@@ -115,17 +162,18 @@ class _SearchPageState extends State<SearchPage> {
                   Text('Search', style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 16),
                 ],
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: _SearchBox(
-                    controller: _controller,
-                    focusNode: widget.focusNode,
-                    onChanged: _onQuery,
-                    onSubmitted: _submit,
+                if (widget.input == null)
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    child: SearchBox(
+                      controller: _controller,
+                      focusNode: widget.focusNode,
+                      onChanged: _onQuery,
+                      onSubmitted: _submit,
+                    ),
                   ),
-                ),
                 if (searching) ...[
-                  const SizedBox(height: 16),
+                  if (widget.input == null) const SizedBox(height: 16),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
@@ -598,19 +646,29 @@ abstract final class RecentSearches {
 /// The search field, with a dropdown of suggestions under it while typing
 /// (completed searches, then artists / songs / albums to open directly) and
 /// recent searches while it's empty. Arrow keys move, Enter picks, Esc closes.
-class _SearchBox extends StatefulWidget {
-  const _SearchBox({required this.controller, required this.onChanged, required this.onSubmitted, this.focusNode});
+class SearchBox extends StatefulWidget {
+  const SearchBox({
+    super.key,
+    required this.controller,
+    required this.onChanged,
+    required this.onSubmitted,
+    this.focusNode,
+    this.onBar = false,
+  });
 
   final TextEditingController controller;
   final FocusNode? focusNode;
   final ValueChanged<String> onChanged;
   final ValueChanged<String> onSubmitted;
 
+  /// In the dark title bar: a dark pill instead of the white one.
+  final bool onBar;
+
   @override
-  State<_SearchBox> createState() => _SearchBoxState();
+  State<SearchBox> createState() => _SearchBoxState();
 }
 
-class _SearchBoxState extends State<_SearchBox> {
+class _SearchBoxState extends State<SearchBox> {
   final _portal = OverlayPortalController();
   final _link = LayerLink();
   late final FocusNode _focus = widget.focusNode ?? FocusNode();
@@ -647,6 +705,8 @@ class _SearchBoxState extends State<_SearchBox> {
   }
 
   String get _text => widget.controller.text.trim();
+
+  Color get _ink => widget.onBar ? AppColors.textPrimary : Colors.black;
 
   int get _count => _text.isEmpty ? _recent.length : _queries.length + _hits.length;
 
@@ -778,17 +838,20 @@ class _SearchBoxState extends State<_SearchBox> {
                   widget.onSubmitted(v);
                   if (v.trim().isNotEmpty) RecentSearches.load().then((r) => _recent = r);
                 },
-                style: text.bodyLarge?.copyWith(color: Colors.black, fontWeight: FontWeight.w500),
-                cursorColor: Colors.black,
+                style: text.bodyLarge?.copyWith(color: _ink, fontWeight: FontWeight.w500),
+                cursorColor: _ink,
                 decoration: InputDecoration(
                   hintText: 'What do you want to play?',
-                  hintStyle: text.bodyLarge?.copyWith(color: Colors.black54),
-                  prefixIcon: const Icon(Icons.search_rounded, color: Colors.black87),
+                  hintStyle: text.bodyLarge?.copyWith(color: widget.onBar ? AppColors.textSecondary : Colors.black54),
+                  prefixIcon: Icon(
+                    Icons.search_rounded,
+                    color: widget.onBar ? AppColors.textSecondary : Colors.black87,
+                  ),
                   suffixIcon: widget.controller.text.isEmpty
                       ? null
                       : IconButton(
                           tooltip: 'Clear',
-                          color: Colors.black87,
+                          color: widget.onBar ? AppColors.textSecondary : Colors.black87,
                           onPressed: () {
                             widget.controller.clear();
                             _changed('');
@@ -797,9 +860,15 @@ class _SearchBoxState extends State<_SearchBox> {
                           icon: const Icon(Icons.close_rounded),
                         ),
                   filled: true,
-                  fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 14),
+                  fillColor: widget.onBar ? AppColors.tile : Colors.white,
+                  hoverColor: widget.onBar ? AppColors.hover : null,
+                  contentPadding: EdgeInsets.symmetric(vertical: widget.onBar ? 12 : 14),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(500), borderSide: BorderSide.none),
+                  // Focused in the bar: a light ring, like the streaming apps.
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(500),
+                    borderSide: widget.onBar ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                  ),
                 ),
               ),
             ),
