@@ -38,7 +38,7 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 | **Follow artists** | Artists you follow on YouTube Music show up in your library; follow or unfollow from any artist page. |
 | **Playlists** | OpenMusic playlists live on your device and can mix your own files with YouTube Music songs. |
 | **Autoplay** | When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song. |
-| **Synced lyrics** | Follow the song line by line, from YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net) or [Better Lyrics](https://betterlyrics.org). Click a line to jump to it. |
+| **Synced lyrics** | Follow the song line by line, from YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net), [Better Lyrics](https://betterlyrics.org), NetEase Cloud Music or [lyrics.ovh](https://lyrics.ovh). Click a line to jump to it. Turn on **Pronunciation** (romaji for Japanese, and the like for other scripts) and **Translation** into your language under each line. |
 | **Hi-fi audio** | On desktop and Android: a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio). |
 | **Fast** | YouTube songs start in about 0.3 s and the next one in the queue in under 20 ms (it's fetched ahead); Home appears at once on launch from the last session's shelves. Light on memory too: about 165 MB at rest on Linux. |
 | **Make it yours** | Pick an accent colour, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, set the text size, and on Linux make the window see-through so your compositor's blur shows behind it. |
@@ -118,7 +118,7 @@ OpenMusic stands on the shoulders of:
 - [FFmpeg](https://ffmpeg.org) for decoding, filters and resampling (with [SoX's resampler](https://sourceforge.net/projects/soxr/))
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) and [youtube_explode_dart](https://github.com/Hexer10/youtube_explode_dart) for YouTube audio
 - [ytmusicapi](https://github.com/sigma67/ytmusicapi), whose documentation of YouTube Music's API this app follows
-- [LRCLIB](https://lrclib.net) and [Better Lyrics](https://betterlyrics.org) for free synced lyrics
+- [LRCLIB](https://lrclib.net), [Better Lyrics](https://betterlyrics.org), NetEase Cloud Music and [lyrics.ovh](https://lyrics.ovh) for free lyrics
 - [audio_metadata_reader](https://github.com/ClementBeal/audio_metadata_reader) for tags
 
 OpenMusic is not affiliated with YouTube, Google or Discord.
