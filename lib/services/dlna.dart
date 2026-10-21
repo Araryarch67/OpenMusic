@@ -99,10 +99,13 @@ abstract final class Dlna {
       for (final address in [for (final i in interfaces) ...i.addresses]) {
         try {
           final socket = await RawDatagramSocket.bind(address, 0);
-          // Send on this network, not just the one with the default route.
-          socket.setRawOption(
-            RawSocketOption(RawSocketOption.levelIPv4, RawSocketOption.IPv4MulticastInterface, address.rawAddress),
-          );
+          // Send on this network, not just the one with the default route
+          // (optional: some systems refuse the option, the default route still works).
+          try {
+            socket.setRawOption(
+              RawSocketOption(RawSocketOption.levelIPv4, RawSocketOption.IPv4MulticastInterface, address.rawAddress),
+            );
+          } catch (_) {}
           sockets.add(socket);
           socket.listen((event) {
             if (event != RawSocketEvent.read) return;
