@@ -1,10 +1,12 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -30,6 +32,9 @@ Future<void> main() async {
     await windowManager.waitUntilReadyToShow(
       WindowOptions(
         title: 'OpenMusic',
+        // Opens in the middle of the screen, sized to it (tiling WMs place it themselves).
+        size: await _startSize(),
+        center: true,
         minimumSize: const Size(320, 420),
         // Linux: the window has an alpha channel; Flutter paints the background.
         backgroundColor: Platform.isLinux ? Colors.transparent : AppColors.background,
@@ -46,6 +51,20 @@ Future<void> main() async {
   await controller.load();
   await MediaSession.start(controller);
   runApp(OpenMusicApp(controller: controller));
+}
+
+/// A window that suits the screen: 85% of its height (up to 960), about
+/// 16:10 wide, never wider than 85% of the screen. Falls back to 1280 x 820.
+Future<Size> _startSize() async {
+  try {
+    final screen = (await screenRetriever.getPrimaryDisplay()).visibleSize;
+    if (screen == null || screen.isEmpty) throw StateError('no display size');
+    final height = math.min(screen.height * 0.85, 960.0);
+    final width = math.min(screen.width * 0.85, height * 1.6);
+    return Size(width.roundToDouble(), height.roundToDouble());
+  } catch (_) {
+    return const Size(1280, 820);
+  }
 }
 
 /// Debug builds: also append every framework error (with full stack) to
