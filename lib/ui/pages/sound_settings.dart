@@ -371,9 +371,12 @@ class SettingsDivider extends StatelessWidget {
 /// A settings row whose control sits on the right, or under the text when
 /// the window is too narrow for both side by side.
 class SettingTile extends StatelessWidget {
-  const SettingTile({super.key, required this.title, this.subtitle, required this.control, this.icon});
+  const SettingTile({super.key, required this.title, this.subtitle, required this.control, this.icon, this.leading});
 
   final IconData? icon;
+
+  /// Instead of [icon] (e.g. an avatar).
+  final Widget? leading;
   final Widget title;
   final Widget? subtitle;
   final Widget control;
@@ -381,9 +384,14 @@ class SettingTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) => constraints.maxWidth >= 520
-        ? ListTile(leading: icon == null ? null : Icon(icon), title: title, subtitle: subtitle, trailing: control)
+        ? ListTile(
+            leading: leading ?? (icon == null ? null : Icon(icon)),
+            title: title,
+            subtitle: subtitle,
+            trailing: control,
+          )
         : ListTile(
-            leading: icon == null ? null : Icon(icon),
+            leading: leading ?? (icon == null ? null : Icon(icon)),
             title: title,
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

@@ -66,7 +66,8 @@ class _SettingsPageState extends State<SettingsPage> {
           final account = c.ytMusic;
           return SettingsCard(
             children: [
-              ListTile(
+              // Stacks the button under the text on narrow windows.
+              SettingTile(
                 leading: CircleAvatar(
                   radius: 20,
                   backgroundColor: AppColors.hover,
@@ -80,7 +81,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       : 'Not signed in. Search and the public home work without an account.',
                   style: muted,
                 ),
-                trailing: account.isSignedIn
+                control: account.isSignedIn
                     ? TextButton(onPressed: account.signOut, child: const Text('Disconnect'))
                     : FilledButton(
                         style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
