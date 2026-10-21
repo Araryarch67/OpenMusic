@@ -44,7 +44,7 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 | **Make it yours** | Pick an accent colour, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, set the text size, and on Linux make the window see-through so your compositor's blur shows behind it. |
 | **Downloads** | Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves. |
 | **Made for every screen** | Bottom tabs and a floating mini player on phones (swipe it to change song), a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward, mouse side buttons, `Alt+←/→`. |
-| **Full-screen and mini player** | On desktop (`F11`, `Esc`), like Spotify's: the cover fills the screen, or the window shrinks to a small always-on-top player. |
+| **Expanded, full-screen and mini player** | On desktop, like Spotify's: the cover fills the window (**Expanded player**) or the whole screen (`F11`, `Esc`), with the synced lyrics beside it at the press of **Lyrics**; or the window shrinks to a small always-on-top player. |
 | **System media controls** | The Android notification and lock screen, Control Center on iOS / macOS, and MPRIS on Linux (desktop media widgets, `playerctl`). |
 | **Discord, media keys, shortcuts** | Discord Rich Presence, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+V` to import a copied YouTube link). |
 
