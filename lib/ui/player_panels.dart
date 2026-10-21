@@ -5,6 +5,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../models/track.dart';
 import '../services/appearance.dart';
 import '../services/audio_engine.dart';
 import '../services/player_controller.dart';
@@ -12,6 +13,7 @@ import 'shell_scope.dart';
 import 'theme.dart';
 import 'widgets/controls.dart';
 import 'widgets/signal_path.dart';
+import 'pages/lyrics_page.dart';
 import 'ytmusic_edit.dart';
 import 'widgets/track_row.dart';
 import 'widgets/smooth_scroll.dart';
@@ -303,10 +305,22 @@ class DesktopPlayerBar extends StatelessWidget {
                         onPressed: onToggleSidePanel,
                         icon: const Icon(Icons.view_sidebar_outlined, size: 20),
                       ),
-                    IconButton(
-                      tooltip: 'Lyrics',
-                      onPressed: track == null ? null : shell.openLyrics,
-                      icon: const Icon(Icons.lyrics_outlined, size: 20),
+                    // In the expanded player, lyrics open beside the cover instead.
+                    ListenableBuilder(
+                      listenable: Listenable.merge([fullScreenPlayer, expandedPlayerLyrics]),
+                      builder: (context, _) {
+                        final beside = fullScreenPlayer.value;
+                        return IconButton(
+                          tooltip: 'Lyrics',
+                          color: beside && expandedPlayerLyrics.value ? AppColors.accent : null,
+                          onPressed: track == null
+                              ? null
+                              : beside
+                              ? () => expandedPlayerLyrics.value = !expandedPlayerLyrics.value
+                              : shell.openLyrics,
+                          icon: const Icon(Icons.lyrics_outlined, size: 20),
+                        );
+                      },
                     ),
                     IconButton(
                       tooltip: 'Queue',
@@ -322,6 +336,15 @@ class DesktopPlayerBar extends StatelessWidget {
                     ),
                     ValueListenableBuilder(
                       valueListenable: fullScreenPlayer,
+                      builder: (context, on, _) => IconButton(
+                        tooltip: on ? 'Close expanded player' : 'Expanded player',
+                        color: on ? AppColors.accent : null,
+                        onPressed: track == null && !on ? null : () => showExpandedPlayer(!on),
+                        icon: Icon(on ? Icons.close_fullscreen_rounded : Icons.open_in_full_rounded, size: 18),
+                      ),
+                    ),
+                    ValueListenableBuilder(
+                      valueListenable: windowFullScreen,
                       builder: (context, on, _) => IconButton(
                         tooltip: on ? 'Exit full screen' : 'Full screen',
                         onPressed: track == null && !on ? null : () => setFullScreenPlayer(!on),
@@ -703,15 +726,28 @@ class _MiniProgressState extends State<_MiniProgress> {
   Widget build(BuildContext context) => StreamBuilder<Duration>(stream: _position, builder: widget.builder);
 }
 
-/// Desktop full-screen player: the window goes full screen and the cover art
-/// fills the space above the player bar (Esc, F11 or the bar's button leave).
+/// Desktop expanded player: the cover art (and lyrics beside it, if asked)
+/// fills the space above the player bar, inside the window or with the
+/// window full screen (Esc, F11 or the bar's buttons leave).
 final fullScreenPlayer = ValueNotifier<bool>(false);
 
-Future<void> setFullScreenPlayer(bool on) async {
-  if (fullScreenPlayer.value == on) return;
+/// Whether the window fills the screen too.
+final windowFullScreen = ValueNotifier<bool>(false);
+
+/// Lyrics beside the cover in the expanded player.
+final expandedPlayerLyrics = ValueNotifier<bool>(false);
+
+/// Expanded player with the window full screen, or neither.
+Future<void> setFullScreenPlayer(bool on) => showExpandedPlayer(on, fullScreen: on);
+
+/// Opens or closes the expanded player; [fullScreen] makes the window fill the screen as well.
+Future<void> showExpandedPlayer(bool on, {bool fullScreen = false}) async {
   fullScreenPlayer.value = on;
+  final full = on && fullScreen;
+  if (windowFullScreen.value == full) return;
+  windowFullScreen.value = full;
   try {
-    await windowManager.setFullScreen(on);
+    await windowManager.setFullScreen(full);
   } catch (e) {
     debugPrint('Full screen: $e'); // the view still works inside the window
   }
@@ -738,6 +774,64 @@ class _FullScreenPlayerState extends State<FullScreenPlayer> {
   void dispose() {
     _hintTimer?.cancel();
     super.dispose();
+  }
+
+  /// The cover with the title and what's next under it, sized to [box].
+  Widget _cover(BuildContext context, Track track, Track? next, BoxConstraints box, {required double widthShare}) {
+    final text = Theme.of(context).textTheme;
+
+    // Room for the title lines and "Next" under the cover.
+    final art = math.min(box.maxHeight - 150, box.maxWidth * widthShare).clamp(120.0, 900.0);
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox.square(
+            dimension: art,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: const [BoxShadow(color: Color(0x73000000), blurRadius: 40, offset: Offset(0, 16))],
+              ),
+              child: _TrackSwitcher(
+                trackId: track.id,
+                slide: false,
+                child: Artwork(key: ValueKey(track.id), track: track, radius: 12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            width: math.min(math.max(art, 420), box.maxWidth * widthShare),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        track.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        next == null ? track.artist : '${track.artist}   ·   Next: ${next.title}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: text.bodyLarge?.copyWith(color: AppColors.textSecondary),
+                      ),
+                    ],
+                  ),
+                ),
+                LikeButton(track: track, size: 26),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -767,11 +861,25 @@ class _FullScreenPlayerState extends State<FullScreenPlayer> {
                           style: text.titleMedium?.copyWith(fontWeight: FontWeight.w700),
                         ),
                       ),
-                      // Lyrics, queue etc. are in the player bar right below.
-                      IconButton(
-                        tooltip: 'Exit full screen',
-                        onPressed: () => setFullScreenPlayer(false),
-                        icon: const Icon(Icons.fullscreen_exit_rounded),
+                      // Queue, volume etc. are in the player bar right below.
+                      if (track != null)
+                        ValueListenableBuilder(
+                          valueListenable: expandedPlayerLyrics,
+                          builder: (context, on, _) => LyricsToggleButton(
+                            on: on,
+                            icon: Icons.lyrics_outlined,
+                            tooltip: on ? 'Hide lyrics' : 'Lyrics',
+                            onPressed: () => expandedPlayerLyrics.value = !on,
+                          ),
+                        ),
+                      const SizedBox(width: 4),
+                      ValueListenableBuilder(
+                        valueListenable: windowFullScreen,
+                        builder: (context, full, _) => IconButton(
+                          tooltip: full ? 'Exit full screen' : 'Close expanded player',
+                          onPressed: () => showExpandedPlayer(false),
+                          icon: Icon(full ? Icons.fullscreen_exit_rounded : Icons.close_fullscreen_rounded),
+                        ),
                       ),
                     ],
                   ),
@@ -779,68 +887,42 @@ class _FullScreenPlayerState extends State<FullScreenPlayer> {
                 Expanded(
                   child: track == null
                       ? Center(child: Text('Nothing is playing', style: text.titleMedium))
-                      : LayoutBuilder(
-                          builder: (context, box) {
-                            // Room for the title lines and "Next" under the cover.
-                            final art = math.min(box.maxHeight - 150, box.maxWidth * 0.5).clamp(120.0, 900.0);
-                            return Center(
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
+                      : ValueListenableBuilder(
+                          valueListenable: expandedPlayerLyrics,
+                          builder: (context, lyrics, _) => LayoutBuilder(
+                            builder: (context, box) {
+                              if (!lyrics) return _cover(context, track, next, box, widthShare: 0.5);
+                              final lyricsView = Padding(
+                                padding: const EdgeInsets.only(top: 8),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                                  children: [
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: Padding(
+                                        padding: const EdgeInsets.only(right: 20),
+                                        child: LyricsExtrasButtons(key: ValueKey(track.id), track: track),
+                                      ),
+                                    ),
+                                    Expanded(child: LyricsView(track: track)),
+                                  ],
+                                ),
+                              );
+                              // Too narrow for both: the lyrics alone.
+                              if (box.maxWidth < 900) return lyricsView;
+                              return Row(
                                 children: [
-                                  SizedBox.square(
-                                    dimension: art,
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                        boxShadow: const [
-                                          BoxShadow(color: Color(0x73000000), blurRadius: 40, offset: Offset(0, 16)),
-                                        ],
-                                      ),
-                                      child: _TrackSwitcher(
-                                        trackId: track.id,
-                                        slide: false,
-                                        child: Artwork(key: ValueKey(track.id), track: track, radius: 12),
-                                      ),
+                                  Expanded(
+                                    flex: 5,
+                                    child: LayoutBuilder(
+                                      builder: (context, half) => _cover(context, track, next, half, widthShare: 0.8),
                                     ),
                                   ),
-                                  const SizedBox(height: 24),
-                                  SizedBox(
-                                    width: math.max(art, 420),
-                                    child: Row(
-                                      children: [
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                track.title,
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: text.headlineSmall?.copyWith(
-                                                  fontWeight: FontWeight.w800,
-                                                  letterSpacing: -0.5,
-                                                ),
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                next == null
-                                                    ? track.artist
-                                                    : '${track.artist}   ·   Next: ${next.title}',
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: text.bodyLarge?.copyWith(color: AppColors.textSecondary),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        LikeButton(track: track, size: 26),
-                                      ],
-                                    ),
-                                  ),
+                                  Expanded(flex: 6, child: lyricsView),
                                 ],
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                 ),
               ],
@@ -853,7 +935,7 @@ class _FullScreenPlayerState extends State<FullScreenPlayer> {
               child: IgnorePointer(
                 child: Center(
                   child: AnimatedOpacity(
-                    opacity: _hint ? 1 : 0,
+                    opacity: _hint && windowFullScreen.value ? 1 : 0,
                     duration: const Duration(milliseconds: 400),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),

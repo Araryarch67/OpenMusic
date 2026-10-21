@@ -67,24 +67,12 @@ class LyricsPage extends StatelessWidget {
                         ],
                       ),
                     ),
-                    if (track != null) _ExtrasButtons(key: ValueKey(track.id), track: track),
+                    if (track != null) LyricsExtrasButtons(key: ValueKey(track.id), track: track),
                   ],
                 ),
               ),
               Expanded(
-                // Lines fade out under the header instead of being cut off.
-                child: ShaderMask(
-                  blendMode: BlendMode.dstIn,
-                  shaderCallback: (rect) => const LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
-                    stops: [0, 0.08, 0.92, 1],
-                  ).createShader(rect),
-                  child: track == null
-                      ? const _Message('Play a song to see its lyrics here.')
-                      : _LyricsLoader(key: ValueKey(track.id), track: track),
-                ),
+                child: track == null ? const _Message('Play a song to see its lyrics here.') : LyricsView(track: track),
               ),
               if (fullScreen && track != null) ...[
                 const Padding(padding: EdgeInsets.symmetric(horizontal: 24), child: SeekBar()),
@@ -97,6 +85,27 @@ class LyricsPage extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The lyrics of [track] following the song, without a header or background:
+/// the lyrics page and the full-screen player both show it.
+class LyricsView extends StatelessWidget {
+  const LyricsView({super.key, required this.track});
+
+  final Track track;
+
+  @override
+  Widget build(BuildContext context) => ShaderMask(
+    // Lines fade out at the edges instead of being cut off.
+    blendMode: BlendMode.dstIn,
+    shaderCallback: (rect) => const LinearGradient(
+      begin: Alignment.topCenter,
+      end: Alignment.bottomCenter,
+      colors: [Colors.transparent, Colors.black, Colors.black, Colors.transparent],
+      stops: [0, 0.08, 0.92, 1],
+    ).createShader(rect),
+    child: _LyricsLoader(key: ValueKey(track.id), track: track),
+  );
 }
 
 class _LyricsLoader extends StatefulWidget {
@@ -137,16 +146,16 @@ class _LyricsLoaderState extends State<_LyricsLoader> {
 }
 
 /// "Pronunciation" and "Translation" toggles, shown once the song has lyrics.
-class _ExtrasButtons extends StatefulWidget {
-  const _ExtrasButtons({super.key, required this.track});
+class LyricsExtrasButtons extends StatefulWidget {
+  const LyricsExtrasButtons({super.key, required this.track});
 
   final Track track;
 
   @override
-  State<_ExtrasButtons> createState() => _ExtrasButtonsState();
+  State<LyricsExtrasButtons> createState() => LyricsExtrasButtonsState();
 }
 
-class _ExtrasButtonsState extends State<_ExtrasButtons> {
+class LyricsExtrasButtonsState extends State<LyricsExtrasButtons> {
   late final Future<Lyrics> _lyrics = LyricsService.forTrack(widget.track);
 
   @override
@@ -157,15 +166,8 @@ class _ExtrasButtonsState extends State<_ExtrasButtons> {
       if (l == null || l.isEmpty || l.instrumental) return const SizedBox.shrink();
       Widget toggle(ValueNotifier<bool> option, IconData icon, String tooltip) => ValueListenableBuilder(
         valueListenable: option,
-        builder: (context, on, _) => IconButton(
-          tooltip: tooltip,
-          isSelected: on,
-          color: Colors.white70,
-          selectedIcon: Icon(icon, color: Colors.black),
-          style: IconButton.styleFrom(backgroundColor: on ? Colors.white : null),
-          onPressed: () => option.value = !on,
-          icon: Icon(icon),
-        ),
+        builder: (context, on, _) =>
+            LyricsToggleButton(on: on, icon: icon, tooltip: tooltip, onPressed: () => option.value = !on),
       );
       return Row(
         mainAxisSize: MainAxisSize.min,
@@ -177,6 +179,36 @@ class _ExtrasButtonsState extends State<_ExtrasButtons> {
         ],
       );
     },
+  );
+}
+
+/// A small on/off button over lyrics: a soft light backdrop when on, so it
+/// stays quiet next to the title on a phone.
+class LyricsToggleButton extends StatelessWidget {
+  const LyricsToggleButton({
+    super.key,
+    required this.on,
+    required this.icon,
+    required this.tooltip,
+    required this.onPressed,
+  });
+
+  final bool on;
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+    tooltip: tooltip,
+    isSelected: on,
+    visualDensity: VisualDensity.compact,
+    iconSize: 20,
+    color: Colors.white60,
+    selectedIcon: Icon(icon, color: Colors.white),
+    style: IconButton.styleFrom(backgroundColor: on ? Colors.white.withValues(alpha: 0.18) : null),
+    onPressed: onPressed,
+    icon: Icon(icon),
   );
 }
 
