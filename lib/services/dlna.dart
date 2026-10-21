@@ -369,8 +369,12 @@ class CastStream extends CastMedia {
 /// rarely play (DSD, APE, WavPack, Opus...) and slices of cue-sheet albums.
 /// Can't be byte-seeked; seeking starts a new conversion at [start].
 class CastTranscode extends CastMedia {
-  const CastTranscode(this.path, {this.start = Duration.zero, this.end, this.maxRate}) : super('audio/flac');
+  const CastTranscode(this.path, {this.start = Duration.zero, this.end, this.maxRate, this.input})
+    : super('audio/flac');
   final String path;
+
+  /// Bytes to convert instead of reading [path] (an SACD song, built on the fly).
+  final Stream<List<int>> Function()? input;
   final Duration start;
   final Duration? end;
 
@@ -521,13 +525,17 @@ class CastServer {
           final ffmpeg = await Process.start('ffmpeg', [
             '-hide_banner', '-loglevel', 'error', //
             if (media.start > Duration.zero) ...['-ss', '${media.start.inMilliseconds / 1000}'],
-            '-i', media.path,
+            '-i', media.input == null ? media.path : 'pipe:0',
             if (media.end != null) ...['-t', '${(media.end! - media.start).inMilliseconds / 1000}'],
             '-map', '0:a:0', '-map_metadata', '-1',
             if (media.maxRate != null) ...['-af', 'aresample=resampler=soxr:osr=${media.maxRate}'],
             '-c:a', 'flac', '-sample_fmt', 's32', '-bits_per_raw_sample', '24', '-f', 'flac', 'pipe:1',
           ]);
           ffmpeg.stderr.drain<void>().ignore();
+          if (media.input case final input?) {
+            // Ends early when FFmpeg stops reading (the renderer hung up).
+            ffmpeg.stdin.addStream(input()).then((_) => ffmpeg.stdin.close(), onError: (Object _) {}).ignore();
+          }
           try {
             await res.addStream(ffmpeg.stdout);
           } finally {

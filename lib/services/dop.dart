@@ -7,8 +7,24 @@ import 'dart:typed_data';
 
 import 'package:just_audio/just_audio.dart';
 
+/// 1-bit audio that can be read by position: a DSF / DSDIFF file, or a song
+/// on an SACD image.
+abstract interface class DsdSource {
+  int get channels;
+
+  /// 1-bit samples per second per channel: 2822400 for DSD64.
+  int get bitRate;
+
+  /// Audio bytes per channel (8 samples each).
+  int get bytesPerChannel;
+
+  /// [count] bytes of every channel from [byteFrom], byte-interleaved
+  /// (ch0, ch1, ..., ch0, ...), oldest sample in each byte's top bit.
+  Future<Uint8List> interleaved(int byteFrom, int count);
+}
+
 /// Where the 1-bit audio sits in a DSF or DSDIFF file.
-class DsdFile {
+class DsdFile implements DsdSource {
   const DsdFile._({
     required this.path,
     required this.channels,
@@ -20,12 +36,14 @@ class DsdFile {
   });
 
   final String path;
+  @override
   final int channels;
 
-  /// 1-bit samples per second per channel: 2822400 for DSD64.
+  @override
   final int bitRate;
 
-  /// Audio bytes per channel (8 samples each), padding left out.
+  /// Padding left out.
+  @override
   final int bytesPerChannel;
   final int dataOffset;
 
@@ -44,6 +62,47 @@ class DsdFile {
 
   /// DoP frames (two DSD bytes per channel each).
   int get frames => bytesPerChannel ~/ 2;
+
+  static final _reversed = Uint8List.fromList([
+    for (var b = 0; b < 256; b++)
+      [for (var i = 0; i < 8; i++) (b >> i) & 1].fold<int>(0, (acc, bit) => (acc << 1) | bit),
+  ]);
+
+  @override
+  Future<Uint8List> interleaved(int byteFrom, int count) async {
+    final ch = channels;
+    final out = Uint8List(count * ch)..fillRange(0, count * ch, 0x69); // past the end: DSD silence
+    count = (bytesPerChannel - byteFrom).clamp(0, count);
+    if (count == 0) return out;
+    final f = await File(path).open();
+    try {
+      if (blockSize == 0) {
+        // DSDIFF: interleaved already.
+        await f.setPosition(dataOffset + byteFrom * ch);
+        final src = await f.read(count * ch);
+        out.setRange(0, src.length, src);
+        return out;
+      }
+      // DSF: blocks of [blockSize] bytes per channel, one channel after another.
+      final bs = blockSize;
+      final firstBlock = byteFrom ~/ bs, lastBlock = (byteFrom + count - 1) ~/ bs;
+      await f.setPosition(dataOffset + firstBlock * bs * ch);
+      final src = await f.read((lastBlock - firstBlock + 1) * bs * ch);
+      final rev = lsbFirst;
+      for (var i = 0; i < count; i++) {
+        final pos = byteFrom + i;
+        final base = (pos ~/ bs - firstBlock) * bs * ch + pos % bs;
+        for (var c = 0; c < ch; c++) {
+          final at = base + c * bs;
+          if (at >= src.length) continue;
+          out[i * ch + c] = rev ? _reversed[src[at]] : src[at];
+        }
+      }
+      return out;
+    } finally {
+      await f.close();
+    }
+  }
 
   Duration get duration => Duration(microseconds: bytesPerChannel * 8 * 1000000 ~/ bitRate);
 
@@ -149,12 +208,15 @@ class DsdFile {
 class DopAudioSource extends StreamAudioSource {
   DopAudioSource(this.dsd, {super.tag});
 
-  final DsdFile dsd;
+  final DsdSource dsd;
+
+  int get frames => dsd.bytesPerChannel ~/ 2;
+  int get dopRate => dsd.bitRate ~/ 16;
 
   static const headerSize = 68;
 
   int get _frameBytes => dsd.channels * 3;
-  int get length => headerSize + dsd.frames * _frameBytes;
+  int get length => headerSize + frames * _frameBytes;
 
   /// RIFF / WAVE_FORMAT_EXTENSIBLE header for 24-bit PCM at the DoP rate.
   Uint8List header() {
@@ -165,7 +227,7 @@ class DopAudioSource extends StreamAudioSource {
       }
     }
 
-    final data = dsd.frames * _frameBytes;
+    final data = frames * _frameBytes;
     tag(0, 'RIFF');
     h.setUint32(4, (length - 8).clamp(0, 0xFFFFFFFF), Endian.little);
     tag(8, 'WAVE');
@@ -173,8 +235,8 @@ class DopAudioSource extends StreamAudioSource {
     h.setUint32(16, 40, Endian.little);
     h.setUint16(20, 0xFFFE, Endian.little); // WAVE_FORMAT_EXTENSIBLE
     h.setUint16(22, dsd.channels, Endian.little);
-    h.setUint32(24, dsd.dopRate, Endian.little);
-    h.setUint32(28, dsd.dopRate * _frameBytes, Endian.little);
+    h.setUint32(24, dopRate, Endian.little);
+    h.setUint32(28, dopRate * _frameBytes, Endian.little);
     h.setUint16(32, _frameBytes, Endian.little);
     h.setUint16(34, 24, Endian.little);
     h.setUint16(36, 22, Endian.little);
@@ -190,11 +252,6 @@ class DopAudioSource extends StreamAudioSource {
     return h.buffer.asUint8List();
   }
 
-  static final _reversed = Uint8List.fromList([
-    for (var b = 0; b < 256; b++)
-      [for (var i = 0; i < 8; i++) (b >> i) & 1].fold<int>(0, (acc, bit) => (acc << 1) | bit),
-  ]);
-
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
     final from = start ?? 0;
@@ -208,9 +265,8 @@ class DopAudioSource extends StreamAudioSource {
     );
   }
 
-  /// Frames packed per read: one DSF block per channel (DSF blocks are 4096
-  /// bytes, two per frame), or the same amount of DSDIFF.
-  int get _framesPerChunk => dsd.blockSize > 0 ? dsd.blockSize ~/ 2 : 2048;
+  /// DoP frames packed per read (16 KB of DSD per channel).
+  static const _framesPerChunk = 8192;
 
   /// Bytes [from, to) of the WAV.
   Stream<Uint8List> bytes(int from, int to) async* {
@@ -219,66 +275,35 @@ class DopAudioSource extends StreamAudioSource {
       from = headerSize;
     }
     if (from >= to) return;
-    final file = await File(dsd.path).open();
-    try {
-      var frame = (from - headerSize) ~/ _frameBytes;
-      var skip = (from - headerSize) % _frameBytes;
-      final lastFrame = (to - headerSize + _frameBytes - 1) ~/ _frameBytes; // exclusive
-      var left = to - from;
-      while (frame < lastFrame && left > 0) {
-        final chunk = frame ~/ _framesPerChunk;
-        final first = chunk * _framesPerChunk;
-        final count = ((chunk + 1) * _framesPerChunk).clamp(0, dsd.frames) - first;
-        final out = await _pack(file, first, count);
-        final begin = (frame - first) * _frameBytes + skip;
-        final end = (begin + left).clamp(0, out.length);
-        yield Uint8List.sublistView(out, begin, end);
-        left -= end - begin;
-        frame = first + count;
-        skip = 0;
-      }
-    } finally {
-      await file.close();
+    var frame = (from - headerSize) ~/ _frameBytes;
+    var skip = (from - headerSize) % _frameBytes;
+    final lastFrame = (to - headerSize + _frameBytes - 1) ~/ _frameBytes; // exclusive
+    var left = to - from;
+    while (frame < lastFrame && left > 0) {
+      final first = frame ~/ _framesPerChunk * _framesPerChunk;
+      final count = (first + _framesPerChunk).clamp(0, frames) - first;
+      final out = _pack(await dsd.interleaved(first * 2, count * 2), first, count);
+      final begin = (frame - first) * _frameBytes + skip;
+      final end = (begin + left).clamp(0, out.length);
+      yield Uint8List.sublistView(out, begin, end);
+      left -= end - begin;
+      frame = first + count;
+      skip = 0;
     }
   }
 
-  /// DoP frames [first, first + count) as little-endian 24-bit samples.
-  Future<Uint8List> _pack(RandomAccessFile file, int first, int count) async {
+  /// DoP frames [first, first + count) as little-endian 24-bit samples, from
+  /// the matching interleaved DSD bytes.
+  Uint8List _pack(Uint8List src, int first, int count) {
     final ch = dsd.channels;
     final out = Uint8List(count * ch * 3);
-    final byteFrom = first * 2; // per channel
-    if (dsd.blockSize > 0) {
-      // Chunks are block-aligned: one block per channel, [ch0 block][ch1 block]...
-      final bs = dsd.blockSize;
-      await file.setPosition(dsd.dataOffset + (byteFrom ~/ bs) * bs * ch);
-      final src = await file.read(bs * ch);
-      return _fill(out, src, first, count, (c, i) => c * bs + i, 1);
-    }
-    await file.setPosition(dsd.dataOffset + byteFrom * ch);
-    final src = await file.read(count * 2 * ch);
-    return _fill(out, src, first, count, (c, i) => i * ch + c, ch);
-  }
-
-  /// [at] gives the offset in [src] of channel c's i-th byte of the chunk;
-  /// [step] is the distance to that channel's next byte.
-  Uint8List _fill(Uint8List out, Uint8List src, int first, int count, int Function(int c, int i) at, int step) {
-    final ch = dsd.channels;
-    final rev = dsd.lsbFirst;
     var o = 0;
     for (var f = 0; f < count; f++) {
       final marker = (first + f).isEven ? 0x05 : 0xFA;
       for (var c = 0; c < ch; c++) {
-        final i0 = at(c, f * 2), i1 = i0 + step;
-        // Past the end of the file (a short last block): DSD silence.
-        var b0 = i0 < src.length ? src[i0] : 0x69;
-        var b1 = i1 < src.length ? src[i1] : 0x69;
-        if (rev) {
-          b0 = _reversed[b0];
-          b1 = _reversed[b1];
-        }
         // Oldest DSD byte in the middle, marker on top (little-endian: low byte first).
-        out[o++] = b1;
-        out[o++] = b0;
+        out[o++] = src[(f * 2 + 1) * ch + c];
+        out[o++] = src[f * 2 * ch + c];
         out[o++] = marker;
       }
     }

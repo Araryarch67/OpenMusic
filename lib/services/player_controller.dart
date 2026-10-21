@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
@@ -19,6 +20,7 @@ import 'dop.dart';
 import 'lyrics.dart';
 import 'lyrics_translation.dart';
 import 'metadata.dart';
+import 'sacd.dart';
 import 'memory_trim.dart';
 import 'youtube_audio_source.dart';
 import 'youtube_music_account.dart';
@@ -625,15 +627,22 @@ class PlayerController extends ChangeNotifier {
   Future<int> pickFiles() async {
     final files = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: [...Track.audioExtensions, 'cue'],
+      allowedExtensions: [...Track.audioExtensions, 'cue', 'iso'],
       dialogTitle: 'Add music',
     );
     final cues = files.where((f) => f.name.toLowerCase().endsWith('.cue') && f.path != null);
     final split = await _readCues([for (final f in cues) File(f.path!)]);
+    final isos = [
+      for (final f in files)
+        if (f.name.toLowerCase().endsWith('.iso') && f.path != null) f.path!,
+    ];
     return _addTracks([
       ...split.tracks,
+      ...await _readSacds(isos),
       for (final f in files)
-        if (!f.name.toLowerCase().endsWith('.cue') && !split.covers.contains(f.path))
+        if (!f.name.toLowerCase().endsWith('.cue') &&
+            !f.name.toLowerCase().endsWith('.iso') &&
+            !split.covers.contains(f.path))
           Track.fromUri(f.uri, displayName: f.name),
     ]);
   }
@@ -654,21 +663,29 @@ class PlayerController extends ChangeNotifier {
     return (tracks: tracks, covers: covers);
   }
 
+  /// Songs on SACD images; other ISOs (DVDs, data discs) are skipped.
+  static Future<List<Track>> _readSacds(List<String> paths) async {
+    if (paths.isEmpty) return const [];
+    return Isolate.run(() => [for (final p in paths) ...?SacdDisc.read(p)?.tracks()]);
+  }
+
   Future<int> pickFolder() async {
     final dir = await FilePicker.getDirectoryPath(dialogTitle: 'Add music folder');
     if (dir == null) return 0;
     final entries = Directory(dir).list(recursive: true, followLinks: false);
     final tracks = <Track>[];
     final cues = <File>[];
+    final isos = <String>[];
     await for (final e in entries) {
       if (e is! File) continue;
       if (Track.isAudioPath(e.path)) tracks.add(Track.fromUri(Uri.file(e.path)));
       if (e.path.toLowerCase().endsWith('.cue')) cues.add(e);
+      if (e.path.toLowerCase().endsWith('.iso')) isos.add(e.path);
     }
     final split = await _readCues(cues);
     tracks.removeWhere((t) => split.covers.contains(t.path));
     tracks.sort((a, b) => a.id.compareTo(b.id));
-    return _addTracks([...tracks, ...split.tracks]);
+    return _addTracks([...tracks, ...split.tracks, ...await _readSacds(isos)]);
   }
 
   Future<int> _addTracks(Iterable<Track> tracks) async {
@@ -738,6 +755,15 @@ class PlayerController extends ChangeNotifier {
   final _random = math.Random();
 
   AudioSource _sourceFor(Track t) {
+    if (SacdDisc.isSacdTrack(t)) {
+      final found = SacdDisc.find(t);
+      if (found != null) {
+        final (disc, song) = found;
+        // DoP needs the DSD itself; DST-compressed discs play as PCM.
+        if (audio.dopActive && !disc.area.dst) return DopAudioSource(SacdDsd(disc, song), tag: t);
+        return SacdAudioSource(disc, song, tag: t);
+      }
+    }
     if (audio.dopActive && !t.isCueTrack && t.path != null && DsdFile.isDsdPath(t.path!)) {
       final dsd = DsdFile.read(t.path!);
       if (dsd != null) return DopAudioSource(dsd, tag: t);
@@ -762,8 +788,8 @@ class PlayerController extends ChangeNotifier {
     final seq = player.sequenceState;
     final at = seq.currentIndex;
     final hasDsd = seq.sequence.any((s) {
-      final path = (s.tag as Track).path;
-      return path != null && DsdFile.isDsdPath(path);
+      final t = s.tag as Track;
+      return SacdDisc.isSacdTrack(t) || (t.path != null && DsdFile.isDsdPath(t.path!));
     });
     if (at == null || !hasDsd) return;
     final wasPlaying = player.playing;
@@ -986,7 +1012,12 @@ class PlayerController extends ChangeNotifier {
     final local = t.isRemote ? downloadedCopy(t) : t;
     final path = local?.path;
     final CastMedia Function(Duration) media;
-    if (path == null) {
+    final sacd = SacdDisc.isSacdTrack(t) ? SacdDisc.find(t) : null;
+    if (sacd != null) {
+      // No renderer plays DSD: FFmpeg turns the song (as DSDIFF) into FLAC.
+      final source = SacdAudioSource(sacd.$1, sacd.$2);
+      media = (from) => CastTranscode(path!, start: from, maxRate: 176400, input: () => source.bytes(0, source.length));
+    } else if (path == null) {
       // Most TVs and speakers can't decode Opus, so YouTube songs go as AAC.
       final source = YoutubeAudioSource(t.videoId!, yt: youtube.client, aac: true);
       media = (_) => CastStream(source, 'audio/mp4');

@@ -55,6 +55,7 @@ String _codecName(SignalPath p) => p.isDop
         'ape' => "Monkey's Audio",
         final c when c.startsWith('pcm_') => p.container == 'aiff' ? 'AIFF' : 'WAV',
         final c when c.startsWith('dsd_') => 'DSD${p.inRate * 8 ~/ 44100}',
+        'dst' => 'DST (SACD)',
         final c => c.toUpperCase(),
       };
 

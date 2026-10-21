@@ -163,7 +163,8 @@ class SignalPath {
     'pcm_f64le', 'pcm_f64be', 'pcm_u8', 'pcm_s8',
   };
 
-  bool get isDsd => codec.startsWith('dsd_');
+  /// DSD, or DST (an SACD's losslessly compressed DSD).
+  bool get isDsd => codec.startsWith('dsd_') || codec == 'dst';
   bool get lossless => _lossless.contains(codec) || isDsd || codec.startsWith('pcm_');
 
   /// Bits per sample of a decoded format name like `s16`, `s32p`, `floatp`.

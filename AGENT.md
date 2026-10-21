@@ -28,6 +28,8 @@ lib/
     metadata.dart              Tag reading, cover art, tag editor (FLAC and MP4 in-process, others via ffmpeg)
     dlna.dart                  DLNA / UPnP: SSDP search, AVTransport control, the LAN server the TV fetches from
     cast.dart                  A cast session: polls the TV, follows its position, notices a song's end
+    dop.dart                   DSF / DSDIFF reading and DoP packing (Native DSD)
+    sacd.dart                  SACD ISO: TOC, audio sectors, a DSDIFF built on the fly per song
     cue_sheet.dart             Splits whole-album rips into tracks
     ytmusic_web.dart           YouTube Music InnerTube client (WEB_REMIX), public + signed in
     youtube_music_account.dart Session, library, discover pages, playlist edits, likes, radio
