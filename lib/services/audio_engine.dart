@@ -255,7 +255,8 @@ class AudioEngine extends ChangeNotifier {
   int? outputRate;
   bool hqResampler = true;
 
-  /// Everything off, volume fixed at 100%, exclusive output: nothing touches the samples.
+  /// Everything off, exclusive output: nothing touches the samples. The player's
+  /// volume still works (the DAC may have none): untouched at 100%, 64-bit float below.
   bool bitPerfect = false;
 
   List<OutputDevice> devices = const [OutputDevice('auto', 'System default')];
@@ -417,7 +418,7 @@ class AudioEngine extends ChangeNotifier {
   /// The player's volume, applied by [filterChain] in 64-bit float (mpv stays at 100%).
   double _volume = 1;
 
-  bool get _volumeActive => _volume < 0.99999 && !bitPerfect;
+  bool get _volumeActive => _volume < 0.99999;
 
   @visibleForTesting
   set debugVolume(double v) => _volume = v;

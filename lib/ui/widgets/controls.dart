@@ -483,25 +483,7 @@ class VolumeSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
-    final player = c.player;
-    // Bit-perfect output has no digital volume: the DAC / amplifier sets the level.
-    if (c.audio.bitPerfect) {
-      return const Tooltip(
-        message: 'Volume is fixed at 100% in bit-perfect mode. Use your DAC or amplifier.',
-        child: Padding(
-          padding: EdgeInsets.symmetric(horizontal: 12),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(Icons.volume_up_rounded, size: 20, color: AppColors.textMuted),
-              SizedBox(width: 6),
-              Text('Fixed', style: TextStyle(color: AppColors.textMuted, fontSize: 12)),
-            ],
-          ),
-        ),
-      );
-    }
+    final player = PlayerScope.of(context).player;
     return StreamBuilder<double>(
       stream: player.volumeStream,
       builder: (context, snapshot) {

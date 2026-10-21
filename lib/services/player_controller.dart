@@ -479,12 +479,6 @@ class PlayerController extends ChangeNotifier {
     ];
   }
 
-  /// Bit-perfect means no digital volume: pin it at 100% while that mode is on.
-  void _fixVolumeForBitPerfect() {
-    if (audio.bitPerfect && player.volume != 1) player.setVolume(1);
-    notifyListeners();
-  }
-
   // ── Persistence & import ─────────────────────────────────────────────────
 
   Future<void> load() async {
@@ -512,8 +506,7 @@ class PlayerController extends ChangeNotifier {
     await ytMusic.load();
     await audio.load();
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
-    audio.addListener(_fixVolumeForBitPerfect);
-    _fixVolumeForBitPerfect();
+    audio.addListener(notifyListeners);
     notifyListeners();
     unawaited(_enrichUntagged());
   }

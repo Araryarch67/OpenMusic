@@ -306,6 +306,8 @@ FILE "album.wav" WAVE
 
       b.bitPerfect = true;
       expect(b.filterChain, isEmpty, reason: 'bit-perfect bypasses room correction');
+      b.debugVolume = 0.5;
+      expect(b.filterChain, contains('@volume:'), reason: 'volume still works in bit-perfect mode');
     });
 
     test('settings persist', () async {

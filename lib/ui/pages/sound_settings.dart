@@ -178,7 +178,7 @@ class AdvancedAudioSettings extends StatelessWidget {
                         secondary: const Icon(Icons.verified_outlined),
                         title: const Text('Bit-perfect mode'),
                         subtitle: Text(
-                          'Sends the file to your DAC untouched: no equalizer, leveling, resampling or digital volume. '
+                          'Sends the file to your DAC untouched: no equalizer, leveling or resampling. Volume still works; at 100% nothing is changed. '
                           '${AudioEngine.hasExclusiveMode ? 'Takes the device exclusively.' : 'Takes over your DAC so the system mixer can\'t resample. Meanwhile other apps play through another output.'}',
                           style: muted,
                         ),
