@@ -32,18 +32,19 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 | Feature | What you get |
 |---|---|
 | **One library** | Files on your device, your playlists and YouTube Music show up together in Home, Search and Library. YouTube Music songs carry a small cloud (they stream). Everything else plays offline, including YouTube songs you've downloaded. |
-| **Your music** | Reads tags and cover art from FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD (DSF/DFF) and more. Groups albums and artists, splits cue sheets and shows multi-disc albums. Includes a tag editor that keeps ReplayGain and custom tags. |
+| **Your music** | Reads tags and cover art from FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD (DSF/DFF) and more, and plays **SACD ISO images** straight from the image (DST discs too). Groups albums and artists, splits cue sheets and shows multi-disc albums. Includes a tag editor (FLAC, MP4 / M4A, MP3, Ogg...) that keeps ReplayGain and custom tags. |
 | **YouTube Music, no account needed** | Home, charts, search and radio work signed out. Press **Sign in with Google** to add your liked songs, playlists and history. You can like songs and create, rename and delete playlists, and add or remove their songs, right from the app. |
-| **Search that answers while you type** | Suggestions and direct hits (artists, songs, albums) drop down under the search box, recent searches come back when it's empty, and results split into Songs, Artists, Albums and Playlists with a top result first. |
+| **Search from anywhere** | On desktop the search box sits in the title bar, next to Home, on every screen: results appear as you type, split into Songs, Artists, Albums and Playlists with a top result first, and recent searches come back when it's empty. On phones it has its own tab, with suggestions and direct hits under the box. |
 | **Follow artists** | Artists you follow on YouTube Music show up in your library; follow or unfollow from any artist page. |
 | **Playlists** | OpenMusic playlists live on your device and can mix your own files with YouTube Music songs. |
 | **Autoplay** | When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song. |
 | **Synced lyrics** | Follow the song line by line, from YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net), [Better Lyrics](https://betterlyrics.org), NetEase Cloud Music or [lyrics.ovh](https://lyrics.ovh). Click a line to jump to it. Turn on **Pronunciation** (romaji for Japanese, and the like for other scripts) and **Translation** into your language under each line. |
-| **Hi-fi audio** | On desktop and Android: a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio). |
+| **Hi-fi audio** | On desktop and Android: a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output, plus **native DSD to your DAC (DoP)** and **audio plugins** (VST, LV2, CLAP through Carla) on Linux. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio). |
+| **Play on TVs and speakers** | **Play on** sends the music to a TV, speaker or receiver on your network, DLNA / UPnP or AirPlay, from where it was; play, pause, seek, the queue and volume keep working from the app. |
 | **Fast** | YouTube songs start in about 0.3 s and the next one in the queue in under 20 ms (it's fetched ahead); Home appears at once on launch from the last session's shelves. Light on memory too: about 165 MB at rest on Linux. |
 | **Make it yours** | Pick an accent colour, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, set the text size, and on Linux make the window see-through so your compositor's blur shows behind it. |
 | **Downloads** | Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves. |
-| **Made for every screen** | Bottom tabs and a floating mini player on phones (swipe it to change song), a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward, mouse side buttons, `Alt+←/→`. |
+| **Made for every screen** | Bottom tabs and a floating mini player on phones (swipe it to change song), a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward in the title bar, mouse side buttons, `Alt+←/→`. The window opens centred, sized to your screen. |
 | **Expanded, full-screen and mini player** | On desktop, like Spotify's: the cover fills the window (**Expanded player**) or the whole screen (`F11`, `Esc`), with the synced lyrics beside it at the press of **Lyrics**; or the window shrinks to a small always-on-top player. |
 | **System media controls** | The Android notification and lock screen, Control Center on iOS / macOS, and MPRIS on Linux (desktop media widgets, `playerctl`). |
 | **Discord, media keys, shortcuts** | Discord Rich Presence, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+V` to import a copied YouTube link). |
@@ -87,10 +88,11 @@ On Linux and Windows, playback runs on [libmpv](https://mpv.io). OpenMusic drive
 | | |
 |---|---|
 | **Sound** (Settings) | Equalizer with presets and automatic headroom, volume leveling (ReplayGain per song or album), gapless playback, headphone crossfeed |
-| **Advanced audio** | Output device, including direct ALSA hardware devices; **bit-perfect mode** (no DSP, no resampling, volume fixed at 100%; WASAPI exclusive on Windows, not yet tested on real hardware); **ASIO output** on Windows, built into the app's own libmpv (tested under Wine, not yet on real hardware); output sample rate; SoX resampler; buffer size |
+| **Advanced audio** | Output device, including direct ALSA hardware devices; **bit-perfect mode** (no DSP, no resampling, volume fixed at 100%; WASAPI exclusive on Windows, not yet tested on real hardware); **Native DSD (DoP)**: DSF, DSDIFF and SACD songs go to a DoP-capable DAC as DSD (with bit-perfect mode); **audio plugins**: VST2, LV2, CLAP and LADSPA plugins set up in [Carla](https://kx.studio/Applications:Carla), in the chain after the equalizer (Linux, with Carla installed; VST3 not yet); **ASIO output** on Windows, built into the app's own libmpv (tested under Wine, not yet on real hardware); output sample rate; SoX resampler; buffer size |
+| **Play on** | DLNA / UPnP renderers and classic AirPlay speakers, found on the network. Files the device can't play (DSD, cue-sheet songs, WavPack...) are converted to FLAC on the fly, YouTube songs go as AAC; AirPlay gets ALAC. Never tried on real TVs or speakers yet: tested against a simulated renderer and shairport-sync |
 | **Signal path** | Source codec and stored bit depth → decoder → every DSP stage → volume → resampler → output device, with a verdict: *Bit-perfect*, *Lossless to the system mixer* or *Processed* |
 
-What's still missing (native DSD / DoP, DLNA, AirPlay, …) and how it could be built is tracked in **[Features.md](Features.md)**.
+What works, what is partial and how it was tested, item by item, is in **[Features.md](Features.md)**.
 
 ## Platform notes
 

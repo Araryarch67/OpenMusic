@@ -101,13 +101,19 @@ void main() {
       await shot('home');
 
       // Search: your music and YouTube Music together.
-      await tester.tap(find.text('Search').first);
+      // The search box in the title bar.
+      final box = find.widgetWithText(TextField, 'What do you want to play?');
+      await tester.tap(box);
       await settle();
-      await tester.enterText(find.byType(TextField).first, 'codfish');
+      await tester.enterText(box, 'codfish');
       // Enter: the suggestions close and the results (top result, songs, artists…) show.
       await tester.testTextInput.receiveAction(TextInputAction.search);
       await until(() => find.text('Top result').evaluate().isNotEmpty);
       await shot('search');
+      // Empty again, so later pictures don't carry the query.
+      await tester.tap(find.byTooltip('Clear'));
+      FocusManager.instance.primaryFocus?.unfocus();
+      await settle();
 
       // An OpenMusic playlist mixing artists.
       await tester.tap(find.text('Beatbox mix').first);
@@ -122,12 +128,14 @@ void main() {
       await playing();
       await c.player.seek(const Duration(seconds: 48));
       await tester.tap(find.byTooltip('Lyrics'));
-      await until(() => find.text('Lyrics from LRCLIB').evaluate().isNotEmpty);
+      await until(() => find.textContaining('Lyrics from ').evaluate().isNotEmpty);
       await shot('lyrics');
 
       // Settings, then the equalizer.
       await tester.tap(find.text('Settings').first);
       await shot('settings');
+      await Scrollable.ensureVisible(tester.element(find.text('Equalizer')), alignment: 0.5);
+      await settle();
       await tester.tap(find.text('Equalizer'));
       await settle();
       await tester.tap(find.widgetWithText(ChoiceChip, 'Bass boost'));
@@ -137,7 +145,7 @@ void main() {
       await settle();
 
       // Signal path of the hi-res file.
-      await tester.tap(find.text('Home').first);
+      await tester.tap(find.byTooltip('Home'));
       await settle();
       await c.playList([studio], 0, from: 'Hi-Res Test');
       await c.player.setVolume(1);
