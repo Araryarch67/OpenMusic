@@ -54,6 +54,8 @@ dependencies:
   audio_service: ^0.18.19
   audio_service_mpris: ^0.2.1
   xml: ^6.6.1
+  multicast_dns: ^0.3.3+1
+  pointycastle: ^4.0.0
 
 dependency_overrides:
   # The real Linux implementation of flutter_inappwebview links WPE WebKit,

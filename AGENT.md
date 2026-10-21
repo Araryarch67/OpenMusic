@@ -27,7 +27,8 @@ lib/
     lyrics.dart                LRC parser; .lrc file → embedded tag → LRCLIB
     metadata.dart              Tag reading, cover art, tag editor (FLAC and MP4 in-process, others via ffmpeg)
     dlna.dart                  DLNA / UPnP: SSDP search, AVTransport control, the LAN server the TV fetches from
-    cast.dart                  A cast session: polls the TV, follows its position, notices a song's end
+    cast.dart                  A cast session (DLNA or AirPlay): follows position, pause, a song's end
+    airplay.dart               AirPlay 1 (RAOP) sender: mDNS search, RTSP, ALAC over RTP, timing, RSA/AES
     dop.dart                   DSF / DSDIFF reading and DoP packing (Native DSD)
     sacd.dart                  SACD ISO: TOC, audio sectors, a DSDIFF built on the fly per song
     cue_sheet.dart             Splits whole-album rips into tracks

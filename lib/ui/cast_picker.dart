@@ -2,7 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../services/dlna.dart';
+import '../services/cast.dart';
 import '../services/player_controller.dart';
 import 'shell_scope.dart';
 import 'theme.dart';
@@ -60,7 +60,7 @@ class _CastPicker extends StatefulWidget {
 }
 
 class _CastPickerState extends State<_CastPicker> {
-  DlnaRenderer? _connecting;
+  CastTarget? _connecting;
 
   @override
   void initState() {
@@ -71,7 +71,7 @@ class _CastPickerState extends State<_CastPicker> {
     });
   }
 
-  Future<void> _pick(DlnaRenderer? renderer) async {
+  Future<void> _pick(CastTarget? renderer) async {
     final c = PlayerScope.read(context);
     setState(() => _connecting = renderer);
     await c.castTo(renderer);
@@ -94,7 +94,7 @@ class _CastPickerState extends State<_CastPicker> {
       required String name,
       required bool selected,
       required VoidCallback onTap,
-      DlnaRenderer? renderer,
+      CastTarget? renderer,
     }) {
       final busy = renderer != null && _connecting == renderer;
       return ListTile(
@@ -130,7 +130,7 @@ class _CastPickerState extends State<_CastPicker> {
         ),
         for (final r in cast.devices)
           tile(
-            icon: Icons.speaker_rounded,
+            icon: r is AirPlayTarget ? Icons.speaker_group_rounded : Icons.speaker_rounded,
             name: r.name,
             selected: cast.target == r,
             renderer: r,
@@ -152,7 +152,7 @@ class _CastPickerState extends State<_CastPicker> {
                       child: Text(
                         cast.devices.isEmpty
                             ? 'No TVs or speakers found. They need to be on and on the same Wi-Fi.'
-                            : 'Works with TVs, speakers and receivers that support DLNA.',
+                            : 'Works with TVs, speakers and receivers that support DLNA or AirPlay.',
                         style: muted,
                       ),
                     ),

@@ -116,7 +116,7 @@ void main() {
       ended = 0;
       errors.clear();
       cast = Cast(onEnded: () => ended++, onError: errors.add, pollEvery: const Duration(milliseconds: 50));
-      await cast.connect(renderer);
+      await cast.connect(DlnaTarget(renderer));
     });
 
     tearDown(() async {

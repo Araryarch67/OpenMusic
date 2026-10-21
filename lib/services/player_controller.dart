@@ -933,13 +933,14 @@ class PlayerController extends ChangeNotifier {
     LoopMode.one => LoopMode.off,
   });
 
-  // ── Casting (DLNA / UPnP) ───────────────────────────────────────────────
+  // ── Casting (DLNA / UPnP, AirPlay) ────────────────────────────────────────────
   //
   // The queue stays in [player], paused, while a TV or speaker plays: next,
   // previous and queue picks move it, and [_castFollow] sends the new song.
 
   late final Cast cast = Cast(
     onEnded: _castEnded,
+    airPlay: () => Metadata.hasFfmpeg,
     onError: (message) {
       _errors.add(message);
       // The device went away: carry on here, from where it was.
@@ -950,7 +951,7 @@ class PlayerController extends ChangeNotifier {
   bool get casting => cast.active;
 
   /// Plays on [renderer] from where this device is, or back here (null).
-  Future<void> castTo(DlnaRenderer? renderer) async {
+  Future<void> castTo(CastTarget? renderer) async {
     if (renderer == null) return _stopCasting();
     if (cast.target == renderer) return;
     final from = position;
