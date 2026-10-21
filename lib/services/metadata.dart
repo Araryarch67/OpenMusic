@@ -64,12 +64,13 @@ abstract final class Metadata {
     }
   }
 
-  /// FLAC is written in-process (the bundled writer keeps every other tag).
-  /// Other formats go through the `ffmpeg` command when it is installed: a
-  /// stream copy that only changes the tags it is told to.
-  ///
-  /// Not MP4/M4A: ffmpeg's MP4 muxer keeps only the iTunes tags it knows, so
-  /// ReplayGain and other freeform tags would be lost.
+  /// FLAC and MP4/M4A (AAC, ALAC) are written in-process: the bundled writers
+  /// keep every other tag, including ReplayGain and other freeform MP4 atoms
+  /// that ffmpeg's MP4 muxer would drop. Other formats go through the `ffmpeg`
+  /// command when it is installed: a stream copy that only changes the tags it
+  /// is told to.
+  static const _inProcess = {'flac', 'm4a', 'm4b', 'mp4'};
+
   static const _ffmpegWritable = {'mp3', 'ogg', 'oga', 'opus', 'wav', 'aiff', 'aif', 'wv', 'mka'};
 
   /// Formats where ffmpeg can also replace the embedded cover.
@@ -92,11 +93,11 @@ abstract final class Metadata {
     final path = t.path;
     if (path == null || t.isCueTrack) return false;
     final ext = _ext(path);
-    return ext == 'flac' || (_ffmpeg && _ffmpegWritable.contains(ext));
+    return _inProcess.contains(ext) || (_ffmpeg && _ffmpegWritable.contains(ext));
   }
 
   /// Whether "Change cover" can be offered for [t].
-  static bool canEditCover(Track t) => _ext(t.path!) == 'flac' || _ffmpegCover.contains(_ext(t.path!));
+  static bool canEditCover(Track t) => _inProcess.contains(_ext(t.path!)) || _ffmpegCover.contains(_ext(t.path!));
 
   static Future<TagEdit> readTags(Track track) {
     final path = track.path!;
@@ -121,8 +122,8 @@ abstract final class Metadata {
     final dot = path.lastIndexOf('.');
     final temp = File('${path.substring(0, dot)}.openmusic-tmp${path.substring(dot)}');
     try {
-      if (_ext(path) == 'flac') {
-        await Isolate.run(() => _writeFlac(path, temp, edit));
+      if (_inProcess.contains(_ext(path))) {
+        await Isolate.run(() => _writeInProcess(path, temp, edit));
       } else {
         await _writeWithFfmpeg(path, temp, edit);
       }
@@ -138,7 +139,7 @@ abstract final class Metadata {
     return updated;
   }
 
-  static void _writeFlac(String path, File temp, TagEdit edit) {
+  static void _writeInProcess(String path, File temp, TagEdit edit) {
     File(path).copySync(temp.path);
     updateMetadata(temp, (m) {
       m.setTitle(edit.title);
@@ -146,7 +147,13 @@ abstract final class Metadata {
       m.setAlbum(edit.album);
       m.setYear(edit.year == null ? null : DateTime(edit.year!));
       m.setTrackNumber(edit.trackNumber);
-      if (m case final VorbisMetadata v) v.discNumber = edit.discNumber;
+      switch (m) {
+        case final VorbisMetadata v:
+          v.discNumber = edit.discNumber;
+        case final Mp4Metadata v:
+          v.discNumber = edit.discNumber;
+        default:
+      }
       m.setGenres([?edit.genre]);
       if (edit.cover != null) m.setPictures([Picture(edit.cover!, edit.coverMime, PictureType.coverFront)]);
     });

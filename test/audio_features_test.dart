@@ -12,6 +12,9 @@ import 'package:openmusic/services/lyrics.dart';
 import 'package:openmusic/services/metadata.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// A 1x1 PNG, for cover tests.
+const _png1x1 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 SignalPath _path({
   String inFormat = 's16',
   int inRate = 44100,
@@ -352,8 +355,133 @@ FILE "album.wav" WAVE
       return {for (final e in all.entries) (e.key as String).toLowerCase(): e.value as String};
     }
 
-    test('MP4 is not offered: its tags could not be rewritten losslessly', () {
-      expect(Metadata.canEditTags(Track.fromUri(Uri.file('/x/song.m4a'))), isFalse);
+    // ffmpeg can't write freeform MP4 atoms, so a ReplayGain one ("----" with
+    // mean / name / data, as foobar2000 and Mp3tag write it) is added by hand.
+    // ffmpeg puts moov after mdat, so no chunk offsets move.
+    void addFreeformAtom(String path, String name, String value) {
+      Uint8List box(String type, List<int> body) =>
+          Uint8List.fromList([...(ByteData(4)..setUint32(0, body.length + 8)).buffer.asUint8List(), ...latin1.encode(type), ...body]);
+      final atom = box('----', [
+        ...box('mean', [0, 0, 0, 0, ...utf8.encode('com.apple.iTunes')]),
+        ...box('name', [0, 0, 0, 0, ...utf8.encode(name)]),
+        ...box('data', [0, 0, 0, 1, 0, 0, 0, 0, ...utf8.encode(value)]),
+      ]);
+      final bytes = File(path).readAsBytesSync();
+      final view = ByteData.sublistView(bytes);
+      // Finds [type] among the boxes in [start, end); returns its offset.
+      int find(String type, int start, int end) {
+        for (var o = start; o < end; o += view.getUint32(o)) {
+          if (latin1.decode(bytes.sublist(o + 4, o + 8)) == type) return o;
+        }
+        throw StateError('no $type');
+      }
+
+      final moov = find('moov', 0, bytes.length);
+      expect(moov, greaterThan(find('mdat', 0, bytes.length)));
+      final udta = find('udta', moov + 8, moov + view.getUint32(moov));
+      final meta = find('meta', udta + 8, udta + view.getUint32(udta));
+      final ilst = find('ilst', meta + 12, meta + view.getUint32(meta));
+      for (final o in [moov, udta, meta, ilst]) {
+        view.setUint32(o, view.getUint32(o) + atom.length);
+      }
+      final at = ilst + 8;
+      File(path).writeAsBytesSync([...bytes.sublist(0, at), ...atom, ...bytes.sublist(at)]);
+    }
+
+    for (final (name, codec) in [('song.m4a', 'aac'), ('alac.m4a', 'alac')]) {
+      test('edits MP4 ($codec) and keeps ReplayGain and other atoms it does not show', () async {
+        final path = '${dir.path}/$name';
+        final r = await Process.run('ffmpeg', [
+          '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=d=1', '-c:a', codec, //
+          '-metadata', 'title=Old', '-metadata', 'album_artist=Band', path,
+        ]);
+        if (r.exitCode != 0) return markTestSkipped('ffmpeg not available');
+        addFreeformAtom(path, 'REPLAYGAIN_TRACK_GAIN', '-7.50 dB');
+        expect((await probe(path))['replaygain_track_gain'], '-7.50 dB', reason: 'fixture is readable');
+
+        final track = Track.fromUri(Uri.file(path));
+        expect(Metadata.canEditTags(track), isTrue);
+        expect(Metadata.canEditCover(track), isTrue);
+        final tags = await Metadata.readTags(track);
+        expect(tags.title, 'Old');
+        tags
+          ..title = 'New title'
+          ..artist = 'New artist'
+          ..album = 'Album'
+          ..discNumber = 2
+          ..trackNumber = 7
+          ..cover = Uint8List.fromList(base64.decode(_png1x1))
+          ..coverMime = 'image/png';
+        final updated = await Metadata.writeTags(track, tags);
+        expect(updated.title, 'New title');
+        expect(updated.artist, 'New artist');
+        expect(updated.trackNumber, 7);
+        expect(updated.discNumber, 2);
+        final after = await probe(path);
+        expect(after['replaygain_track_gain'], '-7.50 dB', reason: 'ReplayGain survived');
+        expect(after['album_artist'], 'Band', reason: 'aART survived');
+        expect(after['encoder'], isNotNull, reason: '©too survived');
+        expect(await Metadata.artwork(updated), isNotNull, reason: 'cover written');
+        expect(dir.listSync().map((e) => e.path.split('/').last), [name], reason: 'no temp file left');
+      });
+    }
+
+    Future<String> audioMd5(String path) async {
+      final r = await Process.run('ffmpeg', ['-v', 'error', '-i', path, '-map', '0:a', '-f', 'md5', '-']);
+      expect(r.exitCode, 0, reason: r.stderr as String);
+      expect((r.stderr as String).trim(), isEmpty);
+      return (r.stdout as String).trim();
+    }
+
+    test('edits an MP4 with no udta box at all', () async {
+      final path = '${dir.path}/bare.m4a';
+      final r = await Process.run('ffmpeg', [
+        '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=d=1', '-c:a', 'aac', path, //
+      ]);
+      if (r.exitCode != 0) return markTestSkipped('ffmpeg not available');
+      // Drop moov's udta (moov is after mdat, so nothing else moves).
+      final bytes = File(path).readAsBytesSync();
+      final view = ByteData.sublistView(bytes);
+      var moov = 0;
+      while (latin1.decode(bytes.sublist(moov + 4, moov + 8)) != 'moov') {
+        moov += view.getUint32(moov);
+      }
+      var udta = moov + 8;
+      while (latin1.decode(bytes.sublist(udta + 4, udta + 8)) != 'udta') {
+        udta += view.getUint32(udta);
+      }
+      final udtaSize = view.getUint32(udta);
+      view.setUint32(moov, view.getUint32(moov) - udtaSize);
+      File(path).writeAsBytesSync([...bytes.sublist(0, udta), ...bytes.sublist(udta + udtaSize)]);
+      final before = await audioMd5(path);
+
+      final track = Track.fromUri(Uri.file(path));
+      final tags = await Metadata.readTags(track);
+      expect(tags.title, isNull);
+      tags
+        ..title = 'Fresh'
+        ..artist = 'Someone';
+      expect((await Metadata.writeTags(track, tags)).title, 'Fresh');
+      expect((await probe(path))['artist'], 'Someone');
+      expect(await audioMd5(path), before, reason: 'audio untouched');
+    });
+
+    test('edits an MP4 whose moov comes before the audio (chunk offsets move)', () async {
+      final path = '${dir.path}/fast.m4a';
+      final r = await Process.run('ffmpeg', [
+        '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=d=3', '-c:a', 'aac', '-movflags', '+faststart', //
+        '-metadata', 'title=Old', path,
+      ]);
+      if (r.exitCode != 0) return markTestSkipped('ffmpeg not available');
+      final before = await audioMd5(path);
+      final track = Track.fromUri(Uri.file(path));
+      final tags = await Metadata.readTags(track)
+        ..title = 'A much longer title than before, so moov grows'
+        ..cover = Uint8List.fromList(base64.decode(_png1x1))
+        ..coverMime = 'image/png';
+      await Metadata.writeTags(track, tags);
+      expect((await probe(path))['title'], tags.title);
+      expect(await audioMd5(path), before, reason: 'audio untouched');
     });
 
     for (final ext in ['flac', 'mp3', 'ogg']) {

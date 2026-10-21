@@ -18,7 +18,6 @@ native players (ExoPlayer / AVPlayer), which none of the DSP below reaches.
 | AirPlay | Not started | AirPlay 2 needs FairPlay-style pairing; classic RAOP needs ALAC + RTSP + encryption | RAOP (AirPlay 1) sender; most AirPlay 2 receivers still accept it |
 | Roon Ready | Blocked | Roon only certifies vetted hardware/software partners | Apply to Roon's partner programme; nothing to build alone |
 | Qobuz / Tidal | Blocked | Both need partner API credentials and terms | Apply for partner access; then a source like the YouTube Music one |
-| Tag editing for MP4 / M4A / ALAC | Disabled on purpose | The FLAC writer is patched to keep every tag, but ffmpeg's MP4 muxer drops freeform atoms (ReplayGain, MusicBrainz) | Patch `third_party/audio_metadata_reader`'s MP4 writer to keep unknown `----` atoms, then enable `m4a` in `Metadata.canEditTags` |
 
 ## Partial
 
@@ -46,8 +45,9 @@ gapless playback, ReplayGain (track / album), volume applied in 64-bit float (or
 with presets and automatic headroom, headphone crossfeed, lossless and hi-res
 formats (anything FFmpeg decodes; tested with 24-bit / 96 kHz FLAC), cue
 sheets, multi-disc albums, tag editor that keeps ReplayGain and custom tags
-(tested on FLAC, MP3 and Ogg; WAV, AIFF, WavPack and MKA go through the same
-ffmpeg path but are untested), embedded and sidecar cover art, online cover art (**Find online** in the tag
+(tested on FLAC, MP3, Ogg and M4A with AAC or ALAC, where freeform atoms such as
+ReplayGain and MusicBrainz IDs are kept; WAV, AIFF, WavPack and MKA go through
+the same ffmpeg path but are untested), embedded and sidecar cover art, online cover art (**Find online** in the tag
 editor: MusicBrainz + Cover Art Archive, 1200 px, embedded on save), synced lyrics
 (LRC files, embedded, YouTube Music's Lyrics tab, LRCLIB, Better Lyrics, NetEase Cloud Music,
 lyrics.ovh), with pronunciation (romanization) and translation
