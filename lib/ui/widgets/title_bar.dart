@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../theme.dart';
+import 'app_logo.dart';
 
 /// Desktop platforms draw their own title bar; mobile has none.
 bool get hasCustomTitleBar => Platform.isLinux || Platform.isWindows || Platform.isMacOS;
@@ -118,7 +119,7 @@ class _AppTitleBarState extends State<AppTitleBar> with WindowListener {
                 padding: EdgeInsets.only(left: Platform.isMacOS ? 80 : 14),
                 child: Row(
                   children: [
-                    Icon(Icons.graphic_eq_rounded, size: 16, color: AppColors.accent),
+                    const AppLogo(size: 16),
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
