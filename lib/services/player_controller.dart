@@ -1159,8 +1159,17 @@ class PlayerController extends ChangeNotifier {
     );
   }
 
+  bool _disposed = false;
+
+  /// Work started in [load] (tag tools probe, tag enrichment) can finish after dispose.
+  @override
+  void notifyListeners() {
+    if (!_disposed) super.notifyListeners();
+  }
+
   @override
   void dispose() {
+    _disposed = true;
     MemoryTrim.stop();
     cast.dispose();
     for (final s in _subs) {
