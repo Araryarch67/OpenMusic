@@ -418,7 +418,4 @@ abstract final class LyricsService {
     if (plain == null) return null;
     return Lyrics(plain: plain, source: 'LRCLIB');
   }
-
-  @visibleForTesting
-  static void clearCache() => _cache.clear();
 }

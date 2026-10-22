@@ -408,10 +408,6 @@ class YtMusicWeb {
     {'action': 'ACTION_SET_PLAYLIST_NAME', 'playlistName': title},
   ]);
 
-  Future<void> setPlaylistDescription(String playlistId, String description) => _edit(playlistId, [
-    {'action': 'ACTION_SET_PLAYLIST_DESCRIPTION', 'playlistDescription': description},
-  ]);
-
   Future<void> setPlaylistPrivacy(String playlistId, PlaylistPrivacy privacy) => _edit(playlistId, [
     {'action': 'ACTION_SET_PLAYLIST_PRIVACY', 'playlistPrivacy': privacy.api},
   ]);

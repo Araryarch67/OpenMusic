@@ -144,11 +144,4 @@ abstract final class Ffmpeg {
       client.close();
     }
   }
-
-  @visibleForTesting
-  static void debugReset() {
-    _path = null;
-    _probed = false;
-    _download = null;
-  }
 }

@@ -147,8 +147,6 @@ class YoutubeImporter extends ChangeNotifier {
   /// The newest download of [videoId], if any (queued, running, done or failed).
   DownloadJob? jobFor(String videoId) => _jobs.where((j) => j.videoId == videoId).lastOrNull;
 
-  bool isDownloaded(String videoId) => _jobs.any((j) => j.videoId == videoId && j.status == DownloadStatus.done);
-
   int _enqueue(List<DownloadJob> fresh) {
     var added = 0;
     for (final job in fresh) {
