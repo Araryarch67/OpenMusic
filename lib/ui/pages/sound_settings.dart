@@ -130,6 +130,7 @@ class AdvancedAudioSettings extends StatelessWidget {
       listenable: audio,
       builder: (context, _) {
         final locked = audio.bitPerfect;
+        final dopReady = audio.bitPerfect && audio.bypassesMixer;
         return SettingsCard(
           children: [
             Theme(
@@ -178,8 +179,11 @@ class AdvancedAudioSettings extends StatelessWidget {
                         secondary: const Icon(Icons.verified_outlined),
                         title: const Text('Bit-perfect mode'),
                         subtitle: Text(
-                          'Sends the file to your DAC untouched: no equalizer, leveling or resampling. Volume still works; at 100% nothing is changed. '
-                          '${AudioEngine.hasExclusiveMode ? 'Takes the device exclusively.' : 'Takes over your DAC so the system mixer can\'t resample. Meanwhile other apps play through another output.'}',
+                          AudioEngine.hasExclusiveMode
+                              ? 'No equalizer, leveling or resampling in OpenMusic. Volume still works; at 100% nothing is changed. '
+                                    'Other apps keep playing, so Windows still mixes the sound: turn on Exclusive mode too to send the file to your DAC untouched.'
+                              : 'Sends the file to your DAC untouched: no equalizer, leveling or resampling. Volume still works; at 100% nothing is changed. '
+                                    'Takes over your DAC so the system mixer can\'t resample. Meanwhile other apps play through another output.',
                           style: muted,
                         ),
                         value: audio.bitPerfect,
@@ -190,27 +194,29 @@ class AdvancedAudioSettings extends StatelessWidget {
                         secondary: const Icon(Icons.graphic_eq_rounded),
                         title: const Text('Native DSD (DoP)'),
                         subtitle: Text(
-                          audio.bitPerfect
+                          dopReady
                               ? 'Sends DSD files to your DAC as DSD instead of converting them. '
                                     'Only for DACs that support DoP: others play a faint hiss, so turn it off then. '
                                     'The volume stays at 100% for DSD songs; use your DAC\'s.'
+                              : AudioEngine.hasExclusiveMode
+                              ? 'Needs Bit-perfect mode and Exclusive mode'
                               : 'Needs Bit-perfect mode',
                           style: muted,
                         ),
-                        value: audio.nativeDsd && audio.bitPerfect,
-                        onChanged: audio.bitPerfect ? audio.setNativeDsd : null,
+                        value: audio.nativeDsd && dopReady,
+                        onChanged: dopReady ? audio.setNativeDsd : null,
                       ),
                     if (AudioEngine.hasExclusiveMode)
                       SwitchListTile(
                         secondary: const Icon(Icons.lock_outline_rounded),
                         title: const Text('Exclusive mode'),
                         subtitle: Text(
-                          'Takes over the device so the system mixer can\'t resample. '
-                          'The DAC switches to each song\'s sample rate.',
+                          'Takes over the device so Windows\' mixer can\'t resample: the DAC switches to each song\'s sample rate. '
+                          'Other apps go silent while OpenMusic plays, and Windows\' volume mixer can\'t control it.',
                           style: muted,
                         ),
-                        value: audio.exclusive || locked,
-                        onChanged: locked ? null : audio.setExclusive,
+                        value: audio.exclusive,
+                        onChanged: audio.setExclusive,
                       ),
                     if (AudioEngine.hasPlugins)
                       SettingTile(
@@ -279,8 +285,8 @@ class AdvancedAudioSettings extends StatelessWidget {
                         'SoX-grade conversion whenever the rate has to change (slightly more CPU)',
                         style: muted,
                       ),
-                      value: audio.hqResampler && !locked,
-                      onChanged: locked ? null : audio.setHqResampler,
+                      value: audio.hqResamplerActive,
+                      onChanged: locked && audio.bypassesMixer ? null : audio.setHqResampler,
                     ),
                     SettingTile(
                       icon: Icons.timer_outlined,

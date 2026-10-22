@@ -77,8 +77,8 @@ class OutputDevice {
   final String name;
   final String description;
 
-  /// Bypasses the system mixer (Linux ALSA hardware device): nothing else can
-  /// play meanwhile, and the DAC gets the file's own rate and bits.
+  /// Bypasses the system mixer (a Linux ALSA hardware device, a Windows ASIO
+  /// driver): nothing else can play meanwhile, and the DAC gets the file's own rate and bits.
   final bool direct;
 }
 
@@ -252,7 +252,8 @@ class AudioEngine extends ChangeNotifier {
 
   /// Whether the OS output can be opened exclusively by mpv's own option
   /// (WASAPI / CoreAudio). On Linux a direct ALSA device does the same.
-  static bool get hasExclusiveMode => Platform.isWindows || Platform.isMacOS;
+  static bool get hasExclusiveMode =>
+      defaultTargetPlatform == TargetPlatform.windows || defaultTargetPlatform == TargetPlatform.macOS;
 
   static const _key = 'audio.v1';
 
@@ -274,14 +275,31 @@ class AudioEngine extends ChangeNotifier {
   bool convolution = false;
 
   String device = 'auto';
+
+  /// Windows: WASAPI exclusive mode, past Windows' mixer. Other apps go silent
+  /// meanwhile and Windows' volume mixer can't reach the player, so only this
+  /// switch asks for it (Bit-perfect mode alone keeps the device shared).
   bool exclusive = false;
+
+  /// mpv's `audio-exclusive`.
+  bool get exclusiveOutput => hasExclusiveMode && exclusive;
+
+  /// The sound reaches the DAC without the OS mixer in between: Exclusive mode
+  /// or an ASIO driver on Windows, a direct card (Bit-perfect mode's) on Linux.
+  bool get bypassesMixer =>
+      hasExclusiveMode ? exclusive || device.startsWith('asio/') : bitPerfect || device.startsWith('alsa/');
 
   /// Null follows each song's own rate.
   int? outputRate;
   bool hqResampler = true;
 
-  /// Everything off, exclusive output: nothing touches the samples. The player's
-  /// volume still works (the DAC may have none): untouched at 100%, 64-bit float below.
+  /// Bit-perfect mode leaves the rate alone, except through Windows' shared
+  /// mixer: mpv still converts to the mixer's rate there, so with this resampler.
+  bool get hqResamplerActive => hqResampler && !(bitPerfect && bypassesMixer);
+
+  /// Everything off: nothing in the player touches the samples. On Linux the
+  /// output goes straight to the card; on Windows that takes [exclusive] too. The
+  /// player's volume still works (the DAC may have none): untouched at 100%, 64-bit float below.
   bool bitPerfect = false;
 
   /// Audio plugins (VST2, LV2, CLAP, LADSPA...) set up in Carla's window and
@@ -343,8 +361,8 @@ class AudioEngine extends ChangeNotifier {
   /// DoP) and a DAC that understands DoP; others play it as faint hiss.
   bool nativeDsd = false;
 
-  /// Whether DSD files are sent as DoP right now.
-  bool get dopActive => nativeDsd && bitPerfect && hasOutputChoice;
+  /// Whether DSD files are sent as DoP right now (a mixer in between would destroy it).
+  bool get dopActive => nativeDsd && bitPerfect && bypassesMixer && hasOutputChoice;
 
   DsdPlayback? _dop;
 
@@ -632,7 +650,6 @@ class AudioEngine extends ChangeNotifier {
   }
 
   Future<void> _applyProps(NativePlayer p) async {
-    final exclusiveOut = exclusive || bitPerfect;
     final outputDevice = await _outputDevice();
     final props = <String, String>{
       // media_kit turns on mpv's disk cache, which fails ("Failed to create file
@@ -651,10 +668,10 @@ class AudioEngine extends ChangeNotifier {
       'audio-device': outputDevice,
       // The app's name in the Linux mixers (PulseAudio / PipeWire); mpv's default is "mpv".
       'audio-client-name': 'OpenMusic',
-      'audio-exclusive': hasExclusiveMode && exclusiveOut ? 'yes' : 'no',
+      'audio-exclusive': exclusiveOutput ? 'yes' : 'no',
       'audio-samplerate': bitPerfect ? '0' : '${outputRate ?? 0}',
       // Only used when the rate has to change; keeps the default otherwise.
-      'audio-swresample-o': hqResampler && !bitPerfect ? await _hqResampler() : '',
+      'audio-swresample-o': hqResamplerActive ? await _hqResampler() : '',
       // Volume is applied in the filter chain (64-bit float); mpv must not scale samples too.
       'volume': '100',
     };
@@ -806,7 +823,7 @@ class AudioEngine extends ChangeNotifier {
         out.add(OutputDevice(name, desc.split('/').first, direct: true));
         continue;
       }
-      out.add(OutputDevice(name, desc));
+      out.add(OutputDevice(name, desc, direct: api == 'asio'));
     }
     return out;
   }

@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:openmusic/models/track.dart';
@@ -134,7 +134,7 @@ FILE "album.wav" WAVE
       expect(mixer.untouched, isTrue);
       expect(mixer.bitPerfect, isFalse);
       expect(_path(device: 'alsa/plughw:CARD=DAC').viaSystemMixer, isTrue);
-      // Bit-perfect mode opens the chosen WASAPI device exclusively.
+      // A chosen WASAPI device in Exclusive mode.
       expect(_path(output: 'wasapi', device: 'wasapi/{x}', exclusive: true).bitPerfect, isTrue);
       expect(_path(output: 'wasapi', device: 'wasapi/{x}').bitPerfect, isFalse, reason: 'a chosen device, still shared');
     });
@@ -266,6 +266,32 @@ FILE "album.wav" WAVE
       await a.setBitPerfect(true);
       expect(a.filterChain, isEmpty);
       expect(a.effectiveLeveling, VolumeLeveling.off);
+    });
+
+    test('Windows: only Exclusive mode takes the device; Bit-perfect mode alone stays shared', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final a = AudioEngine()
+        ..bitPerfect = true
+        ..nativeDsd = true;
+      expect(a.exclusiveOutput, isFalse, reason: 'other apps keep playing; Windows\' volume mixer still works');
+      expect(a.bypassesMixer, isFalse);
+      expect(a.dopActive, isFalse, reason: 'Windows\' mixer would destroy DoP');
+      expect(a.hqResamplerActive, isTrue, reason: 'mpv still converts to the mixer\'s rate');
+      a.exclusive = true;
+      expect(a.exclusiveOutput, isTrue);
+      expect(a.dopActive, isTrue);
+      expect(a.hqResamplerActive, isFalse);
+      a
+        ..exclusive = false
+        ..device = 'asio/Focusrite USB ASIO';
+      expect(a.exclusiveOutput, isFalse);
+      expect(a.bypassesMixer, isTrue, reason: 'an ASIO driver skips the mixer by itself');
+
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      final b = AudioEngine()..bitPerfect = true;
+      expect(b.exclusiveOutput, isFalse, reason: 'Linux has no exclusive option; a direct card does it');
+      expect(b.bypassesMixer, isTrue);
     });
 
     test('the filter chain really changes the sound (measured through mpv)', () async {

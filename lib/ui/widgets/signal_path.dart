@@ -173,13 +173,14 @@ class _SignalPathSheet extends StatelessWidget {
                 'Lossless to the system mixer',
                 AppColors.textPrimary,
                 'Nothing in OpenMusic changes the sound, but the system mixer may resample it. '
-                    'For bit-perfect, turn on Bit-perfect mode in Settings › Advanced audio.',
+                    '${AudioEngine.hasExclusiveMode ? 'For bit-perfect, turn on Bit-perfect mode and Exclusive mode in Settings › Advanced audio (other apps go silent meanwhile).' : 'For bit-perfect, turn on Bit-perfect mode in Settings › Advanced audio.'}',
               )
             : p.isDsd
             ? (
                 'DSD converted to PCM',
                 AppColors.textPrimary,
-                'DSD is decoded to high-rate PCM. To send it to your DAC as DSD, turn on Bit-perfect mode and Native DSD (DoP) in Settings › Advanced audio.',
+                'DSD is decoded to high-rate PCM. To send it to your DAC as DSD, turn on Bit-perfect mode'
+                    '${AudioEngine.hasExclusiveMode ? ', Exclusive mode' : ''} and Native DSD (DoP) in Settings › Advanced audio.',
               )
             : (
                 'Processed',
