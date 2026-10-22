@@ -169,7 +169,11 @@ class _StatsPanelState extends State<_StatsPanel> {
         ),
       if (streaming && yt?.bitsPerSecond != null) ('Connection Speed', '${(yt!.bitsPerSecond! / 1000).round()} Kbps'),
       if (streaming && yt != null)
-        ('Network Activity', '${_bytes(yt.received)}${stream?.size == null ? '' : ' of ${_bytes(stream!.size!)}'}'),
+        // Can pass the file's size: mpv reads some parts twice (a webm's index sits at the end).
+        (
+          'Network Activity',
+          '${_bytes(yt.received)} received${stream?.size == null ? '' : ' (file ${_bytes(stream!.size!)})'}',
+        ),
       if (_extra.buffered case final s?) ('Buffer Health', '${s.toStringAsFixed(2)} s'),
       if (stream != null) ('Stream URL from', stream.via),
     ];
