@@ -247,7 +247,7 @@ class _SignalPathSheet extends StatelessWidget {
                   title: 'Output',
                   value:
                       '${SignalPath.describe(p.outFormat, p.outRate)} · ${_channels(p.outChannels)}\n'
-                      '${_outputName(p)}',
+                      '${outputName(p)}',
                   changes: p.viaSystemMixer,
                   last: p.dac == null,
                 ),
@@ -273,19 +273,20 @@ class _SignalPathSheet extends StatelessWidget {
     2 => 'stereo',
     final n => '$n channels',
   };
+}
 
-  static String _outputName(SignalPath p) {
-    final api = switch (p.output) {
-      'pipewire' => 'PipeWire (system mixer)',
-      'pulse' => 'PulseAudio (system mixer)',
-      'alsa' => p.viaSystemMixer ? 'ALSA' : 'ALSA, direct to hardware',
-      'wasapi' => 'WASAPI',
-      'asio' => 'ASIO',
-      'coreaudio' => 'Core Audio',
-      final o => o,
-    };
-    return p.device == 'auto' || p.device.isEmpty ? api : '$api · ${p.device.split('/').last}';
-  }
+/// The output API and device, e.g. "WASAPI shared · {0.0.0.00000000}.{…}".
+String outputName(SignalPath p) {
+  final api = switch (p.output) {
+    'pipewire' => 'PipeWire (system mixer)',
+    'pulse' => 'PulseAudio (system mixer)',
+    'alsa' => p.viaSystemMixer ? 'ALSA' : 'ALSA, direct to hardware',
+    'wasapi' => p.exclusive ? 'WASAPI exclusive' : 'WASAPI shared',
+    'asio' => 'ASIO',
+    'coreaudio' => 'Core Audio',
+    final o => o,
+  };
+  return p.device == 'auto' || p.device.isEmpty ? api : '$api · ${p.device.split('/').last}';
 }
 
 class _Stage extends StatelessWidget {

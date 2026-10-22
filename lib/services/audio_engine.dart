@@ -907,17 +907,39 @@ class AudioEngine extends ChangeNotifier {
     return null;
   }
 
+  /// An mpv property as text, empty when mpv has none.
+  static Future<String> _read(NativePlayer p, String key) async {
+    try {
+      return await p.getProperty(key, waitForInitialization: false);
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// What Stats for nerds shows beside [signalPath]: seconds of the song read
+  /// ahead of the playhead, and the ReplayGain tag leveling applies ("-7.50 dB").
+  Future<({double? buffered, String? gain})> nerdStats() async {
+    final p = _native;
+    if (p == null) return (buffered: null, gain: null);
+    Future<String> g(String k) => _read(p, k);
+    final track = await g('metadata/by-key/REPLAYGAIN_TRACK_GAIN');
+    final gain = switch (effectiveLeveling) {
+      VolumeLeveling.off => '',
+      VolumeLeveling.track => track,
+      // mpv falls back to the track's gain where the album has none.
+      VolumeLeveling.album => switch (await g('metadata/by-key/REPLAYGAIN_ALBUM_GAIN')) {
+        '' => track,
+        final album => album,
+      },
+    };
+    return (buffered: double.tryParse(await g('demuxer-cache-duration')), gain: gain.isEmpty ? null : gain);
+  }
+
   /// One read of the live signal path, or null when nothing is playing.
   Future<SignalPath?> signalPath() async {
     final p = _native;
     if (p == null) return null;
-    Future<String> g(String k) async {
-      try {
-        return await p.getProperty(k, waitForInitialization: false);
-      } catch (_) {
-        return '';
-      }
-    }
+    Future<String> g(String k) => _read(p, k);
 
     final inRate = int.tryParse(await g('audio-params/samplerate')) ?? 0;
     if (inRate == 0) return null;

@@ -14,6 +14,7 @@ import 'cast_picker.dart';
 import 'theme.dart';
 import 'widgets/controls.dart';
 import 'widgets/signal_path.dart';
+import 'widgets/stats_for_nerds.dart';
 import 'pages/lyrics_page.dart';
 import 'ytmusic_edit.dart';
 import 'widgets/track_row.dart';
@@ -75,6 +76,13 @@ class _MiniPlayerState extends State<MiniPlayer> {
               item(Icons.lyrics_outlined, 'Lyrics', shell.openLyrics),
               item(Icons.cast_rounded, 'Play on a device', () => showCastPicker(context)),
               if (AudioEngine.supported) item(Icons.graphic_eq_rounded, 'Signal path', () => showSignalPath(context)),
+              if (AudioEngine.supported)
+                statsForNerds.value
+                    ? item(Icons.query_stats_rounded, 'Hide stats for nerds', () => statsForNerds.value = false)
+                    : item(Icons.query_stats_rounded, 'Stats for nerds', () {
+                        statsForNerds.value = true;
+                        widget.onOpen();
+                      }),
               item(Icons.close_rounded, 'Close player', c.closePlayer),
             ],
           ),
@@ -452,10 +460,12 @@ class NowPlayingSidePanel extends StatelessWidget {
                   const SizedBox(height: 8),
                   AspectRatio(
                     aspectRatio: 1,
-                    child: _TrackSwitcher(
-                      trackId: track.id,
-                      slide: false,
-                      child: Artwork(key: ValueKey(track.id), track: track, radius: 8),
+                    child: NowPlayingCover(
+                      child: _TrackSwitcher(
+                        trackId: track.id,
+                        slide: false,
+                        child: Artwork(key: ValueKey(track.id), track: track, radius: 8),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 16),
@@ -609,13 +619,15 @@ class NowPlayingPage extends StatelessWidget {
                           const CastButton(color: Colors.white),
                         ],
                       );
-                      Widget cover(double size) => Hero(
-                        tag: 'now-playing-art',
-                        child: DecoratedBox(
-                          decoration: const BoxDecoration(
-                            boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12))],
+                      Widget cover(double size) => NowPlayingCover(
+                        child: Hero(
+                          tag: 'now-playing-art',
+                          child: DecoratedBox(
+                            decoration: const BoxDecoration(
+                              boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12))],
+                            ),
+                            child: Artwork(track: track, size: size, radius: 8),
                           ),
-                          child: Artwork(track: track, size: size, radius: 8),
                         ),
                       );
                       final info = Row(
@@ -814,15 +826,17 @@ class _FullScreenPlayerState extends State<FullScreenPlayer> {
         children: [
           SizedBox.square(
             dimension: art,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: const [BoxShadow(color: Color(0x73000000), blurRadius: 40, offset: Offset(0, 16))],
-              ),
-              child: _TrackSwitcher(
-                trackId: track.id,
-                slide: false,
-                child: Artwork(key: ValueKey(track.id), track: track, radius: 12),
+            child: NowPlayingCover(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: const [BoxShadow(color: Color(0x73000000), blurRadius: 40, offset: Offset(0, 16))],
+                ),
+                child: _TrackSwitcher(
+                  trackId: track.id,
+                  slide: false,
+                  child: Artwork(key: ValueKey(track.id), track: track, radius: 12),
+                ),
               ),
             ),
           ),

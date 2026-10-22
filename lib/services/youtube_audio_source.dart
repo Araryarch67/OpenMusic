@@ -14,6 +14,24 @@ import 'youtube_importer.dart';
 import 'youtube_stream.dart';
 import 'ytdlp.dart';
 
+/// How a YouTube song is being streamed, for Stats for nerds.
+class StreamStats {
+  /// What YouTube serves for it (null until resolved).
+  ResolvedAudio? stream;
+
+  /// Bytes received from YouTube for this song so far, the preloaded start included.
+  int received = 0;
+
+  /// Speed of the latest request, in bits per second. Time spent waiting for
+  /// the player to read is left out, so this is the connection's speed.
+  double? bitsPerSecond;
+
+  void _count(int bytes, Duration took) {
+    // A short read (the end of the file, a seek) says little about the connection.
+    if (bytes >= 64 << 10 && took > Duration.zero) bitsPerSecond = bytes * 8 / (took.inMicroseconds / 1e6);
+  }
+}
+
 /// Streams a YouTube video's audio track without downloading it first.
 ///
 /// Stream URLs expire after a few hours, so nothing is resolved until the
@@ -32,6 +50,20 @@ class YoutubeAudioSource extends StreamAudioSource {
   static const _headSize = 256 << 10; // ~15 s of 128 kbps Opus
   static final _headHttp = http.Client();
 
+  static final _stats = <String, StreamStats>{};
+
+  /// How [videoId] is being streamed, if it has been this session.
+  static StreamStats? statsOf(String videoId) => _stats[videoId];
+
+  static StreamStats _statsFor(String videoId) {
+    final s = _stats.remove(videoId) ?? StreamStats();
+    _stats[videoId] = s; // newest last
+    while (_stats.length > 8) {
+      _stats.remove(_stats.keys.first);
+    }
+    return s;
+  }
+
   /// Resolves [videoId] and fetches the start of its audio, once.
   static Future<void> preload(String videoId) =>
       _heads.containsKey(videoId) ? Future.value() : _loadingHeads[videoId] ??= _fetchHead(videoId);
@@ -41,11 +73,16 @@ class YoutubeAudioSource extends StreamAudioSource {
       final r = await YoutubeStream.best(videoId);
       final total = r.size;
       if (total == null) return;
+      final took = Stopwatch()..start();
       final res = await _headHttp.get(
         r.url,
         headers: {'Range': 'bytes=0-${(_headSize < total ? _headSize : total) - 1}'},
       );
       if (res.statusCode != 206 && res.statusCode != 200) return;
+      _statsFor(videoId)
+        ..stream = r
+        ..received += res.bodyBytes.length
+        .._count(res.bodyBytes.length, took.elapsed);
       _heads[videoId] = (total: total, bytes: res.bodyBytes);
       while (_heads.length > 4) {
         _heads.remove(_heads.keys.first);
@@ -65,11 +102,13 @@ class YoutubeAudioSource extends StreamAudioSource {
   final _http = http.Client();
 
   /// YouTube's player API (yt-dlp on desktop if refused), with
-  /// youtube_explode as a last resort on phones.
-  Future<({Uri url, int total, String mime})> _resolve() async {
+  /// youtube_explode as a last resort on phones. Always has a size.
+  Future<ResolvedAudio> _resolve() async => _statsFor(videoId).stream = await _find();
+
+  Future<ResolvedAudio> _find() async {
     try {
       final r = await YoutubeStream.best(videoId, aac: aac);
-      if (r.size case final size?) return (url: r.url, total: size, mime: r.mimeType);
+      if (r.size != null) return r;
       if (YtDlp.supported) throw StateError('Unknown stream size for $videoId');
     } catch (e) {
       if (YtDlp.supported) rethrow;
@@ -78,24 +117,30 @@ class YoutubeAudioSource extends StreamAudioSource {
     final manifest = await yt.videos.streams.getManifest(videoId);
     final best = YoutubeImporter.pickBestAudio(manifest.audioOnly, appleOnly: aac ? true : null);
     if (best == null) throw StateError('No audio stream for $videoId');
-    return (
+    return ResolvedAudio(
       url: best.url,
-      total: best.size.totalBytes,
-      mime: best.container == StreamContainer.webM ? 'audio/webm' : 'audio/mp4',
+      formatId: '${best.tag}',
+      ext: best.container == StreamContainer.webM ? 'webm' : 'm4a',
+      codec: best.audioCodec,
+      kbps: best.bitrate.kiloBitsPerSecond.round(),
+      size: best.size.totalBytes,
+      resolvedAt: DateTime.now(),
+      via: 'youtube_explode',
     );
   }
 
   @override
   Future<StreamAudioResponse> request([int? start, int? end]) async {
     final info = await _resolve();
+    final total = info.size!;
     final from = start ?? 0;
-    final to = (end ?? info.total).clamp(from, info.total);
+    final to = (end ?? total).clamp(from, total);
     return StreamAudioResponse(
-      sourceLength: info.total,
+      sourceLength: total,
       contentLength: to - from,
       offset: from,
-      contentType: info.mime,
-      stream: _ranged(info.url, from, to, info.total),
+      contentType: info.mimeType,
+      stream: _ranged(info.url, from, to, total),
     );
   }
 
@@ -119,10 +164,14 @@ class YoutubeAudioSource extends StreamAudioSource {
       pos = end;
     }
     var dropped = 0;
+    final stats = _statsFor(videoId);
     while (pos < to) {
       final last = (pos + _chunkSize).clamp(0, to) - 1;
       try {
         final req = http.Request('GET', source)..headers['Range'] = 'bytes=$pos-$last';
+        // Runs only while waiting for the network, not while the player isn't reading.
+        final took = Stopwatch()..start();
+        var got = 0;
         final res = await _http.send(req);
         if (res.statusCode != 200 && res.statusCode != 206) {
           await res.stream.drain<void>();
@@ -136,9 +185,14 @@ class YoutubeAudioSource extends StreamAudioSource {
           throw http.ClientException('HTTP ${res.statusCode} while streaming $videoId', source);
         }
         await for (final bytes in res.stream) {
+          got += bytes.length;
+          stats.received += bytes.length;
+          took.stop();
           yield bytes;
+          took.start();
           pos += bytes.length;
         }
+        stats._count(got, took.elapsed);
         pos = last + 1;
         dropped = 0;
       } on http.ClientException catch (e) {

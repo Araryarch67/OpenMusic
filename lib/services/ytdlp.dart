@@ -15,6 +15,9 @@ class ResolvedAudio {
     required this.kbps,
     required this.size,
     required this.resolvedAt,
+    required this.via,
+    this.loudness,
+    this.loudnessTarget,
   });
 
   final Uri url;
@@ -24,6 +27,14 @@ class ResolvedAudio {
   final int? kbps;
   final int? size;
   final DateTime resolvedAt;
+
+  /// What found the URL: "YouTube player API", "yt-dlp" or "youtube_explode".
+  final String via;
+
+  /// The song's measured loudness, and the level YouTube's own player brings
+  /// it to (LUFS), where the player API says.
+  final double? loudness;
+  final double? loudnessTarget;
 
   bool get isOpus => codec.contains('opus');
   String get quality => '${isOpus ? 'Opus' : 'AAC'}${kbps == null ? '' : ' · $kbps kbps'}';
@@ -148,6 +159,7 @@ abstract final class YtDlp {
       size: int.tryParse(url.queryParameters['clen'] ?? '') ?? int.tryParse(f[4]),
       url: url,
       resolvedAt: DateTime.now(),
+      via: 'yt-dlp',
     );
   }
 }

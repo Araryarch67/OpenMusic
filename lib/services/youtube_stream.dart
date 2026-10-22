@@ -189,6 +189,7 @@ abstract final class YoutubeStream {
     if (best == null) throw StateError('No audio stream for this song.');
     final url = Uri.parse(best['url'] as String);
     final mime = best['mimeType'] as String;
+    final loudness = (j['playerConfig'] as Map<String, dynamic>?)?['audioConfig'] as Map<String, dynamic>?;
     return ResolvedAudio(
       url: url,
       formatId: '${best['itag']}',
@@ -197,6 +198,9 @@ abstract final class YoutubeStream {
       kbps: (((best['averageBitrate'] ?? best['bitrate']) as num?)?.toDouble() ?? 0) ~/ 1000,
       size: int.tryParse(best['contentLength'] as String? ?? '') ?? int.tryParse(url.queryParameters['clen'] ?? ''),
       resolvedAt: DateTime.now(),
+      via: 'YouTube player API',
+      loudness: (loudness?['trackAbsoluteLoudnessLkfs'] as num?)?.toDouble(),
+      loudnessTarget: (loudness?['loudnessTargetLkfs'] as num?)?.toDouble(),
     );
   }
 
