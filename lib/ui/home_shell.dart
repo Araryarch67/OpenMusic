@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -313,10 +314,15 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
-    final width = MediaQuery.sizeOf(context).width;
+    final size = MediaQuery.sizeOf(context);
+    final width = size.width;
+    // A phone keeps its layout when turned sideways (it's still held in the
+    // hand); tablets and desktop windows switch by width.
+    final mobile = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
+    final phone = mobile && size.shortestSide < 600;
     // Stay in the phone layout for the one frame it takes to close its full-screen pages.
-    final compact = width < 700 || _phoneRoutes.isNotEmpty;
-    if (width >= 700 && _phoneRoutes.isNotEmpty) {
+    final compact = width < 700 || phone || _phoneRoutes.isNotEmpty;
+    if (width >= 700 && !phone && _phoneRoutes.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _closePhoneRoutes());
     }
     final expanded = width >= 1200;
@@ -358,26 +364,46 @@ class _HomeShellState extends State<HomeShell> {
 
     final Widget body;
     if (compact) {
-      _contentWidth = width;
+      // Sideways the tabs move to a rail on the left, leaving the height to the pages.
+      final sideways = width > size.height && size.height < 500;
+      final insets = MediaQuery.paddingOf(context);
+      _contentWidth = sideways ? width - _SideTabs.width - insets.left - insets.right : width;
+      // The desktop history stays alive (hidden) while the window is narrow,
+      // so widening it again returns to the same page.
+      final pages = Stack(
+        children: [
+          Positioned.fill(child: tabs()),
+          // Full size even while hidden: laid out at width 0 its pages would break.
+          Positioned.fill(
+            child: Offstage(child: TickerMode(enabled: false, child: _desktopNavigator())),
+          ),
+        ],
+      );
       body = _scoped(
         Scaffold(
           // Pages scroll on under the see-through tab bar; they pad their ends by its height.
           extendBody: true,
-          // The desktop history stays alive (hidden) while the window is narrow,
-          // so widening it again returns to the same page.
-          body: Stack(
-            children: [
-              Positioned.fill(child: tabs()),
-              // Full size even while hidden: laid out at width 0 its pages would break.
-              Positioned.fill(
-                child: Offstage(child: TickerMode(enabled: false, child: _desktopNavigator())),
-              ),
-            ],
-          ),
+          body: sideways
+              ? Row(
+                  children: [
+                    _SideTabs(tab: _tab, onSelect: _selectTab),
+                    Expanded(
+                      // The rail took the left inset; a camera cutout on the right stays clear.
+                      child: SafeArea(
+                        left: false,
+                        top: false,
+                        bottom: false,
+                        child: MediaQuery.removePadding(context: context, removeLeft: true, child: pages),
+                      ),
+                    ),
+                  ],
+                )
+              : pages,
           bottomNavigationBar: _BottomBar(
             mini: MiniPlayer(onOpen: _openNowPlaying),
             tab: _tab,
             onSelect: _selectTab,
+            showTabs: !sideways,
           ),
         ),
       );
@@ -866,44 +892,41 @@ class _DownloadsLink extends StatelessWidget {
 }
 
 /// Phone bottom area: mini player floating over a fade-to-black tab bar.
-class _BottomBar extends StatelessWidget {
-  const _BottomBar({required this.mini, required this.tab, required this.onSelect});
+const _tabItems = [
+  (tab: _Tab.home, icon: Icons.home_outlined, selected: Icons.home_rounded, label: 'Home'),
+  (tab: _Tab.search, icon: Icons.search_rounded, selected: Icons.manage_search_rounded, label: 'Search'),
+  (tab: _Tab.library, icon: Icons.library_music_outlined, selected: Icons.library_music_rounded, label: 'Your Library'),
+];
 
-  final Widget mini;
+/// The phone's tabs as a rail down the left, for a phone held sideways.
+class _SideTabs extends StatelessWidget {
+  const _SideTabs({required this.tab, required this.onSelect});
+
+  static const width = 88.0;
+
   final _Tab tab;
   final ValueChanged<_Tab> onSelect;
 
   @override
   Widget build(BuildContext context) {
     final text = Theme.of(context).textTheme;
-    const items = [
-      (tab: _Tab.home, icon: Icons.home_outlined, selected: Icons.home_rounded, label: 'Home'),
-      (tab: _Tab.search, icon: Icons.search_rounded, selected: Icons.manage_search_rounded, label: 'Search'),
-      (
-        tab: _Tab.library,
-        icon: Icons.library_music_outlined,
-        selected: Icons.library_music_rounded,
-        label: 'Your Library',
-      ),
-    ];
-    final glass = Appearance.instance.glass;
-    final bar = SafeArea(
-      top: false,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          mini,
-          Row(
+    return SafeArea(
+      right: false,
+      child: SizedBox(
+        width: width,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Column(
             children: [
-              for (final i in items)
-                Expanded(
-                  child: InkResponse(
-                    onTap: () => onSelect(i.tab),
-                    radius: 36,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 8, bottom: 6),
+              for (final i in _tabItems)
+                InkResponse(
+                  onTap: () => onSelect(i.tab),
+                  radius: 36,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: SizedBox(
+                      width: width,
                       child: Column(
-                        mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
                             tab == i.tab ? i.selected : i.icon,
@@ -912,6 +935,8 @@ class _BottomBar extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(
                             i.label,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                             style: text.labelSmall?.copyWith(
                               color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
                               fontWeight: FontWeight.w600,
@@ -924,6 +949,64 @@ class _BottomBar extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({required this.mini, required this.tab, required this.onSelect, this.showTabs = true});
+
+  final Widget mini;
+  final _Tab tab;
+  final ValueChanged<_Tab> onSelect;
+
+  /// Off when the tabs sit in [_SideTabs] instead.
+  final bool showTabs;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    final glass = Appearance.instance.glass;
+    final bar = SafeArea(
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          mini,
+          if (showTabs)
+            Row(
+              children: [
+                for (final i in _tabItems)
+                  Expanded(
+                    child: InkResponse(
+                      onTap: () => onSelect(i.tab),
+                      radius: 36,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 6),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              tab == i.tab ? i.selected : i.icon,
+                              color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              i.label,
+                              style: text.labelSmall?.copyWith(
+                                color: tab == i.tab ? AppColors.textPrimary : AppColors.textSecondary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
         ],
       ),
     );

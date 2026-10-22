@@ -566,100 +566,122 @@ class NowPlayingPage extends StatelessWidget {
                       // Leave room for the controls; never let the cover push them off-screen.
                       // On very short windows the cover (then the quality badge) makes way.
                       final showBadge = constraints.maxHeight >= 480;
-                      final room = constraints.maxHeight - (showBadge ? 376 : 340);
-                      final art = math.min(constraints.maxWidth - 48, room);
                       final narrow = constraints.maxWidth < 320;
+                      // A phone held sideways: the cover goes beside the controls.
+                      final sideways = constraints.maxWidth > constraints.maxHeight && constraints.maxHeight < 480;
+                      final topBar = Row(
+                        children: [
+                          IconButton(
+                            tooltip: 'Close',
+                            color: Colors.white,
+                            onPressed: () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
+                          ),
+                          Expanded(
+                            child: Column(
+                              children: [
+                                Text(
+                                  'PLAYING FROM',
+                                  style: text.labelSmall?.copyWith(letterSpacing: 1.2, color: Colors.white70),
+                                ),
+                                Text(
+                                  c.playingFrom ?? 'Your library',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (!narrow)
+                            IconButton(
+                              tooltip: 'Lyrics',
+                              color: Colors.white,
+                              onPressed: ShellScope.of(context).openLyrics,
+                              icon: const Icon(Icons.lyrics_outlined),
+                            ),
+                          IconButton(
+                            tooltip: 'Queue',
+                            color: Colors.white,
+                            onPressed: ShellScope.of(context).openQueue,
+                            icon: const Icon(Icons.queue_music_rounded),
+                          ),
+                          const CastButton(color: Colors.white),
+                        ],
+                      );
+                      Widget cover(double size) => Hero(
+                        tag: 'now-playing-art',
+                        child: DecoratedBox(
+                          decoration: const BoxDecoration(
+                            boxShadow: [BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12))],
+                          ),
+                          child: Artwork(track: track, size: size, radius: 8),
+                        ),
+                      );
+                      final info = Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  track?.title ?? 'Nothing playing',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  track?.artist ?? '',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: text.titleMedium?.copyWith(color: Colors.white70),
+                                ),
+                                if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
+                              ],
+                            ),
+                          ),
+                          if (track != null) ...[
+                            DownloadButton(track: track, size: 26, color: Colors.white),
+                            LikeButton(track: track, size: 28, color: Colors.white),
+                            TrackMenuButton(track: track, color: Colors.white),
+                          ],
+                        ],
+                      );
+                      if (sideways) {
+                        final art = math.min(constraints.maxHeight - 32, constraints.maxWidth * 0.4);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Row(
+                            children: [
+                              if (art >= 96) ...[cover(art), const SizedBox(width: 32)],
+                              Expanded(
+                                child: Column(
+                                  children: [
+                                    topBar,
+                                    const Spacer(),
+                                    info,
+                                    const SizedBox(height: 8),
+                                    const SeekBar(),
+                                    const TransportControls(large: true),
+                                    const SizedBox(height: 8),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }
+                      final art = math.min(constraints.maxWidth - 48, constraints.maxHeight - (showBadge ? 376 : 340));
                       return Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24),
                         child: Column(
                           children: [
-                            Row(
-                              children: [
-                                IconButton(
-                                  tooltip: 'Close',
-                                  color: Colors.white,
-                                  onPressed: () => Navigator.of(context).pop(),
-                                  icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 30),
-                                ),
-                                Expanded(
-                                  child: Column(
-                                    children: [
-                                      Text(
-                                        'PLAYING FROM',
-                                        style: text.labelSmall?.copyWith(letterSpacing: 1.2, color: Colors.white70),
-                                      ),
-                                      Text(
-                                        c.playingFrom ?? 'Your library',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: text.labelLarge?.copyWith(fontWeight: FontWeight.w700),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                                if (!narrow)
-                                  IconButton(
-                                    tooltip: 'Lyrics',
-                                    color: Colors.white,
-                                    onPressed: ShellScope.of(context).openLyrics,
-                                    icon: const Icon(Icons.lyrics_outlined),
-                                  ),
-                                IconButton(
-                                  tooltip: 'Queue',
-                                  color: Colors.white,
-                                  onPressed: ShellScope.of(context).openQueue,
-                                  icon: const Icon(Icons.queue_music_rounded),
-                                ),
-                                const CastButton(color: Colors.white),
-                              ],
-                            ),
+                            topBar,
                             const Spacer(),
-                            if (art >= 96)
-                              Hero(
-                                tag: 'now-playing-art',
-                                child: DecoratedBox(
-                                  decoration: const BoxDecoration(
-                                    boxShadow: [
-                                      BoxShadow(color: Colors.black45, blurRadius: 32, offset: Offset(0, 12)),
-                                    ],
-                                  ),
-                                  child: Artwork(track: track, size: art, radius: 8),
-                                ),
-                              ),
+                            if (art >= 96) cover(art),
                             const Spacer(),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        track?.title ?? 'Nothing playing',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: text.headlineSmall?.copyWith(
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: -0.5,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        track?.artist ?? '',
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: text.titleMedium?.copyWith(color: Colors.white70),
-                                      ),
-                                      if (showBadge) ...[const SizedBox(height: 8), const QualityBadge(onDark: true)],
-                                    ],
-                                  ),
-                                ),
-                                if (track != null) ...[
-                                  DownloadButton(track: track, size: 26, color: Colors.white),
-                                  LikeButton(track: track, size: 28, color: Colors.white),
-                                  TrackMenuButton(track: track, color: Colors.white),
-                                ],
-                              ],
-                            ),
+                            info,
                             const SizedBox(height: 16),
                             const SeekBar(),
                             const SizedBox(height: 8),
