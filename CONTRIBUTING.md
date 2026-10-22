@@ -8,7 +8,7 @@ Thanks for helping. A few things make reviews quick.
   and what happened. Debug builds log every error to
   `<app support dir>/errors.log`; attach the relevant part.
 - **Features:** for anything big, open an issue first so we can agree on the
-  approach. Audiophile features have a status table in [Features.md](Features.md).
+  approach.
 
 ## Who we build for
 

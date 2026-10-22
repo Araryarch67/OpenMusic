@@ -97,8 +97,6 @@ On Linux and Windows, playback runs on [libmpv](https://mpv.io). OpenMusic drive
 | **Play on** | DLNA / UPnP renderers and classic AirPlay speakers, found on the network. Files the device can't play (DSD, cue-sheet songs, WavPack...) are converted to FLAC on the fly, YouTube songs go as AAC; AirPlay gets ALAC. Never tried on real TVs or speakers yet: tested against a simulated renderer and shairport-sync |
 | **Signal path** | Source codec and stored bit depth → decoder → every DSP stage → volume → resampler → output device, with a verdict: *Bit-perfect*, *Lossless to the system mixer* or *Processed* |
 
-What works, what is partial and how it was tested, item by item, is in **[Features.md](Features.md)**.
-
 ## Platform notes
 
 | Platform | Playback | YouTube streaming / downloads |

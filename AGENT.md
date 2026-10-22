@@ -1,7 +1,7 @@
 # AGENT.md
 
 Guide for coding agents (and people) working on OpenMusic. Read it before
-changing code. The open feature work is tracked in [Features.md](Features.md).
+changing code.
 
 ## Who it's for
 
@@ -71,8 +71,8 @@ test/                          Unit and widget tests
 
 ## How audio works
 
-- just_audio everywhere; on **Linux and Windows** its backend is libmpv through
-  `just_audio_media_kit`. macOS/Android/iOS use native players, so
+- just_audio everywhere; on **Linux, Windows and Android** its backend is
+  libmpv through `just_audio_media_kit`. macOS and iOS use native players, so
   `AudioEngine.supported` is false there and the Sound settings hide.
 - `third_party/just_audio_media_kit` is vendored (public domain) to expose the
   mpv player: `JustAudioMediaKit.onPlayerCreated` and `.activePlayer`.
@@ -102,7 +102,6 @@ test/                          Unit and widget tests
    control under the text on narrow windows).
 6. A unit test in `test/audio_features_test.dart` and a real-mpv check in
    `integration_test/zz_audio_test.dart` (read it back with `signalPath()`).
-7. Update [Features.md](Features.md): move the row to *Working* or *Partial*.
 
 - An output device that isn't plugged in (a USB DAC) falls back to the
   system default with a note under Output device; the choice stays saved.
