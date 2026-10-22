@@ -842,9 +842,15 @@ class YtMusicWeb {
   }
 
   /// Songs matching [query], using YouTube Music's own "Songs" filter.
-  Future<List<WebTrack>> searchSongs(String query) async {
-    // The params value is the "Songs" chip, as ytmusicapi sends it.
-    final res = await _send('search', {'query': query, 'params': 'EgWKAQIIAWoKEAoQCRADEAQQBQ%3D%3D'});
+  Future<List<WebTrack>> searchSongs(String query) => _searchRows(query, 'EgWKAQIIAWoKEAoQCRADEAQQBQ%3D%3D');
+
+  /// Music videos matching [query] ("Videos" filter): official videos and
+  /// uploads of songs that aren't in the Songs catalogue.
+  Future<List<WebTrack>> searchVideos(String query) => _searchRows(query, 'EgWKAQIQAWoKEAoQCRADEAQQBQ%3D%3D');
+
+  Future<List<WebTrack>> _searchRows(String query, String params) async {
+    // The params values are the filter chips, as ytmusicapi sends them.
+    final res = await _send('search', {'query': query, 'params': params});
     return [
       for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer'))
         if (_asMap(node) case final row?) ?_songOf(row),

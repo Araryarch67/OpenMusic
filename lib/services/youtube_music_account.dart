@@ -438,6 +438,9 @@ class YoutubeMusicAccount extends ChangeNotifier {
   /// Song search on YouTube Music itself (better matches than plain YouTube).
   Future<List<Track>> searchSongs(String query) async => _webTracks(await _browseClient.searchSongs(query));
 
+  /// Music videos on YouTube Music, for songs its Songs search doesn't have.
+  Future<List<Track>> searchVideos(String query) async => _webTracks(await _browseClient.searchVideos(query));
+
   /// Everything matching [query] (top result, songs, artists, albums, playlists).
   Future<SearchResults> search(String query) async {
     final r = await _browseClient.search(query);

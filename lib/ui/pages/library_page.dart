@@ -77,6 +77,13 @@ class _LibraryListState extends State<LibraryList> {
             subtitle: 'Paste a link from a friend',
             onTap: () => joinSharedPlaylist(context),
           ),
+        _SimpleRow(
+          collapsed: widget.collapsed,
+          art: const _IconArt(Icons.playlist_add_rounded),
+          title: 'Import a playlist',
+          subtitle: 'From Spotify, Apple Music or Deezer',
+          onTap: () => importPlaylist(context),
+        ),
         for (final p in c.playlists) _LibraryRow(collection: c.playlistCollection(p), collapsed: widget.collapsed),
         if (online != null) ...[
           if (online.liked.isNotEmpty)

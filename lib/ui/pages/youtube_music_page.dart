@@ -15,6 +15,7 @@ import 'youtube_music_login_page.dart';
 import '../widgets/smooth_scroll.dart';
 import '../navigation.dart';
 import '../ytmusic_edit.dart';
+import '../playlist_import.dart';
 import '../../services/ytmusic_web.dart';
 import '../widgets/menus.dart';
 
@@ -64,6 +65,17 @@ Future<void> joinSharedPlaylist(BuildContext context) async {
   final p = lib?.playlists.where((p) => p.id == id).firstOrNull;
   ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined "${p?.title ?? 'the playlist'}"')));
   openRemotePlaylist(context, p ?? RemotePlaylist(id: id, title: 'Shared playlist', count: 0));
+}
+
+/// "Import a playlist" from Spotify, Apple Music or Deezer, then opens it.
+Future<void> importPlaylist(BuildContext context) async {
+  final imported = await askToImportPlaylist(context);
+  if (imported == null || !context.mounted) return;
+  if (imported.local case final p?) {
+    ShellScope.of(context).openCollection(PlayerScope.read(context).playlistCollection(p));
+  } else if (imported.youtubeId case final id?) {
+    openRemotePlaylist(context, RemotePlaylist(id: id, title: imported.title, count: 0));
+  }
 }
 
 /// Opens a library playlist or a public album / playlist in the current tab.
@@ -863,6 +875,20 @@ class YoutubeMusicLibraryList extends StatelessWidget {
                   subtitle: 'Paste a link from a friend',
                   location: '',
                   onTap: () => joinSharedPlaylist(context),
+                ),
+              if (account.canEdit)
+                row(
+                  art: SizedBox.square(
+                    dimension: 48,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(color: AppColors.hover),
+                      child: Icon(Icons.playlist_add_rounded, color: AppColors.textPrimary),
+                    ),
+                  ),
+                  title: 'Import a playlist',
+                  subtitle: 'From Spotify, Apple Music or Deezer',
+                  location: '',
+                  onTap: () => importPlaylist(context),
                 ),
               row(
                 art: CoverMosaic(tracks: lib.liked, size: 48),
