@@ -12,6 +12,8 @@ import 'package:http/http.dart' as http;
 import 'package:just_audio/just_audio.dart';
 import 'package:xml/xml.dart';
 
+import 'ffmpeg.dart';
+
 /// A TV, speaker or receiver on the network that plays what it's handed
 /// (a UPnP AV / DLNA MediaRenderer).
 class DlnaRenderer {
@@ -522,7 +524,7 @@ class CastServer {
       case CastTranscode():
         res.headers.set(HttpHeaders.acceptRangesHeader, 'none');
         if (!head) {
-          final ffmpeg = await Process.start('ffmpeg', [
+          final ffmpeg = await Process.start(await Ffmpeg.executable(), [
             '-hide_banner', '-loglevel', 'error', //
             if (media.start > Duration.zero) ...['-ss', '${media.start.inMilliseconds / 1000}'],
             '-i', media.input == null ? media.path : 'pipe:0',

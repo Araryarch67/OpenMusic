@@ -195,8 +195,19 @@ class _IpcConnection {
       if (Platform.isWindows) {
         final pipe = await File(path).open(mode: FileMode.append);
         late final _IpcConnection conn;
-        conn = _IpcConnection._((b) => pipe.writeFromSync(b), () => pipe.closeSync());
-        unawaited(conn._readPipe(pipe, onClosed));
+        // A RandomAccessFile runs one operation at a time: a read left waiting for
+        // Discord made every write fail ("an async operation is currently pending").
+        // Discord answers each message with one frame, so each write reads its answer.
+        var queue = Future<void>.value();
+        void enqueue(Future<void> Function() op) =>
+            queue = queue.then((_) => op()).catchError((Object _) => conn._onClosed(onClosed));
+        conn = _IpcConnection._(
+          (b) => enqueue(() async {
+            await pipe.writeFrom(b);
+            await conn._readFrame(pipe).timeout(const Duration(seconds: 5));
+          }),
+          () => enqueue(pipe.close),
+        );
         return conn;
       }
       if (!File(path).existsSync() && FileSystemEntity.typeSync(path) != FileSystemEntityType.unixDomainSock) {
@@ -214,17 +225,21 @@ class _IpcConnection {
     }
   }
 
-  Future<void> _readPipe(RandomAccessFile pipe, void Function() onClosed) async {
-    try {
-      while (!_closed) {
-        final chunk = await pipe.read(4096);
-        if (chunk.isEmpty) break;
-        _onData(chunk);
+  /// Reads one frame (Windows: the answer to the message just written).
+  Future<void> _readFrame(RandomAccessFile pipe) async {
+    Future<Uint8List> exactly(int n) async {
+      final out = BytesBuilder(copy: false);
+      while (out.length < n) {
+        final chunk = await pipe.read(n - out.length);
+        if (chunk.isEmpty) throw const FileSystemException('Discord closed the pipe');
+        out.add(chunk);
       }
-    } catch (_) {
-      // Pipe closed.
+      return out.takeBytes();
     }
-    _onClosed(onClosed);
+
+    final header = await exactly(8);
+    final length = ByteData.sublistView(header).getInt32(4, Endian.little);
+    _onData([...header, ...await exactly(length)]);
   }
 
   void _onClosed(void Function() onClosed) {

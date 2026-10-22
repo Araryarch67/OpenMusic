@@ -8,6 +8,7 @@ import '../../services/lyrics.dart';
 import '../../services/player_controller.dart';
 import '../../services/youtube_importer.dart';
 import '../../services/ytdlp.dart';
+import '../navigation.dart';
 import '../shell_scope.dart';
 import '../theme.dart';
 import '../widgets/page_scaffold.dart';
@@ -16,14 +17,79 @@ import 'appearance_settings.dart';
 import 'sound_settings.dart';
 import 'youtube_music_page.dart';
 
-class SettingsPage extends StatefulWidget {
+/// One page of settings, opened from the list on [SettingsPage].
+enum SettingsTopic {
+  account('Account', Icons.person_outline_rounded, 'YouTube Music sign-in'),
+  appearance('Appearance', Icons.palette_outlined, 'Theme, accent colour, background, text size'),
+  playback('Playback', Icons.play_circle_outline_rounded, 'Autoplay, equalizer, volume leveling, crossfeed'),
+  advanced('Hi-fi audio', Icons.tune_rounded, 'Output device, bit-perfect mode, sample rate'),
+  downloads('Downloads', Icons.download_rounded, 'Where songs are saved, YouTube downloader'),
+  integrations('Integrations', Icons.extension_outlined, 'Discord, lyrics services');
+
+  const SettingsTopic(this.label, this.icon, this.summary);
+  final String label;
+  final IconData icon;
+  final String summary;
+
+  static List<SettingsTopic> get available => [
+    for (final t in values)
+      if (t != advanced || AudioEngine.supported) t,
+  ];
+}
+
+/// The list of settings pages.
+class SettingsPage extends StatelessWidget {
   const SettingsPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  Widget build(BuildContext context) {
+    final c = PlayerScope.of(context);
+    final shell = ShellScope.of(context);
+    final muted = settingsMuted(context);
+    return _SettingsFrame(
+      title: 'Settings',
+      child: ListenableBuilder(
+        listenable: c.ytMusic,
+        builder: (context, _) => SettingsCard(
+          children: [
+            for (final t in SettingsTopic.available)
+              ListTile(
+                leading: t == SettingsTopic.account
+                    ? CircleAvatar(
+                        radius: 18,
+                        backgroundColor: AppColors.hover,
+                        foregroundImage: c.ytMusic.avatarUrl == null ? null : NetworkImage(c.ytMusic.avatarUrl!),
+                        child: Icon(t.icon, color: AppColors.textSecondary, size: 20),
+                      )
+                    : SizedBox.square(dimension: 36, child: Icon(t.icon)),
+                title: Text(t.label),
+                subtitle: Text(
+                  t == SettingsTopic.account && c.ytMusic.isSignedIn
+                      ? 'Signed in as ${c.ytMusic.accountName ?? 'YouTube Music'}'
+                      : t.summary,
+                  style: muted,
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () => shell.open(SettingsTopicPage(topic: t), location: Locations.settingsTopic(t.name)),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+/// One settings topic on its own page.
+class SettingsTopicPage extends StatefulWidget {
+  const SettingsTopicPage({super.key, required this.topic});
+
+  final SettingsTopic topic;
+
+  @override
+  State<SettingsTopicPage> createState() => _SettingsTopicPageState();
+}
+
+class _SettingsTopicPageState extends State<SettingsTopicPage> {
   late final Future<String?> _ytdlp = _ytdlpVersion();
   late final Future<Directory> _downloads = YoutubeImporter.downloadsDir();
 
@@ -34,33 +100,13 @@ class _SettingsPageState extends State<SettingsPage> {
     return r.exitCode == 0 ? '${(r.stdout as String).trim()} ($exe)' : null;
   }
 
-  final _keys = {for (final s in _Section.values) s: GlobalKey()};
-
-  void _jump(_Section s) {
-    final target = _keys[s]!.currentContext;
-    if (target != null) {
-      Scrollable.ensureVisible(target, duration: const Duration(milliseconds: 350), curve: Curves.easeOutCubic);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
-    final shell = ShellScope.of(context);
-    final text = Theme.of(context).textTheme;
-    final pad = shell.compact ? 16.0 : 24.0;
     final muted = settingsMuted(context);
-    final sections = [
-      _Section.account,
-      _Section.appearance,
-      _Section.playback,
-      if (AudioEngine.supported) _Section.advanced,
-      _Section.downloads,
-      _Section.integrations,
-    ];
 
-    Widget body(_Section s) => switch (s) {
-      _Section.account => ListenableBuilder(
+    final body = switch (widget.topic) {
+      SettingsTopic.account => ListenableBuilder(
         listenable: c.ytMusic,
         builder: (context, _) {
           final account = c.ytMusic;
@@ -72,7 +118,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   radius: 20,
                   backgroundColor: AppColors.hover,
                   foregroundImage: account.avatarUrl == null ? null : NetworkImage(account.avatarUrl!),
-                  child: const Icon(Icons.person_rounded, color: AppColors.textSecondary),
+                  child: Icon(Icons.person_rounded, color: AppColors.textSecondary),
                 ),
                 title: Text(account.isSignedIn ? account.accountName ?? 'YouTube Music' : 'YouTube Music'),
                 subtitle: Text(
@@ -84,7 +130,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 control: account.isSignedIn
                     ? TextButton(onPressed: account.signOut, child: const Text('Disconnect'))
                     : FilledButton(
-                        style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: AppColors.inverse,
+                          foregroundColor: AppColors.onInverse,
+                        ),
                         onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
                         child: const Text('Sign in with Google'),
                       ),
@@ -93,10 +142,10 @@ class _SettingsPageState extends State<SettingsPage> {
           );
         },
       ),
-      _Section.appearance => const AppearanceSettings(),
-      _Section.playback => const PlaybackSettings(),
-      _Section.advanced => const AdvancedAudioSettings(),
-      _Section.downloads => SettingsCard(
+      SettingsTopic.appearance => const AppearanceSettings(),
+      SettingsTopic.playback => const PlaybackSettings(),
+      SettingsTopic.advanced => const AdvancedAudioSettings(),
+      SettingsTopic.downloads => SettingsCard(
         children: [
           FutureBuilder<Directory>(
             future: _downloads,
@@ -129,7 +178,7 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
         ],
       ),
-      _Section.integrations => SettingsCard(
+      SettingsTopic.integrations => SettingsCard(
         children: [
           if (DiscordPresence.supported)
             SwitchListTile(
@@ -160,12 +209,29 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
     };
 
+    return _SettingsFrame(title: widget.topic.label, inTopic: true, child: body);
+  }
+}
+
+/// A settings page: on topic pages a "Settings › Topic" breadcrumb, then the heading and [child].
+class _SettingsFrame extends StatelessWidget {
+  const _SettingsFrame({required this.title, required this.child, this.inTopic = false});
+
+  final String title;
+  final bool inTopic;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final shell = ShellScope.of(context);
+    final text = Theme.of(context).textTheme;
+    final pad = shell.compact ? 16.0 : 24.0;
     return PageScaffold(
-      title: 'Settings',
+      title: title,
       slivers: [
         SliverToBoxAdapter(
           child: Padding(
-            padding: EdgeInsets.fromLTRB(pad, 0, pad, 0),
+            padding: EdgeInsets.fromLTRB(pad, 0, pad, 28),
             child: Align(
               alignment: Alignment.topLeft,
               child: ConstrainedBox(
@@ -173,19 +239,10 @@ class _SettingsPageState extends State<SettingsPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Settings', style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    const SizedBox(height: 14),
-                    // Jump to a section.
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final s in sections)
-                          ActionChip(avatar: Icon(s.icon, size: 18), label: Text(s.label), onPressed: () => _jump(s)),
-                      ],
-                    ),
-                    const SizedBox(height: 28),
-                    for (final s in sections) SettingsSection(key: _keys[s], title: s.label, child: body(s)),
+                    if (inTopic) _Breadcrumb(current: title),
+                    Text(title, style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
+                    const SizedBox(height: 24),
+                    child,
                   ],
                 ),
               ),
@@ -197,17 +254,78 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 }
 
-enum _Section {
-  account('Account', Icons.person_outline_rounded),
-  appearance('Appearance', Icons.palette_outlined),
-  playback('Playback', Icons.play_circle_outline_rounded),
-  advanced('Hi-fi audio', Icons.tune_rounded),
-  downloads('Downloads', Icons.download_rounded),
-  integrations('Integrations', Icons.extension_outlined);
+/// "Settings › Appearance": the first crumb opens the list of settings.
+class _Breadcrumb extends StatelessWidget {
+  const _Breadcrumb({required this.current});
 
-  const _Section(this.label, this.icon);
+  final String current;
+
+  @override
+  Widget build(BuildContext context) {
+    final style = Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Semantics(
+        label: 'Settings, then $current',
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _CrumbLink(
+              label: 'Settings',
+              style: style,
+              onTap: () => ShellScope.of(context).open(const SettingsPage(), location: Locations.settings),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Icon(Icons.chevron_right_rounded, size: 18, color: AppColors.textMuted),
+            ),
+            Flexible(
+              child: Text(
+                current,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: style?.copyWith(color: AppColors.textPrimary),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A crumb that underlines on hover, like a link.
+class _CrumbLink extends StatefulWidget {
+  const _CrumbLink({required this.label, required this.style, required this.onTap});
+
   final String label;
-  final IconData icon;
+  final TextStyle? style;
+  final VoidCallback onTap;
+
+  @override
+  State<_CrumbLink> createState() => _CrumbLinkState();
+}
+
+class _CrumbLinkState extends State<_CrumbLink> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    onEnter: (_) => setState(() => _hover = true),
+    onExit: (_) => setState(() => _hover = false),
+    child: GestureDetector(
+      onTap: widget.onTap,
+      child: Text(
+        widget.label,
+        style: widget.style?.copyWith(
+          color: _hover ? AppColors.textPrimary : AppColors.textSecondary,
+          decoration: _hover ? TextDecoration.underline : null,
+          decorationColor: AppColors.textPrimary,
+        ),
+      ),
+    ),
+  );
 }
 
 /// Paste, check and save (or remove) a Better Lyrics API key.

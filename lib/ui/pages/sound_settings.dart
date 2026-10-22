@@ -365,7 +365,7 @@ class SettingsDivider extends StatelessWidget {
   const SettingsDivider({super.key});
 
   @override
-  Widget build(BuildContext context) => const Divider(height: 1, thickness: 1, indent: 58, color: Color(0x0FFFFFFF));
+  Widget build(BuildContext context) => Divider(height: 1, thickness: 1, indent: 58, color: AppColors.divider);
 }
 
 /// A settings row whose control sits on the right, or under the text when

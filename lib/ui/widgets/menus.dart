@@ -4,7 +4,7 @@ import '../theme.dart';
 
 /// Menus and pickers share one look: a dark rounded card with a hairline
 /// border, compact rows with an icon.
-const _menuBorder = BorderSide(color: Color(0x1AFFFFFF));
+BorderSide get _menuBorder => BorderSide(color: AppColors.border);
 final menuShape = RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: _menuBorder);
 
 /// One row of a popup menu: icon and label, sized for both mouse and touch.
@@ -18,7 +18,7 @@ class MenuRow extends StatelessWidget {
   Widget build(BuildContext context) => Row(
     children: [
       IconTheme.merge(
-        data: const IconThemeData(size: 20, color: AppColors.textSecondary),
+        data: IconThemeData(size: 20, color: AppColors.textSecondary),
         child: leading,
       ),
       const SizedBox(width: 14),
@@ -60,7 +60,7 @@ class OptionPicker<T> extends StatelessWidget {
     return MenuAnchor(
       alignmentOffset: const Offset(0, 6),
       style: MenuStyle(
-        backgroundColor: const WidgetStatePropertyAll(AppColors.menu),
+        backgroundColor: WidgetStatePropertyAll(AppColors.menu),
         surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
         shape: WidgetStatePropertyAll(menuShape),
         elevation: const WidgetStatePropertyAll(12),

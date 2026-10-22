@@ -65,7 +65,11 @@ class _PageScaffoldState extends State<PageScaffold> {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [color.withValues(alpha: 0.85), color.withValues(alpha: 0.25), AppColors.panel],
+                  colors: [
+                    color.withValues(alpha: 0.85 * AppColors.washStrength),
+                    color.withValues(alpha: 0.25 * AppColors.washStrength),
+                    AppColors.panel,
+                  ],
                   stops: const [0, 0.55, 1],
                 ),
               ),
@@ -91,7 +95,7 @@ class _PageScaffoldState extends State<PageScaffold> {
               children: [
                 Positioned.fill(
                   child: IgnorePointer(
-                    child: ColoredBox(color: Color.lerp(color, Colors.black, 0.45)!.withValues(alpha: barOpacity)),
+                    child: ColoredBox(color: AppColors.sink(color, 0.45).withValues(alpha: barOpacity)),
                   ),
                 ),
                 Container(

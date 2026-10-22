@@ -91,6 +91,10 @@ class _HomeShellState extends State<HomeShell> {
     _ => page.runtimeType.toString(),
   };
 
+  void _openSettings() {
+    if (_history.location != Locations.settings) _open(const SettingsPage());
+  }
+
   void _goHome() {
     if (_compact) return _selectTab(_Tab.home);
     if (_history.location != Locations.home) _history.open(const HomePage(), Locations.home);
@@ -114,7 +118,14 @@ class _HomeShellState extends State<HomeShell> {
   /// Back / Forward, Home and search, in the desktop title bar.
   Widget _titleBar() => AppTitleBar(
     height: AppTitleBar.tallHeight,
-    leading: HistoryButtons(history: _history),
+    leading: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _MoreMenu(onDownloads: () => _open(const DownloadsPage()), onSettings: _openSettings),
+        const SizedBox(width: 4),
+        HistoryButtons(history: _history),
+      ],
+    ),
     center: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 560),
       child: Row(
@@ -326,6 +337,8 @@ class _HomeShellState extends State<HomeShell> {
       const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious): c.previous,
       const SingleActivator(LogicalKeyboardKey.arrowRight, control: true): c.next,
       const SingleActivator(LogicalKeyboardKey.arrowLeft, control: true): c.previous,
+      const SingleActivator(LogicalKeyboardKey.arrowUp, control: true): () => c.nudgeVolume(0.05),
+      const SingleActivator(LogicalKeyboardKey.arrowDown, control: true): () => c.nudgeVolume(-0.05),
       const SingleActivator(LogicalKeyboardKey.keyK, control: true): _goSearch,
       const SingleActivator(LogicalKeyboardKey.arrowLeft, alt: true): _history.back,
       const SingleActivator(LogicalKeyboardKey.arrowRight, alt: true): _history.forward,
@@ -603,15 +616,16 @@ class _Sidebar extends StatelessWidget {
       return collapsed ? Tooltip(message: label, child: row) : row;
     }
 
+    // With the title bar, Home and search sit in it and Downloads / Settings in its ⋯ menu.
     final navItems = [
       if (!inTitleBar) ...[
         item(Locations.home, Icons.home_outlined, Icons.home_rounded, 'Home', onHome),
         item(Locations.search, Icons.search_rounded, Icons.manage_search_rounded, 'Search', onSearch),
+        _DownloadsLink(collapsed: collapsed, selected: location == Locations.downloads),
+        item(Locations.settings, Icons.settings_outlined, Icons.settings_rounded, 'Settings', () {
+          if (location != Locations.settings) ShellScope.of(context).open(const SettingsPage());
+        }),
       ],
-      _DownloadsLink(collapsed: collapsed, selected: location == Locations.downloads),
-      item(Locations.settings, Icons.settings_outlined, Icons.settings_rounded, 'Settings', () {
-        if (location != Locations.settings) ShellScope.of(context).open(const SettingsPage());
-      }),
     ];
 
     return LayoutBuilder(
@@ -639,13 +653,15 @@ class _Sidebar extends StatelessWidget {
         }
         return Column(
           children: [
-            _Panel(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: Column(children: navItems),
+            if (navItems.isNotEmpty) ...[
+              _Panel(
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Column(children: navItems),
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
+              const SizedBox(height: 8),
+            ],
             Expanded(
               child: _Panel(child: LibraryList(dense: true, collapsed: collapsed)),
             ),
@@ -694,6 +710,88 @@ class _NavLink extends StatelessWidget {
       ),
     );
     return collapsed ? Tooltip(message: label, child: row) : row;
+  }
+}
+
+/// The title bar's ⋯ button: Downloads and Settings. A ring around it shows
+/// downloads in progress.
+class _MoreMenu extends StatelessWidget {
+  const _MoreMenu({required this.onDownloads, required this.onSettings});
+
+  final VoidCallback onDownloads;
+  final VoidCallback onSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = PlayerScope.read(context);
+    final text = Theme.of(context).textTheme;
+    return ListenableBuilder(
+      listenable: c.youtube,
+      builder: (context, _) {
+        final progress = c.youtube.activeProgress;
+        // Compact, like a desktop app's menu: short rows, small text and icons.
+        PopupMenuItem<VoidCallback> entry(IconData icon, String label, VoidCallback onTap, {Widget? trailing}) =>
+            PopupMenuItem(
+              value: onTap,
+              height: 34,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              textStyle: text.bodyMedium?.copyWith(fontSize: 13, color: AppColors.textPrimary),
+              child: Row(
+                children: [
+                  Icon(icon, size: 17, color: AppColors.textSecondary),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(label)),
+                  ?trailing,
+                ],
+              ),
+            );
+        return PopupMenuButton<VoidCallback>(
+          // Over the whole window, so a click anywhere closes it.
+          useRootNavigator: true,
+          tooltip: 'More',
+          position: PopupMenuPosition.under,
+          constraints: const BoxConstraints(minWidth: 180),
+          menuPadding: const EdgeInsets.symmetric(vertical: 4),
+          onSelected: (open) => open(),
+          style: IconButton.styleFrom(
+            foregroundColor: AppColors.textPrimary,
+            minimumSize: const Size(36, 36),
+            fixedSize: const Size(36, 36),
+            padding: EdgeInsets.zero,
+          ),
+          icon: Stack(
+            alignment: Alignment.center,
+            children: [
+              if (progress != null)
+                SizedBox.square(
+                  dimension: 28,
+                  child: CircularProgressIndicator(
+                    value: progress == 0 ? null : progress,
+                    strokeWidth: 2,
+                    color: AppColors.accent,
+                    backgroundColor: AppColors.hover,
+                  ),
+                ),
+              const Icon(Icons.more_horiz_rounded, size: 24),
+            ],
+          ),
+          itemBuilder: (context) => [
+            entry(
+              Icons.download_rounded,
+              'Downloads',
+              onDownloads,
+              trailing: progress == null
+                  ? null
+                  : Text(
+                      '${c.youtube.activeCount}',
+                      style: text.labelSmall?.copyWith(color: AppColors.accent, fontWeight: FontWeight.w700),
+                    ),
+            ),
+            entry(Icons.settings_outlined, 'Settings', onSettings),
+          ],
+        );
+      },
+    );
   }
 }
 
@@ -834,17 +932,21 @@ class _BottomBar extends StatelessWidget {
       return ClipRect(
         child: BackdropFilter(
           filter: ImageFilter.blur(sigmaX: Appearance.instance.blur, sigmaY: Appearance.instance.blur),
-          child: ColoredBox(color: const Color(0x8C000000), child: bar),
+          child: ColoredBox(color: AppColors.solidBackground.withValues(alpha: 0.55), child: bar),
         ),
       );
     }
     return DecoratedBox(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: [Color(0x00000000), Color(0xE6000000), Colors.black],
-          stops: [0, 0.35, 1],
+          colors: [
+            AppColors.solidBackground.withValues(alpha: 0),
+            AppColors.solidBackground.withValues(alpha: 0.9),
+            AppColors.solidBackground,
+          ],
+          stops: const [0, 0.35, 1],
         ),
       ),
       child: bar,

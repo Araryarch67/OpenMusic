@@ -130,7 +130,7 @@ class CollectionPage extends StatelessWidget {
                         padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                         child: Row(
                           children: [
-                            const Icon(Icons.album_outlined, size: 18, color: AppColors.textSecondary),
+                            Icon(Icons.album_outlined, size: 18, color: AppColors.textSecondary),
                             const SizedBox(width: 12),
                             Text(
                               'Disc ${tracks[i].discNumber ?? 1}',
@@ -250,7 +250,7 @@ class _Header extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        Text(meta, style: text.bodyMedium?.copyWith(color: Colors.white.withValues(alpha: 0.8))),
+        Text(meta, style: text.bodyMedium?.copyWith(color: AppColors.textPrimary.withValues(alpha: 0.8))),
       ],
     );
 

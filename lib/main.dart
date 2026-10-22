@@ -127,7 +127,7 @@ class _OpenMusicAppState extends State<OpenMusicApp> {
     // Decoded images: covers are decoded at their on-screen size, so 40 MiB
     // still holds a few hundred (Flutter's default is 100 MiB).
     PaintingBinding.instance.imageCache.maximumSizeBytes = 40 << 20;
-    final theme = widget.theme ?? buildAppTheme();
+    final theme = widget.theme ?? buildAppTheme(fontFamily: _appearance.fontFamily);
     return PlayerScope(
       controller: widget.controller,
       child: MaterialApp(

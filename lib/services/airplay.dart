@@ -9,6 +9,8 @@ import 'package:flutter/foundation.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 import 'package:pointycastle/export.dart' show AESEngine, CBCBlockCipher, KeyParameter, ParametersWithIV;
 
+import 'ffmpeg.dart';
+
 /// A speaker that takes classic AirPlay (RAOP): AirPort Express, AirPlay
 /// receivers in amplifiers and speakers, shairport-sync.
 class AirPlayDevice {
@@ -552,7 +554,7 @@ class AirPlaySession {
 
   Future<void> _stream(AirPlaySource source, Duration from, int generation) async {
     final start = source.start + from;
-    final ffmpeg = await Process.start('ffmpeg', [
+    final ffmpeg = await Process.start(await Ffmpeg.executable(), [
       '-hide_banner', '-loglevel', 'error', //
       if (start > Duration.zero) ...['-ss', '${start.inMilliseconds / 1000}'],
       '-i', source.input,

@@ -196,8 +196,8 @@ class _ImportFormState extends State<_ImportForm> {
               );
               final button = FilledButton(
                 style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.textPrimary,
-                  foregroundColor: Colors.black,
+                  backgroundColor: AppColors.inverse,
+                  foregroundColor: AppColors.onInverse,
                   padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
                   textStyle: text.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                 ),
@@ -282,11 +282,11 @@ class _PreviewCardState extends State<_PreviewCard> {
               width: 112,
               height: 63,
               child: thumb == null
-                  ? const ColoredBox(color: AppColors.elevated)
+                  ? ColoredBox(color: AppColors.elevated)
                   : Image.network(
                       thumb,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.elevated),
+                      errorBuilder: (_, _, _) => ColoredBox(color: AppColors.elevated),
                     ),
             ),
           ),

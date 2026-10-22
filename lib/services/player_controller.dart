@@ -17,6 +17,7 @@ import 'cue_sheet.dart';
 import 'discord_presence.dart';
 import 'dlna.dart';
 import 'dop.dart';
+import 'ffmpeg.dart';
 import 'lyrics.dart';
 import 'lyrics_translation.dart';
 import 'metadata.dart';
@@ -254,12 +255,55 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> pause() => casting ? cast.pause() : player.pause();
 
-  /// 0-1: this device's volume, or the cast device's.
-  double get volume => casting ? (cast.volume ?? 0) / 100 : player.volume;
+  /// 0-1: where the volume slider sits, for this device or the cast device.
+  ///
+  /// This device's gain is the cube of it, as with mpv's own volume (which the
+  /// app's 64-bit filter replaces): with linear gain halfway is only −6 dB, and
+  /// all the audible change is crammed into the bottom of the slider. A cast
+  /// device's volume is its own 0-100 scale, already shaped by the device.
+  double get volume => casting ? (cast.volume ?? 0) / 100 : levelOfGain(player.volume);
+
+  /// [volume] as it changes on this device.
+  late final Stream<double> volumeLevels = player.volumeStream.map(levelOfGain);
+
+  static double levelOfGain(double gain) => gain <= 0 ? 0 : math.pow(gain.clamp(0, 1), 1 / 3).toDouble();
+  static double gainOfLevel(double level) => math.pow(level.clamp(0, 1), 3).toDouble();
 
   bool get canSetVolume => !casting || (cast.target?.hasVolume ?? false);
 
-  Future<void> setVolume(double v) => casting ? cast.setVolume((v * 100).round()) : player.setVolume(v);
+  Future<void> setVolume(double v) {
+    v = v.clamp(0, 1);
+    if (casting) return cast.setVolume((v * 100).round());
+    _saveVolume?.cancel();
+    _saveVolume = Timer(const Duration(milliseconds: 500), () async {
+      await (await SharedPreferences.getInstance()).setDouble(_volumeKey, v);
+    });
+    return player.setVolume(gainOfLevel(v));
+  }
+
+  static const _volumeKey = 'volume.v1';
+  Timer? _saveVolume;
+
+  /// The level Unmute goes back to.
+  double? _unmuteTo;
+
+  /// Remembers the level a slider drag starts from, for Unmute after dragging to 0.
+  void volumeDragStarted() {
+    if (volume > 0) _unmuteTo = volume;
+  }
+
+  Future<void> toggleMute() {
+    if (volume > 0) {
+      _unmuteTo = volume;
+      return setVolume(0);
+    }
+    return setVolume(_unmuteTo ?? 1);
+  }
+
+  /// Ctrl+↑ / Ctrl+↓ and the mouse wheel over the volume slider.
+  Future<void> nudgeVolume(double by) async {
+    if (canSetVolume && audio.dopPlaying == null) await setVolume(((volume + by) * 20).round() / 20);
+  }
 
   /// [position], updated every frame while playing (here or on the cast
   /// device), so a seek bar glides instead of ticking.
@@ -592,8 +636,11 @@ class PlayerController extends ChangeNotifier {
     _autoplay = prefs.getBool(_autoplayKey) ?? true;
     final loop = LoopMode.values.asNameMap()[prefs.getString(_loopKey)];
     if (loop != null && loop != LoopMode.off) await player.setLoopMode(loop);
+    final level = prefs.getDouble(_volumeKey);
+    if (level != null) await player.setVolume(gainOfLevel(level));
     await ytMusic.load();
     await audio.load();
+    Ffmpeg.onDownload = _errors.add;
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
     unawaited(LyricsTranslation.load());
     unawaited(LyricsService.loadBetterLyricsKey());

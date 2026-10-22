@@ -280,7 +280,7 @@ class _QuickTileState extends State<QuickTile> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: Material(
-        color: _hover ? const Color(0x29FFFFFF) : AppColors.tile,
+        color: _hover ? AppColors.textPrimary.withValues(alpha: 0.16) : AppColors.tile,
         borderRadius: BorderRadius.circular(6),
         clipBehavior: Clip.antiAlias,
         child: InkWell(
@@ -365,7 +365,7 @@ class EmptyLibrary extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.library_music_outlined, size: 56, color: AppColors.textSecondary),
+              Icon(Icons.library_music_outlined, size: 56, color: AppColors.textSecondary),
               const SizedBox(height: 24),
               if (greeting != null) Text(greeting!, style: text.titleMedium?.copyWith(color: AppColors.textSecondary)),
               const SizedBox(height: 4),
@@ -388,8 +388,8 @@ class EmptyLibrary extends StatelessWidget {
                 children: [
                   FilledButton.icon(
                     style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.textPrimary,
-                      foregroundColor: Colors.black,
+                      backgroundColor: AppColors.inverse,
+                      foregroundColor: AppColors.onInverse,
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                       textStyle: text.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                     ),
@@ -400,7 +400,7 @@ class EmptyLibrary extends StatelessWidget {
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
                       foregroundColor: AppColors.textPrimary,
-                      side: const BorderSide(color: AppColors.textMuted),
+                      side: BorderSide(color: AppColors.textMuted),
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                       textStyle: text.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                     ),
@@ -412,7 +412,7 @@ class EmptyLibrary extends StatelessWidget {
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.textPrimary,
-                        side: const BorderSide(color: AppColors.textMuted),
+                        side: BorderSide(color: AppColors.textMuted),
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                         textStyle: text.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                       ),

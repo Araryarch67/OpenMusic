@@ -163,7 +163,10 @@ class _DiscoverHome extends StatelessWidget {
                     style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
                   ),
                   FilledButton.icon(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.inverse,
+                      foregroundColor: AppColors.onInverse,
+                    ),
                     onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
                     icon: const Icon(Icons.login_rounded),
                     label: Text(account.connecting ? 'Signing in…' : 'Sign in with Google'),
@@ -204,7 +207,7 @@ class SignInBanner extends StatelessWidget {
               style: text.bodyMedium?.copyWith(color: AppColors.textSecondary),
             ),
             FilledButton.icon(
-              style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.inverse, foregroundColor: AppColors.onInverse),
               onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
               icon: const Icon(Icons.login_rounded),
               label: Text(account.connecting ? 'Signing in…' : 'Sign in with Google'),
@@ -725,7 +728,10 @@ class YoutubeMusicLibraryList extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.inverse,
+                      foregroundColor: AppColors.onInverse,
+                    ),
                     onPressed: account.connecting ? null : () => signInToYoutubeMusic(context),
                     child: const Text('Sign in with Google'),
                   ),
@@ -797,7 +803,7 @@ class YoutubeMusicLibraryList extends StatelessWidget {
             children: [
               if (account.canEdit)
                 row(
-                  art: const SizedBox.square(
+                  art: SizedBox.square(
                     dimension: 48,
                     child: DecoratedBox(
                       decoration: BoxDecoration(color: AppColors.hover),

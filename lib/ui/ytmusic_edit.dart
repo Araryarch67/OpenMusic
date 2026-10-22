@@ -377,7 +377,7 @@ class DownloadButton extends StatelessWidget {
                     value: job.status == DownloadStatus.downloading && job.progress > 0 ? job.progress : null,
                     strokeWidth: 2,
                     color: AppColors.accent,
-                    backgroundColor: Colors.white24,
+                    backgroundColor: AppColors.textPrimary.withValues(alpha: 0.24),
                   ),
                   Icon(Icons.stop_rounded, size: size * 0.5, color: color),
                 ],

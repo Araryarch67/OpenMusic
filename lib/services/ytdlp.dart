@@ -100,7 +100,7 @@ abstract final class YtDlp {
   }
 
   static String _lastError(String stderr) {
-    final line = stderr.trim().split('\n').lastWhere((l) => l.isNotEmpty, orElse: () => 'yt-dlp failed');
+    final line = stderr.trim().split(RegExp(r'\r?\n')).lastWhere((l) => l.isNotEmpty, orElse: () => 'yt-dlp failed');
     return line.replaceFirst(RegExp(r'^ERROR:\s*(\[[^\]]+\]\s*\S+:\s*)?'), '');
   }
 
@@ -191,8 +191,9 @@ abstract final class YtDlp {
       'https://www.youtube.com/watch?v=$videoId',
     ]);
     if (r.exitCode != 0) throw StateError(_lastError(r.stderr as String));
-    final lines = (r.stdout as String).trim().split('\n');
-    final f = lines.first.split('|');
+    // Windows' yt-dlp.exe ends lines with \r\n.
+    final lines = (r.stdout as String).trim().split(RegExp(r'\r?\n'));
+    final f = lines.first.trim().split('|');
     final url = Uri.parse(lines.last.trim());
     return ResolvedAudio(
       formatId: f[0],

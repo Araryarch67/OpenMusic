@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'dart:ui' show ImageFilter;
 
+import 'package:flutter/gestures.dart' show PointerScrollEvent;
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 
@@ -277,8 +278,8 @@ class PlayButton extends StatelessWidget {
     required this.playing,
     required this.onPressed,
     this.size = 48,
-    this.color = AppColors.textPrimary,
-    this.iconColor = Colors.black,
+    this.color,
+    this.iconColor,
     this.loading = false,
   });
 
@@ -286,11 +287,15 @@ class PlayButton extends StatelessWidget {
   final bool loading;
   final VoidCallback? onPressed;
   final double size;
-  final Color color;
-  final Color iconColor;
+
+  /// The theme's strongest contrast when null (white on dark themes).
+  final Color? color;
+  final Color? iconColor;
 
   @override
   Widget build(BuildContext context) {
+    final color = this.color ?? AppColors.inverse;
+    final iconColor = this.iconColor ?? AppColors.onInverse;
     return _Pressable(
       onPressed: onPressed,
       child: Container(
@@ -478,14 +483,13 @@ class VolumeSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
-    final player = c.player;
     // While casting, the device's volume (the controller rebuilds this on change).
     return StreamBuilder<double>(
-      stream: c.casting ? null : player.volumeStream,
+      stream: c.casting ? null : c.volumeLevels,
       builder: (context, snapshot) {
         // DoP must reach the DAC untouched: its volume is the one to use.
         final dop = !c.casting && c.audio.dopPlaying != null;
-        final volume = dop ? 1.0 : (c.casting ? c.volume : snapshot.data ?? player.volume);
+        final volume = dop ? 1.0 : (c.casting ? c.volume : snapshot.data ?? c.volume);
         final setVolume = c.canSetVolume && !dop ? c.setVolume : null;
         final row = Row(
           mainAxisSize: MainAxisSize.min,
@@ -493,7 +497,7 @@ class VolumeSlider extends StatelessWidget {
             IconButton(
               tooltip: volume == 0 ? 'Unmute' : 'Mute',
               iconSize: 20,
-              onPressed: setVolume == null ? null : () => setVolume(volume == 0 ? 1 : 0),
+              onPressed: setVolume == null ? null : c.toggleMute,
               icon: Icon(
                 volume == 0
                     ? Icons.volume_off_rounded
@@ -507,7 +511,18 @@ class VolumeSlider extends StatelessWidget {
               child: SliderTheme(
                 // Horizontal padding keeps the thumb (and its hover halo) off the window edge at 100%.
                 data: SliderTheme.of(context).copyWith(padding: const EdgeInsets.symmetric(horizontal: 8)),
-                child: Slider(value: volume.clamp(0, 1), onChanged: setVolume),
+                child: Listener(
+                  onPointerSignal: (e) {
+                    if (e is PointerScrollEvent && setVolume != null) {
+                      c.nudgeVolume(e.scrollDelta.dy < 0 ? 0.05 : -0.05);
+                    }
+                  },
+                  child: Slider(
+                    value: volume.clamp(0, 1),
+                    onChangeStart: setVolume == null ? null : (_) => c.volumeDragStarted(),
+                    onChanged: setVolume,
+                  ),
+                ),
               ),
             ),
           ],

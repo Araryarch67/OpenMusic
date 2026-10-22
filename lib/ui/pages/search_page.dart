@@ -706,7 +706,7 @@ class _SearchBoxState extends State<SearchBox> {
 
   String get _text => widget.controller.text.trim();
 
-  Color get _ink => widget.onBar ? AppColors.textPrimary : Colors.black;
+  Color get _ink => widget.onBar ? AppColors.textPrimary : AppColors.onInverse;
 
   /// In the title bar the results page updates as you type (like the
   /// streaming apps), so suggestions would only cover it: just recent
@@ -849,16 +849,18 @@ class _SearchBoxState extends State<SearchBox> {
                 cursorColor: _ink,
                 decoration: InputDecoration(
                   hintText: 'What do you want to play?',
-                  hintStyle: text.bodyLarge?.copyWith(color: widget.onBar ? AppColors.textSecondary : Colors.black54),
+                  hintStyle: text.bodyLarge?.copyWith(
+                    color: widget.onBar ? AppColors.textSecondary : AppColors.onInverse.withValues(alpha: 0.54),
+                  ),
                   prefixIcon: Icon(
                     Icons.search_rounded,
-                    color: widget.onBar ? AppColors.textSecondary : Colors.black87,
+                    color: widget.onBar ? AppColors.textSecondary : AppColors.onInverse.withValues(alpha: 0.87),
                   ),
                   suffixIcon: widget.controller.text.isEmpty
                       ? null
                       : IconButton(
                           tooltip: 'Clear',
-                          color: widget.onBar ? AppColors.textSecondary : Colors.black87,
+                          color: widget.onBar ? AppColors.textSecondary : AppColors.onInverse.withValues(alpha: 0.87),
                           onPressed: () {
                             widget.controller.clear();
                             _changed('');
@@ -867,14 +869,14 @@ class _SearchBoxState extends State<SearchBox> {
                           icon: const Icon(Icons.close_rounded),
                         ),
                   filled: true,
-                  fillColor: widget.onBar ? AppColors.tile : Colors.white,
+                  fillColor: widget.onBar ? AppColors.tile : AppColors.inverse,
                   hoverColor: widget.onBar ? AppColors.hover : null,
                   contentPadding: EdgeInsets.symmetric(vertical: widget.onBar ? 12 : 14),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(500), borderSide: BorderSide.none),
                   // Focused in the bar: a light ring, like the streaming apps.
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(500),
-                    borderSide: widget.onBar ? const BorderSide(color: Colors.white, width: 2) : BorderSide.none,
+                    borderSide: widget.onBar ? BorderSide(color: AppColors.textPrimary, width: 2) : BorderSide.none,
                   ),
                 ),
               ),
@@ -931,7 +933,7 @@ class _SearchBoxState extends State<SearchBox> {
       for (final q in _recent) {
         rows.add(
           row(
-            leading: const Icon(Icons.history_rounded, color: AppColors.textSecondary, size: 22),
+            leading: Icon(Icons.history_rounded, color: AppColors.textSecondary, size: 22),
             title: Text(q, maxLines: 1, overflow: TextOverflow.ellipsis, style: text.bodyLarge),
             trailing: IconButton(
               tooltip: 'Remove',
@@ -954,7 +956,7 @@ class _SearchBoxState extends State<SearchBox> {
         final match = q.toLowerCase().startsWith(typed.toLowerCase());
         rows.add(
           row(
-            leading: const Icon(Icons.search_rounded, color: AppColors.textSecondary, size: 22),
+            leading: Icon(Icons.search_rounded, color: AppColors.textSecondary, size: 22),
             title: Text.rich(
               TextSpan(
                 children: [
@@ -973,7 +975,7 @@ class _SearchBoxState extends State<SearchBox> {
           ),
         );
       }
-      if (_queries.isNotEmpty && _hits.isNotEmpty) rows.add(const Divider(height: 9, color: AppColors.hover));
+      if (_queries.isNotEmpty && _hits.isNotEmpty) rows.add(Divider(height: 9, color: AppColors.hover));
       for (final h in _hits) {
         rows.add(
           row(

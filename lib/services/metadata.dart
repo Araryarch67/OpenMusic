@@ -11,6 +11,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
+import 'ffmpeg.dart';
 
 /// Editable tags of one file.
 class TagEdit {
@@ -67,8 +68,8 @@ abstract final class Metadata {
   /// FLAC and MP4/M4A (AAC, ALAC) are written in-process: the bundled writers
   /// keep every other tag, including ReplayGain and other freeform MP4 atoms
   /// that ffmpeg's MP4 muxer would drop. Other formats go through the `ffmpeg`
-  /// command when it is installed: a stream copy that only changes the tags it
-  /// is told to.
+  /// command (installed, or fetched on first use: [Ffmpeg]): a stream copy that
+  /// only changes the tags it is told to.
   static const _inProcess = {'flac', 'm4a', 'm4b', 'mp4'};
 
   static const _ffmpegWritable = {'mp3', 'ogg', 'oga', 'opus', 'wav', 'aiff', 'aif', 'wv', 'mka'};
@@ -76,19 +77,11 @@ abstract final class Metadata {
   /// Formats where ffmpeg can also replace the embedded cover.
   static const _ffmpegCover = {'mp3'};
 
-  static bool _ffmpeg = false;
-
   /// Looks for `ffmpeg` once at startup so [canEditTags] can answer synchronously.
-  static Future<void> probeTagTools() async {
-    try {
-      _ffmpeg = (await Process.run('ffmpeg', ['-hide_banner', '-version'])).exitCode == 0;
-    } catch (_) {
-      _ffmpeg = false;
-    }
-  }
+  static Future<void> probeTagTools() => Ffmpeg.probe();
 
-  /// Whether the `ffmpeg` command is installed ([probeTagTools] must have run).
-  static bool get hasFfmpeg => _ffmpeg;
+  /// Whether `ffmpeg` is here or can be fetched when needed ([probeTagTools] must have run).
+  static bool get hasFfmpeg => Ffmpeg.available;
 
   static String _ext(String path) => path.split('.').last.toLowerCase();
 
@@ -96,7 +89,7 @@ abstract final class Metadata {
     final path = t.path;
     if (path == null || t.isCueTrack) return false;
     final ext = _ext(path);
-    return _inProcess.contains(ext) || (_ffmpeg && _ffmpegWritable.contains(ext));
+    return _inProcess.contains(ext) || (Ffmpeg.available && _ffmpegWritable.contains(ext));
   }
 
   /// Whether "Change cover" can be offered for [t].
@@ -175,7 +168,7 @@ abstract final class Metadata {
     // Ogg keeps its tags (Vorbis comments) on the audio stream, not the file.
     final scope = const {'ogg', 'oga', 'opus'}.contains(_ext(path)) ? ':s:a:0' : '';
     try {
-      final r = await Process.run('ffmpeg', [
+      final r = await Process.run(await Ffmpeg.executable(), [
         '-hide_banner', '-loglevel', 'error', '-y', '-i', path, //
         if (cover) ...['-i', coverFile!.path, '-map', '0', '-map', '-0:v?', '-map', '1'] else ...['-map', '0'],
         '-c', 'copy', '-map_metadata', '0',

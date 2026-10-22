@@ -5,33 +5,60 @@ import 'package:google_fonts/google_fonts.dart';
 
 import '../services/appearance.dart';
 
-/// Colour tokens for the dark, streaming-app look.
+/// Colour tokens of the theme picked in Settings › Appearance ([ThemeChoice]).
 abstract final class AppColors {
+  static AppPalette get _p => Appearance.instance.palette;
+
+  /// Whether the theme is light (dark text on light surfaces).
+  static bool get light => _p.light;
+
   /// Window and panel backgrounds; see-through when the window opacity
   /// setting is below 100%.
-  static Color get background => const Color(0xFF000000).withValues(alpha: Appearance.instance.windowOpacity);
-  static Color get panel => const Color(0xFF121212).withValues(alpha: Appearance.instance.windowOpacity);
-  static const elevated = Color(0xFF1C1C1C);
-  static const hover = Color(0xFF2A2A2A);
+  static Color get background => _p.background.withValues(alpha: Appearance.instance.windowOpacity);
+  static Color get panel => _p.panel.withValues(alpha: Appearance.instance.windowOpacity);
+
+  /// [background] and [panel] without the window's opacity.
+  static Color get solidBackground => _p.background;
+  static Color get elevated => _p.elevated;
+  static Color get hover => _p.hover;
 
   /// Popup menus and pickers.
-  static const menu = Color(0xFF242424);
-  static const tile = Color(0x14FFFFFF);
-  static const textPrimary = Color(0xFFFFFFFF);
-  static const textSecondary = Color(0xFFA7A7A7);
-  static const textMuted = Color(0xFF6E6E6E);
-  static Color get accent => Appearance.instance.accent.color;
-  static Color get onAccent => Appearance.instance.accent.onColor;
+  static Color get menu => _p.menu;
+  static Color get textPrimary => _p.textPrimary;
+  static Color get textSecondary => _p.textSecondary;
+  static Color get textMuted => _p.textMuted;
+
+  /// A faint fill over any surface (search box, cards on hover).
+  static Color get tile => _p.textPrimary.withValues(alpha: 0.08);
+
+  /// Hairline borders and dividers.
+  static Color get border => _p.textPrimary.withValues(alpha: 0.10);
+  static Color get divider => _p.textPrimary.withValues(alpha: 0.06);
+
+  /// The strongest contrast: a filled button or the phone's search box (white on dark themes).
+  static Color get inverse => _p.textPrimary;
+  static Color get onInverse => _p.light ? _p.panel : _p.background;
+
+  static Color get accent => Appearance.instance.accentColor;
+  static Color get onAccent => Appearance.instance.onAccentColor;
+
+  /// A cover's colour as a page header wash: strong on dark themes, soft on light ones
+  /// (where the text over it is dark).
+  static double get washStrength => _p.light ? 0.4 : 1;
+
+  /// [color] darkened toward the theme's background by [amount] (lightened on light themes).
+  static Color sink(Color color, double amount) => Color.lerp(color, _p.background, _p.light ? 0.75 : amount)!;
 }
 
 bool get _desktop => Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
 ThemeData buildAppTheme({String? fontFamily}) {
+  final brightness = AppColors.light ? Brightness.light : Brightness.dark;
   final base = ThemeData(
-    brightness: Brightness.dark,
+    brightness: brightness,
     colorScheme: ColorScheme.fromSeed(
       seedColor: AppColors.accent,
-      brightness: Brightness.dark,
+      brightness: brightness,
       primary: AppColors.accent,
       onPrimary: AppColors.onAccent,
       surface: AppColors.panel,
@@ -47,26 +74,26 @@ ThemeData buildAppTheme({String? fontFamily}) {
   final text = base.textTheme.apply(bodyColor: AppColors.textPrimary, displayColor: AppColors.textPrimary);
   return base.copyWith(
     textTheme: text,
-    iconTheme: const IconThemeData(color: AppColors.textSecondary),
+    iconTheme: IconThemeData(color: AppColors.textSecondary),
     appBarTheme: const AppBarTheme(backgroundColor: Colors.transparent, elevation: 0, scrolledUnderElevation: 0),
-    sliderTheme: const SliderThemeData(
+    sliderTheme: SliderThemeData(
       trackHeight: 4,
       activeTrackColor: AppColors.textPrimary,
-      inactiveTrackColor: Color(0x4DFFFFFF),
+      inactiveTrackColor: AppColors.textPrimary.withValues(alpha: 0.3),
       thumbColor: AppColors.textPrimary,
-      overlayColor: Color(0x1FFFFFFF),
-      thumbShape: RoundSliderThumbShape(enabledThumbRadius: 6, elevation: 0),
-      overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
-      trackShape: RoundedRectSliderTrackShape(),
+      overlayColor: AppColors.textPrimary.withValues(alpha: 0.12),
+      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6, elevation: 0),
+      overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+      trackShape: const RoundedRectSliderTrackShape(),
     ),
     chipTheme: ChipThemeData(
       backgroundColor: AppColors.hover,
       selectedColor: AppColors.textPrimary,
-      // Material 3 ignores secondaryLabelStyle: the selected (white) chip needs
-      // its dark label from a state colour, or the text vanishes.
+      // Material 3 ignores secondaryLabelStyle: the selected (inverse) chip needs
+      // its label from a state colour, or the text vanishes.
       labelStyle: text.labelLarge?.copyWith(
         color: WidgetStateColor.resolveWith(
-          (states) => states.contains(WidgetState.selected) ? Colors.black : AppColors.textPrimary,
+          (states) => states.contains(WidgetState.selected) ? AppColors.onInverse : AppColors.textPrimary,
         ),
       ),
       side: BorderSide.none,
@@ -82,10 +109,10 @@ ThemeData buildAppTheme({String? fontFamily}) {
       menuPadding: const EdgeInsets.symmetric(vertical: 6),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0x1AFFFFFF)),
+        side: BorderSide(color: AppColors.border),
       ),
     ),
-    // A small dark card floating over the bottom of the page: centred and
+    // A small card floating over the bottom of the page: centred and
     // narrow on desktop, inset from the edges on phones.
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
@@ -98,14 +125,14 @@ ThemeData buildAppTheme({String? fontFamily}) {
       closeIconColor: AppColors.textSecondary,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: Color(0x1FFFFFFF)),
+        side: BorderSide(color: AppColors.border),
       ),
     ),
     tooltipTheme: TooltipThemeData(
       decoration: BoxDecoration(color: AppColors.hover, borderRadius: BorderRadius.circular(4)),
       textStyle: text.bodySmall,
     ),
-    dividerTheme: const DividerThemeData(color: AppColors.hover, thickness: 1, space: 1),
-    listTileTheme: const ListTileThemeData(iconColor: AppColors.textSecondary),
+    dividerTheme: DividerThemeData(color: AppColors.hover, thickness: 1, space: 1),
+    listTileTheme: ListTileThemeData(iconColor: AppColors.textSecondary),
   );
 }

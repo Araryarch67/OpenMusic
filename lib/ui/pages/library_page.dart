@@ -131,7 +131,7 @@ class _LibraryListState extends State<LibraryList> {
             )
           : Row(
               children: [
-                const Icon(Icons.library_music_rounded, color: AppColors.textSecondary),
+                Icon(Icons.library_music_rounded, color: AppColors.textSecondary),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
@@ -418,7 +418,7 @@ class _Prompt extends StatelessWidget {
           Text(body, style: text.bodySmall),
           const SizedBox(height: 14),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.inverse, foregroundColor: AppColors.onInverse),
             onPressed: onPressed,
             child: Text(button),
           ),

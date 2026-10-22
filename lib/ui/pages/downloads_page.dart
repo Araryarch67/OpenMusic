@@ -36,7 +36,10 @@ class DownloadsPage extends StatelessWidget {
                     Text('Downloads', style: text.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
                     const SizedBox(width: 8),
                     FilledButton.icon(
-                      style: FilledButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.black),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.inverse,
+                        foregroundColor: AppColors.onInverse,
+                      ),
                       onPressed: shell.importFromYoutube,
                       icon: const Icon(Icons.add_link_rounded),
                       label: const Text('Import from YouTube'),
@@ -127,7 +130,7 @@ class _JobRow extends StatelessWidget {
                 child: Image.network(
                   job.thumbnailUrl,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) => const ColoredBox(color: AppColors.hover),
+                  errorBuilder: (_, _, _) => ColoredBox(color: AppColors.hover),
                 ),
               ),
             ),
@@ -215,7 +218,7 @@ class DownloadsButton extends StatelessWidget {
                         color: AppColors.accent,
                         backgroundColor: AppColors.hover,
                       ),
-                      const Icon(Icons.arrow_downward_rounded, size: 13, color: AppColors.textPrimary),
+                      Icon(Icons.arrow_downward_rounded, size: 13, color: AppColors.textPrimary),
                     ],
                   ),
                 ),

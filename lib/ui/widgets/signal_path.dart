@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
@@ -162,7 +163,7 @@ class _SignalPathSheet extends StatelessWidget {
             : p.untouched && p.mixerResamples
             ? (
                 'Resampled by the system mixer',
-                Colors.white,
+                AppColors.textPrimary,
                 'OpenMusic leaves the sound alone, but the system mixer runs your DAC at '
                     '${SignalPath.formatRate(p.dac!.rate)} instead of ${SignalPath.formatRate(p.inRate)}. '
                     'Turn on Bit-perfect mode in Settings › Advanced audio to send it as it is.',
@@ -170,14 +171,14 @@ class _SignalPathSheet extends StatelessWidget {
             : p.untouched && p.viaSystemMixer
             ? (
                 'Lossless to the system mixer',
-                Colors.white,
+                AppColors.textPrimary,
                 'Nothing in OpenMusic changes the sound, but the system mixer may resample it. '
                     'For bit-perfect, turn on Bit-perfect mode in Settings › Advanced audio.',
               )
             : p.isDsd
             ? (
                 'DSD converted to PCM',
-                Colors.white,
+                AppColors.textPrimary,
                 'DSD is decoded to high-rate PCM. To send it to your DAC as DSD, turn on Bit-perfect mode and Native DSD (DoP) in Settings › Advanced audio.',
               )
             : (
@@ -227,7 +228,11 @@ class _SignalPathSheet extends StatelessWidget {
                 if (p.leveling) const _Stage(title: 'Volume leveling', value: 'ReplayGain', changes: true),
                 _Stage(
                   title: 'Volume',
-                  value: (p.volume - 100).abs() < 0.01 ? '100% (untouched)' : '${p.volume.round()}% (64-bit float)',
+                  value: (p.volume - 100).abs() < 0.01
+                      ? '100% (untouched)'
+                      : p.volume <= 0
+                      ? 'Muted'
+                      : '${(20 * math.log(p.volume / 100) / math.ln10).toStringAsFixed(1)} dB (64-bit float)',
                   changes: (p.volume - 100).abs() >= 0.01,
                 ),
                 if (p.inRate != p.outRate)

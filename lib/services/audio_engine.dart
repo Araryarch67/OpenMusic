@@ -103,6 +103,7 @@ class SignalPath {
     required this.outChannels,
     required this.output,
     required this.device,
+    this.exclusive = false,
     required this.filters,
     required this.volume,
     required this.leveling,
@@ -125,6 +126,9 @@ class SignalPath {
   /// mpv audio output driver (pipewire, alsa, wasapi, coreaudio...).
   final String output;
   final String device;
+
+  /// The output is held exclusively (WASAPI / CoreAudio exclusive mode), past the OS mixer.
+  final bool exclusive;
 
   /// Processing stages between decoder and output, in order.
   final List<String> filters;
@@ -184,6 +188,8 @@ class SignalPath {
   /// Mixed by the OS (PipeWire / PulseAudio / shared WASAPI) rather than sent to the DAC as-is.
   bool get viaSystemMixer => switch (output) {
     'pipewire' || 'pulse' || 'jack' || 'openal' || 'sdl' || 'opensles' || 'audiotrack' || 'aaudio' => true,
+    // Shared mode goes through Windows' / macOS's mixer (its volume, effects and rate).
+    'wasapi' || 'coreaudio' => !exclusive,
     'alsa' => !RegExp(r'^alsa/(hw|plughw|front|iec958|hdmi|usbstream):').hasMatch(device) || device.contains('plughw'),
     _ => false,
   };
@@ -229,6 +235,9 @@ class AudioEngine extends ChangeNotifier {
     // mpv's read-ahead (media_kit: 32 MiB ahead and 32 MiB behind, per open
     // file). 8 MiB is a whole YouTube song, or 15 s of 24/192 FLAC from disk.
     JustAudioMediaKit.bufferSize = 8 << 20;
+    // mpv's `title`: the app's name in Windows' volume mixer (media_kit's default is "JustAudioMediaKit").
+    // PulseAudio / PipeWire take `audio-client-name` instead (see [_applyProps]).
+    JustAudioMediaKit.title = 'OpenMusic';
     JustAudioMediaKit.volumeOverride = _setVolume;
     JustAudioMediaKit.onPlayerCreated = (p) => unawaited(_applyAll(p));
   }
@@ -352,6 +361,7 @@ class AudioEngine extends ChangeNotifier {
     _dop = v;
     notifyListeners();
     if (_native case final p?) {
+      _chainSetAt = DateTime.now();
       p.setProperty('af', filterChain).then((_) {
         // The output would otherwise stay in the volume filter's float format.
         if (v != null && volumeWasOn) return p.command(['ao-reload']);
@@ -528,20 +538,58 @@ class AudioEngine extends ChangeNotifier {
   @visibleForTesting
   set debugVolume(double v) => _volume = v;
 
-  Future<void> _setVolume(Player player, double v) async {
-    final was = _volumeActive;
+  Future<void>? _volumeApplying;
+  bool _volumeDirty = false;
+
+  Future<void> _setVolume(Player player, double v) {
     _volume = v.clamp(0, 1);
-    if (_dop != null) return; // held at 100% while DoP plays; applied when it ends
+    if (_dop != null) return Future.value(); // held at 100% while DoP plays; applied when it ends
     if (player.platform case final NativePlayer p) {
-      if (was && _volumeActive) {
-        // Just a new level: tell the running filter instead of rebuilding the chain (no click).
-        await p.command(['af-command', 'volume', 'volume', _volume.toStringAsFixed(6), 'volume']);
-      } else if (was != _volumeActive) {
-        await p.setProperty('af', filterChain);
-        // Back at 100%: the output still runs in the volume filter's 64-bit float
-        // until it reopens, so bit-perfect mode would stay not bit-perfect.
-        if (bitPerfect && !_volumeActive) await p.command(['ao-reload']);
+      // A slider drag sends dozens of levels a second. Sent concurrently, an
+      // `af-command` could reach mpv before the chain holding the volume filter
+      // was set (and be lost), so they go one at a time and the last one wins.
+      _volumeDirty = true;
+      return _volumeApplying ??= _applyVolume(p);
+    }
+    return Future.value();
+  }
+
+  /// When `af` was last set: mpv builds the new filter graph only once audio flows through it.
+  DateTime _chainSetAt = DateTime(0);
+
+  Future<void> _setChain(NativePlayer p) async {
+    await p.setProperty('af', filterChain);
+    _chainSetAt = DateTime.now();
+  }
+
+  Future<void> _applyVolume(NativePlayer p) async {
+    try {
+      while (_volumeDirty && _dop == null) {
+        _volumeDirty = false;
+        // What mpv runs now, not what was last asked: settings changes rebuild the chain too.
+        final inChain = (await p.getProperty('af')).contains('@volume:');
+        // mpv refuses a filter command while no audio flows (paused, loading, a graph not
+        // built yet), and media_kit only logs that. Rebuilding the chain is silent then.
+        final flowing = await p.getProperty('core-idle') == 'no';
+        if (inChain && _volumeActive && flowing) {
+          // A graph set a moment ago may not be running yet.
+          final wait = _chainSetAt.add(const Duration(milliseconds: 150)).difference(DateTime.now());
+          if (wait > Duration.zero) await Future<void>.delayed(wait);
+          // Just a new level: tell the running filter instead of rebuilding the chain (no click).
+          // No target argument: the bundled Windows libmpv's af-command takes only three (and
+          // ignores four), and the `@volume` graph holds nothing but the volume filter.
+          await p.command(['af-command', 'volume', 'volume', _volume.toStringAsFixed(6)]);
+        } else if (inChain || _volumeActive) {
+          await _setChain(p);
+          // Back at 100%: the output still runs in the volume filter's 64-bit float
+          // until it reopens, so bit-perfect mode would stay not bit-perfect.
+          if (inChain && !_volumeActive && bitPerfect) await p.command(['ao-reload']);
+        }
       }
+    } catch (e) {
+      debugPrint('Applying volume failed: $e');
+    } finally {
+      _volumeApplying = null;
     }
   }
 
@@ -601,6 +649,8 @@ class AudioEngine extends ChangeNotifier {
       'audio-buffer': buffer.seconds.toString(),
       'af': filterChain,
       'audio-device': outputDevice,
+      // The app's name in the Linux mixers (PulseAudio / PipeWire); mpv's default is "mpv".
+      'audio-client-name': 'OpenMusic',
       'audio-exclusive': hasExclusiveMode && exclusiveOut ? 'yes' : 'no',
       'audio-samplerate': bitPerfect ? '0' : '${outputRate ?? 0}',
       // Only used when the rate has to change; keeps the default otherwise.
@@ -611,6 +661,7 @@ class AudioEngine extends ChangeNotifier {
     for (final e in props.entries) {
       await p.setProperty(e.key, e.value);
     }
+    _chainSetAt = DateTime.now();
   }
 
   /// The mpv device to open. On Linux, bit-perfect mode goes straight to the
@@ -875,6 +926,7 @@ class AudioEngine extends ChangeNotifier {
       outChannels: int.tryParse(await g('audio-out-params/channel-count')) ?? 0,
       output: output,
       device: device,
+      exclusive: await g('audio-exclusive') == 'yes',
       filters: [
         // Volume has its own stage; the rest are listed in order.
         for (final m in RegExp(r'@(\w+):').allMatches(af).where((m) => m[1] != 'volume'))

@@ -4,12 +4,14 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/audio_engine.dart';
 import 'package:openmusic/services/cue_sheet.dart';
 import 'package:openmusic/services/linux_alsa.dart';
 import 'package:openmusic/services/lyrics.dart';
 import 'package:openmusic/services/metadata.dart';
+import 'package:openmusic/services/player_controller.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// A 1x1 PNG, for cover tests.
@@ -22,6 +24,7 @@ SignalPath _path({
   int outRate = 44100,
   String output = 'alsa',
   String device = 'alsa/front:CARD=DAC,DEV=0',
+  bool exclusive = false,
   List<String> filters = const [],
   double volume = 100,
   bool leveling = false,
@@ -37,6 +40,7 @@ SignalPath _path({
   outChannels: 2,
   output: output,
   device: device,
+  exclusive: exclusive,
   filters: filters,
   volume: volume,
   leveling: leveling,
@@ -93,7 +97,7 @@ FILE "album.wav" WAVE
     INDEX 01 03:10:45
 ''');
       final r = CueSheet.read(cue);
-      expect(r.covers, {'${dir.path}/album.flac'}, reason: 'FILE names the .wav, the rip is FLAC');
+      expect(r.covers, {p.join(dir.path, 'album.flac')}, reason: 'FILE names the .wav, the rip is FLAC');
       expect(r.tracks, hasLength(2));
       final a = r.tracks[0], b = r.tracks[1];
       expect(a.title, 'Opening');
@@ -120,13 +124,19 @@ FILE "album.wav" WAVE
       expect(_path(outRate: 48000).bitPerfect, isFalse);
       expect(_path(filters: ['Equalizer']).bitPerfect, isFalse);
       expect(_path(volume: 80).bitPerfect, isFalse);
+      // Windows: shared mode goes through the system mixer; exclusive mode reaches the DAC.
+      expect(_path(output: 'wasapi', device: 'auto').bitPerfect, isFalse, reason: 'shared WASAPI is mixed');
+      expect(_path(output: 'wasapi', device: 'auto').viaSystemMixer, isTrue);
+      expect(_path(output: 'wasapi', device: 'auto', exclusive: true).bitPerfect, isTrue);
       expect(_path(leveling: true).bitPerfect, isFalse);
       expect(_path(outFormat: 'float').bitPerfect, isFalse);
       final mixer = _path(output: 'pipewire', device: 'auto');
       expect(mixer.untouched, isTrue);
       expect(mixer.bitPerfect, isFalse);
       expect(_path(device: 'alsa/plughw:CARD=DAC').viaSystemMixer, isTrue);
-      expect(_path(output: 'wasapi', device: 'wasapi/{x}').bitPerfect, isTrue);
+      // Bit-perfect mode opens the chosen WASAPI device exclusively.
+      expect(_path(output: 'wasapi', device: 'wasapi/{x}', exclusive: true).bitPerfect, isTrue);
+      expect(_path(output: 'wasapi', device: 'wasapi/{x}').bitPerfect, isFalse, reason: 'a chosen device, still shared');
     });
 
     test('reads the stored bit depth from file headers', () async {
@@ -224,6 +234,19 @@ FILE "album.wav" WAVE
       expect(SignalPath.describe('s32', 96000), '32-bit / 96 kHz');
       expect(SignalPath.describe('floatp', 44100), '32-bit float / 44.1 kHz');
       expect(_path(codec: 'dsd_lsbf_planar').isDsd, isTrue);
+    });
+  });
+
+  group('volume', () {
+    test('the slider is cubic in gain, like mpv\'s own volume', () {
+      double db(double gain) => 20 * math.log(gain) / math.ln10;
+      expect(db(PlayerController.gainOfLevel(0.5)), closeTo(-18.06, 0.01), reason: 'halfway is −18 dB, not −6');
+      expect(PlayerController.gainOfLevel(1), 1);
+      expect(PlayerController.gainOfLevel(0), 0);
+      for (final level in [0.05, 0.3, 0.77, 1.0]) {
+        expect(PlayerController.levelOfGain(PlayerController.gainOfLevel(level)), closeTo(level, 1e-9));
+      }
+      expect(PlayerController.levelOfGain(0), 0);
     });
   });
 
@@ -422,7 +445,7 @@ FILE "album.wav" WAVE
         expect(after['album_artist'], 'Band', reason: 'aART survived');
         expect(after['encoder'], isNotNull, reason: '©too survived');
         expect(await Metadata.artwork(updated), isNotNull, reason: 'cover written');
-        expect(dir.listSync().map((e) => e.path.split('/').last), [name], reason: 'no temp file left');
+        expect(dir.listSync().map((e) => p.basename(e.path)), [name], reason: 'no temp file left');
       });
     }
 
@@ -506,7 +529,7 @@ FILE "album.wav" WAVE
         final after = await probe(path);
         expect(after['replaygain_track_gain'], '-7.50 dB', reason: 'ReplayGain survived');
         expect(after['mood'], 'calm', reason: 'custom tag survived');
-        expect(dir.listSync().map((e) => e.path.split('/').last), ['song.$ext'], reason: 'no temp file left');
+        expect(dir.listSync().map((e) => p.basename(e.path)), ['song.$ext'], reason: 'no temp file left');
       });
     }
   });

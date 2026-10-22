@@ -14,6 +14,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
+import 'package:media_kit/media_kit.dart' show NativePlayer;
 import 'package:openmusic/main.dart';
 import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/player_controller.dart';
@@ -47,11 +48,19 @@ void main() {
       artist: 'OpenMusic',
       album: 'Hi-Res Test',
     );
-    SharedPreferences.setMockInitialValues({});
+    // Discord off: the real one, if running, would show these songs on the user's profile.
+    SharedPreferences.setMockInitialValues({'discord.enabled': false});
 
+    // Silent without a muted volume in the pictures: mpv's own mute, which the
+    // app's volume and signal path don't look at, on the real output.
     final c = PlayerController();
+    final apply = JustAudioMediaKit.onPlayerCreated!;
+    JustAudioMediaKit.onPlayerCreated = (p) async {
+      await (p.platform as NativePlayer).setProperty('mute', 'yes');
+      apply(p);
+    };
+
     await c.load();
-    await c.player.setVolume(0);
 
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
@@ -132,8 +141,12 @@ void main() {
       await shot('lyrics');
 
       // Settings, then the equalizer.
+      await tester.tap(find.byTooltip('More'));
+      await settle();
       await tester.tap(find.text('Settings').first);
       await shot('settings');
+      await tester.tap(find.text('Playback'));
+      await settle();
       await Scrollable.ensureVisible(tester.element(find.text('Equalizer')), alignment: 0.5);
       await settle();
       await tester.tap(find.text('Equalizer'));
@@ -148,7 +161,6 @@ void main() {
       await tester.tap(find.byTooltip('Home'));
       await settle();
       await c.playList([studio], 0, from: 'Hi-Res Test');
-      await c.player.setVolume(1);
       await playing();
       await until(() => find.textContaining('FLAC').evaluate().isNotEmpty);
       showSignalPath(tester.element(find.byType(QualityBadge).first)).ignore();
@@ -156,7 +168,6 @@ void main() {
       await shot('signal-path');
       await tester.tapAt(const Offset(700, 150));
       await settle();
-      await c.player.setVolume(0);
 
       // Desktop full-screen player.
       await c.playList(dlow, 0, from: 'D-low');
@@ -175,6 +186,7 @@ void main() {
       await tester.tap(find.byType(MiniPlayer));
       await shot('phone');
     } finally {
+      JustAudioMediaKit.onPlayerCreated = apply;
       await c.player.stop();
       dir.deleteSync(recursive: true);
     }
