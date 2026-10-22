@@ -54,9 +54,11 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        # One versionCode for every APK (Flutter adds 1000-4000 per ABI by default): a phone
+        # can then move between the universal and per-ABI APKs without "can't downgrade".
         run: |
           flutter build apk --release $BUILD_ARGS
-          flutter build apk --release --split-per-abi $BUILD_ARGS
+          flutter build apk --release --split-per-abi -P force-version-code-ignoring-abi=true $BUILD_ARGS
           mkdir -p dist
           cp build/app/outputs/flutter-apk/app-release.apk dist/OpenMusic-android.apk
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/OpenMusic-android-arm64.apk
@@ -148,3 +150,13 @@ jobs:
         with:
           files: dist/*
           generate_release_notes: true
+          body: |
+            ### Which file?
+
+            **Android** (7.0 and later, up to Android 16): take **OpenMusic-android.apk**; it runs on every phone.
+            The smaller ones are for one kind of processor only: `arm64` fits almost every phone from the last
+            years; `arm32` only old 32-bit phones (newer phones refuse it as "not compatible"); `x86_64` is for
+            emulators and Chromebooks.
+
+            **Windows**: `OpenMusic-windows-x64-setup.exe` installs it; the `.zip` runs without installing.
+            **Linux**: the `.AppImage` runs anywhere; `.deb` for Debian / Ubuntu; `.tar.gz` is the plain bundle.
