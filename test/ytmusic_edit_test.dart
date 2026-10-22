@@ -15,10 +15,7 @@ import 'package:openmusic/services/ytmusic_web.dart';
     expect(req.headers['authorization'], startsWith('SAPISIDHASH '));
     return http.Response.bytes(utf8.encode(jsonEncode(reply(endpoint))), 200);
   });
-  return (
-    web: YtMusicWeb(cookies: '__Secure-3PAPISID=abc; SAPISID=abc', visitorData: 'v', client: client),
-    sent: sent,
-  );
+  return (web: YtMusicWeb(cookies: '__Secure-3PAPISID=abc; SAPISID=abc', visitorData: 'v', client: client), sent: sent);
 }
 
 void main() {
@@ -112,6 +109,63 @@ void main() {
     expect(page.privacy, PlaylistPrivacy.private);
     expect(page.tracks.single.setVideoId, 'row9');
     expect(f.sent.single.$2['browseId'], 'VLPLx');
+  });
+
+  test('sharing a playlist: invite link, join, stop', () async {
+    const link = 'https://music.youtube.com/playlist?list=PLx&jct=tok123';
+    final f = fake((_) => {'status': 'STATUS_SUCCEEDED', 'collaborationInviteLink': link});
+    expect(await f.web.collaborationLink('VLPLx'), link);
+    await f.web.joinCollaboration('PLx', 'tok123');
+    await f.web.stopCollaboration('PLx');
+    final actions = [for (final (e, b) in f.sent) (e, b['playlistId'], (b['actions'] as List).single as Map)];
+    expect(actions.every((a) => a.$1 == 'browse/edit_playlist' && a.$2 == 'PLx'), isTrue);
+    expect(actions[0].$3, {'action': 'ACTION_CREATE_COLLABORATION_INVITE_LINK'});
+    expect(actions[1].$3, {'action': 'ACTION_JOIN_COLLABORATION', 'joinCollaborationToken': 'tok123'});
+    expect(actions[2].$3, {'action': 'ACTION_SET_CLOSED_TO_CONTRIBUTIONS', 'closedToContributions': true});
+  });
+
+  test('no invite link in the reply is an error', () async {
+    final f = fake((_) => {'status': 'STATUS_SUCCEEDED'});
+    expect(() => f.web.collaborationLink('PLx'), throwsA(isA<YtMusicWebError>()));
+  });
+
+  test('reads invite links and nothing else', () {
+    expect(YtMusicWeb.parseInvite(' https://music.youtube.com/playlist?list=PLabc&jct=t-1_x '), (
+      playlistId: 'PLabc',
+      token: 't-1_x',
+    ));
+    expect(YtMusicWeb.parseInvite('https://www.youtube.com/playlist?list=VLPLabc&jct=t'), (
+      playlistId: 'PLabc',
+      token: 't',
+    ));
+    expect(YtMusicWeb.parseInvite('https://music.youtube.com/playlist?list=PLabc'), isNull, reason: 'no token');
+    expect(YtMusicWeb.parseInvite('https://evil.example/playlist?list=PLabc&jct=t'), isNull);
+    expect(YtMusicWeb.parseInvite('https://notyoutube.com/playlist?list=PLabc&jct=t'), isNull);
+    expect(YtMusicWeb.parseInvite('hello'), isNull);
+  });
+
+  test('a playlist with collaborators reads as shared', () async {
+    Map<String, dynamic> page(String panel) => {
+      'header': {
+        'musicResponsiveHeaderRenderer': {
+          'facepile': {
+            'avatarStackViewModel': {
+              'rendererContext': {
+                'commandContext': {
+                  'onTap': {
+                    'innertubeCommand': {
+                      'showEngagementPanelEndpoint': {'panelIdentifier': panel},
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    };
+    expect((await fake((_) => page('PAplaylist_collaborate')).web.playlistPage('PLx')).collaborative, isTrue);
+    expect((await fake((_) => page('PAsomething_else')).web.playlistPage('PLx')).collaborative, isFalse);
   });
 
   test('radio parses the up-next queue', () async {

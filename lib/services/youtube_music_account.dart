@@ -82,12 +82,21 @@ class RemotePlaylist {
 
 /// A library playlist opened for viewing, with what's needed to edit it.
 class RemotePlaylistDetails {
-  const RemotePlaylistDetails({required this.tracks, required this.owned, this.privacy, this.rowIds = const {}});
+  const RemotePlaylistDetails({
+    required this.tracks,
+    required this.owned,
+    this.collaborative = false,
+    this.privacy,
+    this.rowIds = const {},
+  });
 
   final List<Track> tracks;
 
   /// The signed-in account made it, so it can be renamed, edited and deleted.
   final bool owned;
+
+  /// Shared with friends who add songs too; anyone in it can remove songs.
+  final bool collaborative;
   final PlaylistPrivacy? privacy;
 
   /// Track id → the row's id in the playlist (needed to remove it).
@@ -798,6 +807,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
     return RemotePlaylistDetails(
       tracks: tracks,
       owned: page.owned,
+      collaborative: page.collaborative,
       privacy: page.privacy,
       rowIds: {for (var i = 0; i < page.tracks.length; i++) tracks[i].id: ?page.tracks[i].setVideoId},
     );
@@ -841,6 +851,27 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   Future<void> movePlaylistItem(String id, String rowId, String? beforeRowId) =>
       _editing((web) => web.movePlaylistItem(id, rowId, beforeRowId));
+
+  /// The link that lets friends add songs to the playlist. A private playlist
+  /// is made unlisted first: YouTube Music keeps collaborators out of private ones.
+  Future<String> inviteLink(String id, {required PlaylistPrivacy? privacy}) => _editing((web) async {
+    if (privacy == PlaylistPrivacy.private) await web.setPlaylistPrivacy(id, PlaylistPrivacy.unlisted);
+    return web.collaborationLink(id);
+  });
+
+  Future<void> stopCollaboration(String id) => _editing((web) => web.stopCollaboration(id));
+
+  /// Joins a friend's playlist from their invite link and returns its id.
+  Future<String> joinPlaylist(String inviteLink) async {
+    final invite = YtMusicWeb.parseInvite(inviteLink);
+    if (invite == null) throw const YtMusicWebError('That isn\'t a YouTube Music invite link.');
+    // Joining twice is refused like a bad session; already in, just open it.
+    final mine = await library().then((l) => l.playlists, onError: (Object _) => const <RemotePlaylist>[]);
+    if (mine.any((p) => p.id == invite.playlistId)) return invite.playlistId;
+    await _editing((web) => web.joinCollaboration(invite.playlistId, invite.token));
+    library(refresh: true).ignore();
+    return invite.playlistId;
+  }
 
   /// Recently played. Browser and web sessions have it; the Data API does not.
   Future<List<Track>> history() async {

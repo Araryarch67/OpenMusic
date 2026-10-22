@@ -69,6 +69,14 @@ class _LibraryListState extends State<LibraryList> {
           subtitle: 'Mix your own songs and YouTube Music',
           onTap: () => createPlaylist(context),
         ),
+        if (account.canEdit)
+          _SimpleRow(
+            collapsed: widget.collapsed,
+            art: const _IconArt(Icons.group_add_outlined),
+            title: 'Join a shared playlist',
+            subtitle: 'Paste a link from a friend',
+            onTap: () => joinSharedPlaylist(context),
+          ),
         for (final p in c.playlists) _LibraryRow(collection: c.playlistCollection(p), collapsed: widget.collapsed),
         if (online != null) ...[
           if (online.liked.isNotEmpty)

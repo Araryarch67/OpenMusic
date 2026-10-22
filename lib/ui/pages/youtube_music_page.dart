@@ -54,6 +54,18 @@ Future<void> signInToYoutubeMusic(BuildContext context) async {
 Collection likedCollection(List<Track> liked) =>
     Collection(kind: CollectionKind.remote, title: 'Liked music', subtitle: 'YouTube Music', tracks: liked);
 
+/// "Join a shared playlist": joins from a friend's invite link, then opens it.
+Future<void> joinSharedPlaylist(BuildContext context) async {
+  final account = PlayerScope.read(context).ytMusic;
+  final id = await askToJoinPlaylist(context);
+  if (id == null || !context.mounted) return;
+  final lib = await account.library().then<YoutubeMusicLibrary?>((l) => l, onError: (Object _) => null);
+  if (!context.mounted) return;
+  final p = lib?.playlists.where((p) => p.id == id).firstOrNull;
+  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Joined "${p?.title ?? 'the playlist'}"')));
+  openRemotePlaylist(context, p ?? RemotePlaylist(id: id, title: 'Shared playlist', count: 0));
+}
+
 /// Opens a library playlist or a public album / playlist in the current tab.
 void openRemotePlaylist(BuildContext context, RemotePlaylist p) {
   final account = PlayerScope.read(context).ytMusic;
@@ -527,7 +539,8 @@ class _RemoteCollectionPageState extends State<RemoteCollectionPage> {
 }
 
 /// One of the library's playlists. If the account owns it, it can be renamed,
-/// made public or private, deleted, and songs can be removed from it.
+/// made public or private, shared with friends, deleted, and songs can be
+/// removed from it. In a shared playlist everyone can remove songs.
 class LibraryPlaylistPage extends StatefulWidget {
   const LibraryPlaylistPage({super.key, required this.playlist});
 
@@ -556,6 +569,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
             if (x.id != t.id) x,
         ],
         owned: d.owned,
+        collaborative: d.collaborative,
         privacy: d.privacy,
         rowIds: {...d.rowIds}..remove(t.id),
       );
@@ -586,6 +600,14 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
+  }
+
+  Future<void> _invite(RemotePlaylistDetails d) async {
+    if (await inviteToPlaylist(context, widget.playlist.id, d.privacy)) _reload();
+  }
+
+  Future<void> _stopSharing() async {
+    if (await stopSharingPlaylist(context, widget.playlist.id)) _reload();
   }
 
   Future<void> _delete() async {
@@ -651,11 +673,15 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
         final collection = Collection(
           kind: CollectionKind.remote,
           title: _title,
-          subtitle: [if (d.privacy != null) d.privacy!.label, 'YouTube Music'].join(' · '),
+          subtitle: [
+            if (d.privacy != null) d.privacy!.label,
+            if (d.collaborative) 'Shared',
+            'YouTube Music',
+          ].join(' · '),
           tracks: d.tracks,
         );
         return PlaylistEditScope(
-          canRemove: (t) => d.owned && d.rowIds.containsKey(t.id),
+          canRemove: (t) => (d.owned || d.collaborative) && d.rowIds.containsKey(t.id),
           remove: (context, t) async {
             final row = d.rowIds[t.id];
             if (row != null && await removeFromRemotePlaylist(context, widget.playlist.id, t, row)) _removed(t);
@@ -671,6 +697,15 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
                   icon: const Icon(Icons.more_horiz_rounded, size: 30),
                   onSelected: (action) => action(),
                   itemBuilder: (_) => [
+                    PopupMenuItem(
+                      value: () => _invite(d),
+                      child: const MenuRow(leading: Icon(Icons.group_add_outlined), title: Text('Invite friends')),
+                    ),
+                    if (d.collaborative)
+                      PopupMenuItem(
+                        value: _stopSharing,
+                        child: const MenuRow(leading: Icon(Icons.group_off_outlined), title: Text('Stop sharing')),
+                      ),
                     PopupMenuItem(
                       value: _rename,
                       child: const MenuRow(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
@@ -814,6 +849,20 @@ class YoutubeMusicLibraryList extends StatelessWidget {
                   subtitle: 'Create one in YouTube Music',
                   location: '',
                   onTap: () => createPlaylist(context),
+                ),
+              if (account.canEdit)
+                row(
+                  art: SizedBox.square(
+                    dimension: 48,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(color: AppColors.hover),
+                      child: Icon(Icons.group_add_outlined, color: AppColors.textPrimary),
+                    ),
+                  ),
+                  title: 'Join a shared playlist',
+                  subtitle: 'Paste a link from a friend',
+                  location: '',
+                  onTap: () => joinSharedPlaylist(context),
                 ),
               row(
                 art: CoverMosaic(tracks: lib.liked, size: 48),

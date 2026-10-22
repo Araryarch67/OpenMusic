@@ -45,10 +45,19 @@ enum PlaylistPrivacy {
 
 /// A playlist page: its songs, and whether the signed-in account owns it.
 class WebPlaylistPage {
-  const WebPlaylistPage({required this.tracks, required this.owned, this.privacy, this.description});
+  const WebPlaylistPage({
+    required this.tracks,
+    required this.owned,
+    this.collaborative = false,
+    this.privacy,
+    this.description,
+  });
 
   final List<WebTrack> tracks;
   final bool owned;
+
+  /// Friends were invited to add songs (the header shows their faces).
+  final bool collaborative;
   final PlaylistPrivacy? privacy;
   final String? description;
 }
@@ -354,6 +363,8 @@ class YtMusicWeb {
     return WebPlaylistPage(
       tracks: await _tracksOf(res, limit),
       owned: editable != null,
+      // ytmusicapi tells collaborators from an author by this panel id.
+      collaborative: jsonEncode(_deepFind(res, 'avatarStackViewModel') ?? '').contains('PAplaylist_collaborate'),
       privacy: PlaylistPrivacy.parse(edit?['privacy']),
       description: _text(edit?['description']),
     );
@@ -381,7 +392,7 @@ class YtMusicWeb {
     return id;
   }
 
-  Future<void> _edit(String playlistId, List<Map<String, dynamic>> actions) async {
+  Future<Map<String, dynamic>> _edit(String playlistId, List<Map<String, dynamic>> actions) async {
     final res = await _send('browse/edit_playlist', {
       'playlistId': playlistId.startsWith('VL') ? playlistId.substring(2) : playlistId,
       'actions': actions,
@@ -390,6 +401,7 @@ class YtMusicWeb {
     if (status is String && !status.contains('SUCCEEDED')) {
       throw YtMusicWebError('YouTube Music refused the change ($status).');
     }
+    return res;
   }
 
   Future<void> renamePlaylist(String playlistId, String title) => _edit(playlistId, [
@@ -421,6 +433,44 @@ class YtMusicWeb {
   Future<void> movePlaylistItem(String playlistId, String setVideoId, String? beforeSetVideoId) => _edit(playlistId, [
     {'action': 'ACTION_MOVE_VIDEO_BEFORE', 'setVideoId': setVideoId, 'movedSetVideoIdSuccessor': ?beforeSetVideoId},
   ]);
+
+  // Collaboration follows ytmusicapi's edit_playlist(collaboration=…) and
+  // join_collaborative_playlist. Only unlisted or public playlists take
+  // collaborators.
+
+  /// Lets friends add songs and returns the link that invites them (a new
+  /// one each time). Anyone holding it can join until [stopCollaboration].
+  Future<String> collaborationLink(String playlistId) async {
+    final res = await _edit(playlistId, [
+      {'action': 'ACTION_CREATE_COLLABORATION_INVITE_LINK'},
+    ]);
+    final link = res['collaborationInviteLink'];
+    if (link is! String || parseInvite(link) == null) {
+      throw const YtMusicWebError('YouTube Music did not make an invite link.');
+    }
+    return link;
+  }
+
+  /// Closes the playlist to contributions; every collaborator is removed.
+  Future<void> stopCollaboration(String playlistId) => _edit(playlistId, [
+    {'action': 'ACTION_SET_CLOSED_TO_CONTRIBUTIONS', 'closedToContributions': true},
+  ]);
+
+  /// Joins a friend's playlist from an invite (see [parseInvite]); it then
+  /// shows up in the library.
+  Future<void> joinCollaboration(String playlistId, String token) => _edit(playlistId, [
+    {'action': 'ACTION_JOIN_COLLABORATION', 'joinCollaborationToken': token},
+  ]);
+
+  /// The playlist and join token of an invite link
+  /// (`music.youtube.com/playlist?list=PL…&jct=…`), or null for anything else.
+  static ({String playlistId, String token})? parseInvite(String text) {
+    final uri = Uri.tryParse(text.trim());
+    if (uri == null || !(uri.host == 'youtube.com' || uri.host.endsWith('.youtube.com'))) return null;
+    final list = uri.queryParameters['list'], token = uri.queryParameters['jct'];
+    if (list == null || list.isEmpty || token == null || token.isEmpty) return null;
+    return (playlistId: list.startsWith('VL') ? list.substring(2) : list, token: token);
+  }
 
   Future<void> deletePlaylist(String playlistId) async {
     await _send('playlist/delete', {'playlistId': playlistId.startsWith('VL') ? playlistId.substring(2) : playlistId});

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../models/track.dart';
 import '../services/player_controller.dart';
@@ -269,6 +270,186 @@ Future<bool> removeFromRemotePlaylist(BuildContext context, String playlistId, T
   () => PlayerScope.read(context).ytMusic.removeFromPlaylist(playlistId, track, rowId),
   'Removed from this playlist',
 );
+
+/// "Invite friends": turns on collaboration and hands over the link to send.
+/// A private playlist has to become unlisted first, so that's asked.
+/// Returns whether the playlist is now shared.
+Future<bool> inviteToPlaylist(BuildContext context, String playlistId, PlaylistPrivacy? privacy) async {
+  final account = PlayerScope.read(context).ytMusic;
+  final messenger = ScaffoldMessenger.of(context);
+  if (privacy == PlaylistPrivacy.private) {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Make it unlisted?'),
+        content: const Text(
+          'Friends can only join a playlist that isn\'t private. It will become unlisted: '
+          'hidden from search, but anyone with the link can see it.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Make unlisted')),
+        ],
+      ),
+    );
+    if (ok != true) return false;
+  }
+  final String link;
+  try {
+    link = await account.inviteLink(playlistId, privacy: privacy);
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    return false;
+  }
+  await Clipboard.setData(ClipboardData(text: link));
+  if (!context.mounted) return true;
+  await showDialog<void>(
+    context: context,
+    builder: (_) => _InviteDialog(link: link),
+  );
+  return true;
+}
+
+class _InviteDialog extends StatelessWidget {
+  const _InviteDialog({required this.link});
+
+  final String link;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme;
+    return AlertDialog(
+      title: const Text('Invite friends'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('The link is copied. Send it to your friends: anyone who opens it can add songs.'),
+            const SizedBox(height: 16),
+            DecoratedBox(
+              decoration: BoxDecoration(color: AppColors.hover, borderRadius: BorderRadius.circular(6)),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: SelectableText(link, maxLines: 2, style: text.bodySmall),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: link));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Link copied')));
+          },
+          child: const Text('Copy again'),
+        ),
+        FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+      ],
+    );
+  }
+}
+
+/// "Stop sharing": every friend loses access and old links stop working.
+Future<bool> stopSharingPlaylist(BuildContext context, String playlistId) async {
+  final sure = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Stop sharing?'),
+      content: const Text('Friends won\'t be able to add songs any more, and old invite links stop working.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+        FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Stop sharing')),
+      ],
+    ),
+  );
+  if (sure != true || !context.mounted) return false;
+  return _report(
+    context,
+    () => PlayerScope.read(context).ytMusic.stopCollaboration(playlistId),
+    'Only you can add songs now',
+  );
+}
+
+/// Asks for a friend's invite link (filled in from the clipboard when one is
+/// there) and joins it. Returns the playlist's id once joined.
+Future<String?> askToJoinPlaylist(BuildContext context) async {
+  final account = PlayerScope.read(context).ytMusic;
+  final messenger = ScaffoldMessenger.of(context);
+  final copied = (await Clipboard.getData(Clipboard.kTextPlain))?.text?.trim();
+  if (!context.mounted) return null;
+  final link = await showDialog<String>(
+    context: context,
+    builder: (_) => _JoinDialog(initial: copied != null && YtMusicWeb.parseInvite(copied) != null ? copied : null),
+  );
+  if (link == null) return null;
+  try {
+    return await account.joinPlaylist(link);
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    return null;
+  }
+}
+
+class _JoinDialog extends StatefulWidget {
+  const _JoinDialog({required this.initial});
+
+  final String? initial;
+
+  @override
+  State<_JoinDialog> createState() => _JoinDialogState();
+}
+
+class _JoinDialogState extends State<_JoinDialog> {
+  late final link = TextEditingController(text: widget.initial);
+  late bool valid = widget.initial != null;
+
+  @override
+  void dispose() {
+    link.dispose();
+    super.dispose();
+  }
+
+  void submit() {
+    if (valid) Navigator.pop(context, link.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Join a shared playlist'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Paste the invite link a friend sent you. You\'ll both be able to add songs.'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: link,
+              autofocus: widget.initial == null,
+              textInputAction: TextInputAction.done,
+              onChanged: (v) => setState(() => valid = YtMusicWeb.parseInvite(v) != null),
+              onSubmitted: (_) => submit(),
+              decoration: InputDecoration(
+                labelText: 'Invite link',
+                border: const OutlineInputBorder(),
+                errorText: link.text.trim().isNotEmpty && !valid ? 'That isn\'t an invite link' : null,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(onPressed: valid ? submit : null, child: const Text('Join')),
+      ],
+    );
+  }
+}
 
 /// The ♥ button for the song that's playing.
 class LikeButton extends StatelessWidget {
