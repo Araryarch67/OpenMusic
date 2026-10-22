@@ -37,7 +37,15 @@ reaches the DAC as `S24_3LE` at 96 kHz and a CD-quality file as `S16_LE` at
 is restored afterwards, and the card is released even if the app is killed
 (`integration_test/zz_dac_test.dart`, opt-in). WASAPI Exclusive / bit-perfect
 on Windows (`audio-exclusive=yes` when **Bit-perfect mode** or **Exclusive
-mode** is on, volume pinned at 100%), tested on real Windows hardware. Also: output
+mode** is on, volume pinned at 100%), tested on real Windows hardware; shared
+WASAPI is reported as going through the system mixer, never as bit-perfect.
+Volume on Windows and Linux: a cubic slider (half way is −18 dB, as mpv's own),
+measured in what the real libmpv renders on Windows, including a fast slider
+drag, changes while paused, mute and unmute (`integration_test/zz_volume_test.dart`);
+the level is kept between launches, and the app is named OpenMusic in Windows'
+volume mixer and the Linux mixers. Themes (whole colour schemes) and any font
+from the device's font folders. FFmpeg fetched on first use where it isn't
+installed (`integration_test/zz_ffmpeg_download_test.dart`). Also: output
 device picker, output sample-rate override, SoX (VHQ) resampler when
 libswresample has it (high-quality swr settings otherwise), buffer size,
 gapless playback, ReplayGain (track / album), volume applied in 64-bit float (or bypassed in bit-perfect mode), room correction (impulse response through FFmpeg's `afir`), 10-band parametric equalizer

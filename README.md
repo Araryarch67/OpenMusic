@@ -1,5 +1,10 @@
 <div align="center">
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/icon/openmusic-transparent.svg">
+  <img src="assets/icon/openmusic-transparent-light.svg" width="128" height="128" alt="OpenMusic logo">
+</picture>
+
 # OpenMusic
 
 **Your own music and YouTube Music in one player, with hi-fi audio.**
@@ -42,12 +47,12 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 | **Hi-fi audio** | On desktop and Android: a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output, plus **native DSD to your DAC (DoP)** and **audio plugins** (VST, LV2, CLAP through Carla) on Linux. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio). |
 | **Play on TVs and speakers** | **Play on** sends the music to a TV, speaker or receiver on your network, DLNA / UPnP or AirPlay, from where it was; play, pause, seek, the queue and volume keep working from the app. |
 | **Fast** | YouTube songs start in about 0.3 s and the next one in the queue in under 20 ms (it's fetched ahead); Home appears at once on launch from the last session's shelves. Light on memory too: about 165 MB at rest on Linux. |
-| **Make it yours** | Pick an accent colour, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, set the text size, and on Linux make the window see-through so your compositor's blur shows behind it. |
+| **Make it yours** | Whole colour schemes, not just an accent: Default, Monochrome, Catppuccin (Mocha, Macchiato, Frappé, Latte), Everblush, Everforest (dark and light), Nord, Gruvbox, Tokyo Night, Dracula and Rosé Pine. Pick an accent on top, any font installed on your device (or dropped into the app's `fonts` folder; Figtree is OpenMusic's own), the text size in pixels, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, and on Linux make the window see-through so your compositor's blur shows behind it. |
 | **Downloads** | Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves. |
 | **Made for every screen** | Bottom tabs and a floating mini player on phones (swipe it to change song), a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward in the title bar, mouse side buttons, `Alt+←/→`. The window opens centred, sized to your screen. |
 | **Expanded, full-screen and mini player** | On desktop, like Spotify's: the cover fills the window (**Expanded player**) or the whole screen (`F11`, `Esc`), with the synced lyrics beside it at the press of **Lyrics**; or the window shrinks to a small always-on-top player. |
 | **System media controls** | The Android notification and lock screen, Control Center on iOS / macOS, and MPRIS on Linux (desktop media widgets, `playerctl`). |
-| **Discord, media keys, shortcuts** | Discord Rich Presence, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+V` to import a copied YouTube link). |
+| **Discord, media keys, shortcuts** | Discord Rich Presence, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+↑/↓` for volume, `Ctrl+V` to import a copied YouTube link). |
 
 ## Screenshots
 
@@ -105,6 +110,8 @@ What works, what is partial and how it was tested, item by item, is in **[Featur
 | iOS | AVPlayer | YouTube's player API, built-in extractor as a fallback |
 
 The equalizer, leveling and signal path need libmpv (Linux, Windows, Android); crossfeed, room correction and the output device choice are Linux and Windows only. yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
+
+Nothing else needs installing. The tag editor for MP3 / Ogg / WAV…, AirPlay, and casting formats a TV can't play use FFmpeg: a system one when there is one, otherwise the official static build (gyan.dev on Windows, johnvansickle.com on Linux, about 40 MB) is downloaded the first time one of them is used, checked against its published checksum and kept in the app's folder.
 
 Debug builds append every Flutter error with its full stack trace to `<app support dir>/errors.log` (on Linux, `~/.local/share/dev.openmusic.openmusic/errors.log`).
 
