@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -44,60 +43,6 @@ abstract final class YtDlp {
   static bool get supported => Platform.isLinux || Platform.isWindows || Platform.isMacOS;
 
   static Future<String?>? _exe;
-
-  /// Browser whose YouTube login yt-dlp reuses (e.g. "firefox"); null = anonymous.
-  /// Cookies are read from the browser on each call and never copied to disk.
-  static String? cookiesFromBrowser;
-
-  static List<String> get _cookieArgs =>
-      cookiesFromBrowser == null ? const [] : ['--cookies-from-browser', cookiesFromBrowser!];
-
-  /// Browsers yt-dlp can read logins from.
-  static const browsers = ['firefox', 'chrome', 'chromium', 'brave', 'edge', 'vivaldi', 'opera', 'safari'];
-
-  /// Supported browsers that look installed, best guess first.
-  static Future<List<String>> installedBrowsers() async {
-    const binaries = {
-      'firefox': ['firefox', 'firefox.exe'],
-      'chrome': ['google-chrome', 'google-chrome-stable', 'chrome.exe'],
-      'chromium': ['chromium', 'chromium-browser'],
-      'brave': ['brave', 'brave-browser', 'brave.exe'],
-      'edge': ['microsoft-edge', 'microsoft-edge-stable', 'msedge.exe'],
-      'vivaldi': ['vivaldi', 'vivaldi-stable'],
-      'opera': ['opera'],
-    };
-    final found = <String>[];
-    final lookup = Platform.isWindows ? 'where' : 'which';
-    for (final e in binaries.entries) {
-      for (final bin in e.value) {
-        try {
-          if ((await Process.run(lookup, [bin])).exitCode == 0) {
-            found.add(e.key);
-            break;
-          }
-        } catch (_) {}
-      }
-    }
-    if (Platform.isMacOS) found.add('safari');
-    return found;
-  }
-
-  /// Lists a playlist / feed without resolving each video (`--flat-playlist -J`).
-  static Future<Map<String, dynamic>> flatPlaylist(String url, {int? limit}) async {
-    final exe = await executable();
-    if (exe == null) throw StateError('yt-dlp is not available on this device.');
-    final r = await Process.run(exe, [
-      '--no-warnings',
-      ..._cookieArgs,
-      '--flat-playlist',
-      '-J',
-      if (limit != null) ...['--playlist-items', '1:$limit'],
-      '--',
-      url,
-    ], stdoutEncoding: utf8);
-    if (r.exitCode != 0) throw StateError(_lastError(r.stderr as String));
-    return jsonDecode(r.stdout as String) as Map<String, dynamic>;
-  }
 
   static String _lastError(String stderr) {
     final line = stderr.trim().split(RegExp(r'\r?\n')).lastWhere((l) => l.isNotEmpty, orElse: () => 'yt-dlp failed');
@@ -180,7 +125,6 @@ abstract final class YtDlp {
     final r = await Process.run(exe, [
       '--no-warnings',
       '--no-playlist',
-      ..._cookieArgs,
       '-f',
       aac ? 'ba[acodec^=mp4a][format_id!*=drc]/ba[ext=m4a]/ba' : _format,
       '-O',
