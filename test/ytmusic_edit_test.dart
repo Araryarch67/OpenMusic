@@ -168,6 +168,77 @@ void main() {
     expect((await fake((_) => page('PAsomething_else')).web.playlistPage('PLx')).collaborative, isFalse);
   });
 
+  test('reads a long playlist page after page', () async {
+    Map<String, dynamic> row(String id) => {
+      'musicResponsiveListItemRenderer': {
+        'flexColumns': [
+          {
+            'musicResponsiveListItemFlexColumnRenderer': {
+              'text': {
+                'runs': [
+                  {
+                    'text': 'Song $id',
+                    'navigationEndpoint': {
+                      'watchEndpoint': {'videoId': id},
+                    },
+                  },
+                ],
+              },
+            },
+          },
+        ],
+      },
+    };
+    Map<String, dynamic> more(String token) => {
+      'continuationItemRenderer': {
+        'continuationEndpoint': {
+          'continuationCommand': {'token': token},
+        },
+      },
+    };
+    final pages = <Object?, Map<String, dynamic>>{
+      null: {
+        'contents': {
+          'musicPlaylistShelfRenderer': {
+            'contents': [row('a'), row('b'), more('t1')],
+          },
+        },
+      },
+      't1': {
+        'onResponseReceivedActions': [
+          {
+            'appendContinuationItemsAction': {
+              'continuationItems': [row('c'), more('t2')],
+            },
+          },
+        ],
+      },
+      't2': {
+        'onResponseReceivedActions': [
+          {
+            'appendContinuationItemsAction': {
+              'continuationItems': [row('d')],
+            },
+          },
+        ],
+      },
+    };
+    final web = YtMusicWeb(
+      cookies: '',
+      visitorData: '',
+      client: MockClient(
+        (req) async =>
+            http.Response.bytes(utf8.encode(jsonEncode(pages[(jsonDecode(req.body) as Map)['continuation']])), 200),
+      ),
+    );
+    expect((await web.playlistTracks('PLx')).map((t) => t.videoId), ['a', 'b', 'c', 'd']);
+    expect((await web.playlistTracks('PLx', limit: 3)).map((t) => t.videoId), [
+      'a',
+      'b',
+      'c',
+    ], reason: 'stops at the limit');
+  });
+
   test('radio parses the up-next queue', () async {
     final f = fake(
       (_) => {

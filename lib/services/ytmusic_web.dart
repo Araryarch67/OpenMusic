@@ -329,18 +329,33 @@ class YtMusicWeb {
     final res = await _send('browse', const {'browseId': 'FEmusic_liked_playlists'});
     final grid = _asMap(_deepFind(res, 'gridRenderer'));
     if (grid == null) return const [];
-    final out = <WebPlaylist>[];
+    return _allPages(grid, grid['items'], limit, (item) {
+      final row = _asMap(item['musicTwoRowItemRenderer']);
+      final playlist = row == null ? null : _playlistOf(row);
+      // Liked music has its own collection; "Episodes for later" (SE) can't hold songs.
+      return playlist?.id == 'LM' || playlist?.id == 'SE' ? null : playlist;
+    });
+  }
+
+  /// Every item of a paged list, read with [read]: the first page's [items],
+  /// then one continuation after another until [limit] are read or none are left.
+  Future<List<T>> _allPages<T>(
+    Map<String, dynamic> renderer,
+    Object? items,
+    int limit,
+    T? Function(Map<String, dynamic> item) read,
+  ) async {
+    final out = <T>[];
     void take(Object? items) {
       for (final item in _list(items)) {
-        final row = _asMap(_asMap(item)?['musicTwoRowItemRenderer']);
-        final playlist = row == null ? null : _playlistOf(row);
-        // Liked music has its own collection; "Episodes for later" (SE) can't hold songs.
-        if (playlist != null && playlist.id != 'LM' && playlist.id != 'SE') out.add(playlist);
+        if (_asMap(item) case final m?) {
+          if (read(m) case final T value) out.add(value);
+        }
       }
     }
 
-    take(grid['items']);
-    var token = _nextToken(grid);
+    take(items);
+    var token = _nextToken(renderer);
     while (token != null && out.length < limit) {
       final page = await _send('browse', {'continuation': token});
       final items = _continuationItems(page);
@@ -598,25 +613,10 @@ class YtMusicWeb {
     final res = await _send('browse', const {'browseId': 'FEmusic_library_corpus_artists'});
     final shelf = _asMap(_deepFind(res, 'musicShelfRenderer'));
     if (shelf == null) return const [];
-    final out = <WebArtist>[];
-    void take(Object? items) {
-      for (final item in _list(items)) {
-        final row = _asMap(_asMap(item)?['musicResponsiveListItemRenderer']);
-        final artist = row == null ? null : artistOf(row);
-        if (artist != null) out.add(artist);
-      }
-    }
-
-    take(shelf['contents']);
-    var token = _nextToken(shelf);
-    while (token != null && out.length < limit) {
-      final page = await _send('browse', {'continuation': token});
-      final items = _continuationItems(page);
-      if (items.isEmpty) break;
-      take(items);
-      token = _nextToken({'items': items});
-    }
-    return out;
+    return _allPages(shelf, shelf['contents'], limit, (item) {
+      final row = _asMap(item['musicResponsiveListItemRenderer']);
+      return row == null ? null : artistOf(row);
+    });
   }
 
   /// One row of the subscriptions list: name, channel id, "N subscribers".
@@ -642,36 +642,20 @@ class YtMusicWeb {
     final header = _asMap(_deepFind(res, 'musicResponsiveHeaderRenderer'));
     final headerArtist = _text(header?['straplineTextOne']) ?? '';
     final headerArt = _lastThumb(_at(header, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']));
-    final out = <WebTrack>[];
-    void take(Object? items) {
-      for (final item in _list(items)) {
-        final row = _asMap(_asMap(item)?['musicResponsiveListItemRenderer']);
-        final track = row == null ? null : _songOf(row);
-        if (track == null) continue;
-        out.add(
-          WebTrack(
-            videoId: track.videoId,
-            title: track.title,
-            artist: track.artist.isEmpty ? headerArtist : track.artist,
-            duration: track.duration,
-            artworkUrl: track.artworkUrl ?? headerArt,
-            setVideoId: _at(row, const ['playlistItemData', 'playlistSetVideoId']) as String?,
-            artistId: track.artistId,
-          ),
-        );
-      }
-    }
-
-    take(shelf['contents'] ?? shelf['items']);
-    var token = _nextToken(shelf);
-    while (token != null && out.length < limit) {
-      final page = await _send('browse', {'continuation': token});
-      final items = _continuationItems(page);
-      if (items.isEmpty) break;
-      take(items);
-      token = _nextToken({'items': items});
-    }
-    return out;
+    return _allPages(shelf, shelf['contents'] ?? shelf['items'], limit, (item) {
+      final row = _asMap(item['musicResponsiveListItemRenderer']);
+      final track = row == null ? null : _songOf(row);
+      if (track == null) return null;
+      return WebTrack(
+        videoId: track.videoId,
+        title: track.title,
+        artist: track.artist.isEmpty ? headerArtist : track.artist,
+        duration: track.duration,
+        artworkUrl: track.artworkUrl ?? headerArt,
+        setVideoId: _at(row, const ['playlistItemData', 'playlistSetVideoId']) as String?,
+        artistId: track.artistId,
+      );
+    });
   }
 
   /// The carousels of a browse page: `FEmusic_home` (personal when signed in),
