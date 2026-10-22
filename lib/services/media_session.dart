@@ -26,6 +26,8 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
       p.durationStream.listen((_) => _publishItem()),
     ]);
     _c.addListener(_onController);
+    _publishItem();
+    _publishState();
   }
 
   /// Starts the session; null where the platform has none (Windows).
@@ -53,6 +55,9 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
   final _subs = <StreamSubscription<Object?>>[];
   String? _shownId;
   bool? _shownPlaying;
+
+  /// Swiped away from Recents: the session is put away until something plays.
+  bool _closed = false;
 
   void _onController() {
     if (_c.currentTrack?.id != _shownId) _publishItem();
@@ -82,7 +87,16 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
   void _publishState() {
     final p = _c.player;
     final playing = _c.isPlaying;
+    if (playing) _closed = false;
+    // Android's service forgets the song when it's stopped and started again,
+    // which left a notification with only the app's name. Starting to play
+    // sends the song along every time.
+    if (playing && _shownPlaying != true && mediaItem.value != null) mediaItem.add(mediaItem.value);
     _shownPlaying = playing;
+    // Idle tells Android the session is over: it stops the service and takes
+    // the notification down. Only when nothing is left to play, not when the
+    // player is idle for a moment between or after songs.
+    final over = _closed || _c.currentTrack == null;
     playbackState.add(
       PlaybackState(
         controls: [
@@ -92,10 +106,12 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
         ],
         systemActions: const {MediaAction.seek},
         androidCompactActionIndices: const [0, 1, 2],
-        processingState: _c.casting
+        processingState: over
+            ? AudioProcessingState.idle
+            : _c.casting
             ? (_c.isBuffering ? AudioProcessingState.buffering : AudioProcessingState.ready)
             : switch (p.processingState) {
-                ProcessingState.idle => AudioProcessingState.idle,
+                ProcessingState.idle => AudioProcessingState.ready,
                 ProcessingState.loading => AudioProcessingState.loading,
                 ProcessingState.buffering => AudioProcessingState.buffering,
                 ProcessingState.ready => AudioProcessingState.ready,
@@ -131,6 +147,15 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
 
   @override
   Future<void> stop() => _c.pause();
+
+  /// The app was swiped away from Recents. Closing it stops the music and
+  /// takes the notification down; leaving it with Home keeps playing.
+  @override
+  Future<void> onTaskRemoved() async {
+    _closed = true;
+    await _c.pause();
+    _publishState();
+  }
 
   @override
   Future<void> seek(Duration position) => _c.seek(position);
