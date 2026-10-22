@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -207,6 +208,26 @@ void main() {
       expect(server.playlists.keys, ['PL1']);
       expect(server.playlists['PL1']!.rows.map((r) => r.$1), ['a', 'b']);
       expect(server.liked, ['z', 'l1']);
+    }, () => server.client);
+  });
+
+  test('the library on screen loads on first look and shows edits at once', () async {
+    final server = FakeYtMusic();
+    await http.runWithClient(() async {
+      final a = YoutubeMusicAccount();
+      expect(a.libraryNow, isNull, reason: 'signed out');
+      await a.connectWebSession(cookies: 'SAPISID=x; __Secure-3PAPISID=x', visitorData: 'v', authUser: '0');
+      final loaded = Completer<void>();
+      a.addListener(() {
+        if (a.libraryNow != null && !loaded.isCompleted) loaded.complete();
+      });
+      expect(a.libraryNow, isNull, reason: 'still loading');
+      await loaded.future;
+      expect(a.libraryNow!.playlists.map((p) => p.title), ['Road trip']);
+      await a.createPlaylist('Gym');
+      expect(a.libraryNow!.playlists.map((p) => p.title), ['Gym', 'Road trip']);
+      await a.signOut();
+      expect(a.libraryNow, isNull);
     }, () => server.client);
   });
 

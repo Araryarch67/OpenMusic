@@ -31,16 +31,7 @@ class HomePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
-    final account = c.ytMusic;
-    return ListenableBuilder(
-      listenable: account,
-      builder: (context, _) => FutureBuilder<YoutubeMusicLibrary?>(
-        future: account.isSignedIn
-            ? account.library().then<YoutubeMusicLibrary?>((l) => l, onError: (Object _) => null)
-            : Future.value(null),
-        builder: (context, snap) => _build(context, c, snap.data),
-      ),
-    );
+    return ListenableBuilder(listenable: c.ytMusic, builder: (context, _) => _build(context, c, c.ytMusic.libraryNow));
   }
 
   Widget _build(BuildContext context, PlayerController c, YoutubeMusicLibrary? online) {

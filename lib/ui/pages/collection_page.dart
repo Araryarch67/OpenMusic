@@ -37,7 +37,7 @@ class CollectionPage extends StatelessWidget {
         switch (collection.kind) {
           CollectionKind.allSongs => c.allSongs,
           CollectionKind.youtube => c.youtubeDownloads,
-          CollectionKind.remote => switch (c.ytMusic.likedNow) {
+          CollectionKind.remote => switch (c.ytMusic.libraryNow?.liked) {
             final liked? when collection.id == likedMusicId => Collection(
               kind: collection.kind,
               id: likedMusicId,

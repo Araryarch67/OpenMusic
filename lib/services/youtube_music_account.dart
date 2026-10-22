@@ -534,8 +534,14 @@ class YoutubeMusicAccount extends ChangeNotifier {
     return l;
   }
 
-  /// Liked music as shown now, likes since the last load included.
-  List<Track>? get likedNow => _libraryNow?.liked;
+  /// The library as shown now, edits since the last load included; null when
+  /// signed out or before the first load, which this starts. Listeners hear
+  /// when it changes.
+  YoutubeMusicLibrary? get libraryNow {
+    if (!isSignedIn) return null;
+    if (_library == null) library().ignore();
+    return _libraryNow;
+  }
 
   void _forgetLibrary() {
     _library = null;
