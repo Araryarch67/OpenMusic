@@ -255,7 +255,13 @@ Future<void> addToPlaylist(BuildContext context, List<Track> tracks) async {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(n == 0 ? 'Already in ${p.name}' : '$what to ${p.name}')));
     case final RemotePlaylist p:
-      await _report(context, () => account.addToPlaylist(p.id, tracks), '$what to ${p.title}');
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        final n = await account.addToPlaylist(p.id, tracks);
+        messenger.showSnackBar(SnackBar(content: Text(n == 0 ? 'Already in ${p.title}' : '$what to ${p.title}')));
+      } catch (e) {
+        messenger.showSnackBar(SnackBar(content: Text('$e')));
+      }
   }
 }
 

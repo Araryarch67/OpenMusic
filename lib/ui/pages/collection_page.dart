@@ -23,13 +23,30 @@ class CollectionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
+    // Liked music changes with every like, wherever in the app it's made.
+    if (collection.id == likedMusicId) {
+      return ListenableBuilder(listenable: c.ytMusic, builder: (context, _) => _build(context, c));
+    }
+    return _build(context, c);
+  }
+
+  Widget _build(BuildContext context, PlayerController c) {
     final shell = ShellScope.of(context);
     // Re-resolve so tag scans / removals show up while the page is open.
     final live =
         switch (collection.kind) {
           CollectionKind.allSongs => c.allSongs,
           CollectionKind.youtube => c.youtubeDownloads,
-          CollectionKind.remote => null,
+          CollectionKind.remote => switch (c.ytMusic.likedNow) {
+            final liked? when collection.id == likedMusicId => Collection(
+              kind: collection.kind,
+              id: likedMusicId,
+              title: collection.title,
+              subtitle: collection.subtitle,
+              tracks: liked,
+            ),
+            _ => null,
+          },
           CollectionKind.playlist => c.playlistById(collection.id),
           CollectionKind.artist => c.artistNamed(collection.title),
           CollectionKind.album => c.albums.where((a) => a.title == collection.title).firstOrNull,

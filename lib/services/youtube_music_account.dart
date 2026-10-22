@@ -37,6 +37,14 @@ class YoutubeMusicLibrary {
 
   /// Artists the account follows; each opens as its songs ([RemotePlaylist.browseId]).
   final List<RemotePlaylist> artists;
+
+  YoutubeMusicLibrary copyWith({List<Track>? liked, List<RemotePlaylist>? playlists, List<RemotePlaylist>? artists}) =>
+      YoutubeMusicLibrary(
+        liked: liked ?? this.liked,
+        playlists: playlists ?? this.playlists,
+        recent: recent,
+        artists: artists ?? this.artists,
+      );
 }
 
 class RemotePlaylist {
@@ -60,6 +68,15 @@ class RemotePlaylist {
 
   /// Card subtitle as YouTube Music words it ("Album • Artist").
   final String? subtitle;
+
+  RemotePlaylist copyWith({String? title, int? count, String? thumbnailUrl}) => RemotePlaylist(
+    id: id,
+    title: title ?? this.title,
+    count: count ?? this.count,
+    thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
+    browseId: browseId,
+    subtitle: subtitle,
+  );
 
   factory RemotePlaylist.fromJson(Map<String, dynamic> j) => RemotePlaylist(
     id: j['id'] as String,
@@ -101,6 +118,19 @@ class RemotePlaylistDetails {
 
   /// Track id → the row's id in the playlist (needed to remove it).
   final Map<String, String> rowIds;
+
+  RemotePlaylistDetails copyWith({
+    List<Track>? tracks,
+    bool? collaborative,
+    PlaylistPrivacy? privacy,
+    Map<String, String>? rowIds,
+  }) => RemotePlaylistDetails(
+    tracks: tracks ?? this.tracks,
+    owned: owned,
+    collaborative: collaborative ?? this.collaborative,
+    privacy: privacy ?? this.privacy,
+    rowIds: rowIds ?? this.rowIds,
+  );
 }
 
 /// A titled row of the discover pages: songs, or albums and playlists.
@@ -280,7 +310,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
       _web?.close();
       _web = null;
       _webCookies = _webVisitor = null;
-      _library = null;
+      _forgetLibrary();
       _discover = _discovered = null; // another account's shelves
       accountName = (j['channel'] ?? j['uploader']) as String?;
       if (accountName == 'YouTube Music' || accountName == 'Music') accountName = null;
@@ -320,7 +350,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
       YtDlp.cookiesFromBrowser = null;
       accountName = profile.name ?? accountName;
       avatarUrl = profile.avatarUrl ?? avatarUrl;
-      _library = null;
+      _forgetLibrary();
       _discover = _discovered = null; // another account's shelves
       await _save();
       return true;
@@ -644,7 +674,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
     _web = null;
     _webCookies = _webVisitor = null;
     _webUser = '0';
-    _library = null;
+    _forgetLibrary();
     _discover = _discovered = null; // another account's shelves
     notifyListeners();
     await _save();
@@ -707,6 +737,14 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   Future<YoutubeMusicLibrary>? _library;
 
+  /// The library as last loaded, with every edit since applied to it: edits
+  /// show the moment they're made instead of after a reload.
+  YoutubeMusicLibrary? _libraryNow;
+
+  /// Bumped by every edit, so a load that started before one can tell its
+  /// copy is out of date.
+  int _edits = 0;
+
   /// Liked music, playlists and recent history; loaded once until [refresh].
   Future<YoutubeMusicLibrary> library({bool refresh = false}) {
     if (refresh || _library == null) {
@@ -719,15 +757,63 @@ class YoutubeMusicAccount extends ChangeNotifier {
   }
 
   Future<YoutubeMusicLibrary> _loadLibrary() async {
+    final edits = _edits;
     final (liked, lists, recent, artists) = await (likedMusic(), playlists(), history(), followedArtists()).wait;
+    // Edited while loading: YouTube Music may not have had the edit yet when
+    // it answered, so keep what's shown and look again once edits settle.
+    final now = _libraryNow;
+    if (edits != _edits) {
+      Timer(const Duration(seconds: 3), () => library(refresh: true).ignore());
+      if (now != null) return now;
+    }
     _likedIds
       ..clear()
       ..addAll(liked.map((t) => t.id));
     _followedIds
       ..clear()
       ..addAll(artists.map((a) => a.id));
+    final l = _libraryNow = YoutubeMusicLibrary(liked: liked, playlists: lists, recent: recent, artists: artists);
     notifyListeners();
-    return YoutubeMusicLibrary(liked: liked, playlists: lists, recent: recent, artists: artists);
+    return l;
+  }
+
+  /// Liked music as shown now, likes since the last load included.
+  List<Track>? get likedNow => _libraryNow?.liked;
+
+  void _forgetLibrary() {
+    _library = null;
+    _libraryNow = null;
+    _details.clear();
+  }
+
+  /// Applies an edit to the library on screen right away. [edit] is false
+  /// for news from YouTube Music itself, which a load needn't wait out.
+  void _patchLibrary(YoutubeMusicLibrary Function(YoutubeMusicLibrary l) change, {bool edit = true}) {
+    if (edit) _edits++;
+    final now = _libraryNow;
+    if (now == null) return;
+    final next = _libraryNow = change(now);
+    _library = Future.value(next);
+    notifyListeners();
+  }
+
+  void _patchPlaylist(String id, RemotePlaylist Function(RemotePlaylist p) change, {bool edit = true}) => _patchLibrary(
+    (l) => l.copyWith(playlists: [for (final p in l.playlists) p.id == id ? change(p) : p]),
+    edit: edit,
+  );
+
+  /// Playlists opened before, as last seen (edits included): they open at
+  /// once and are brought up to date behind the scenes.
+  final _details = <String, RemotePlaylistDetails>{};
+
+  RemotePlaylistDetails? cachedPlaylist(String id) => _details[id];
+
+  void _patchDetails(String id, RemotePlaylistDetails Function(RemotePlaylistDetails d) change) {
+    _edits++;
+    final d = _details[id];
+    if (d == null) return;
+    _details[id] = change(d);
+    notifyListeners();
   }
 
   /// Followed artists. Only YouTube Music's own API (the in-app sign-in) lists them.
@@ -774,12 +860,21 @@ class YoutubeMusicAccount extends ChangeNotifier {
   /// undone if YouTube Music refuses.
   Future<void> setLiked(Track t, bool liked) async {
     liked ? _likedIds.add(t.id) : _likedIds.remove(t.id);
-    notifyListeners();
+    final before = _libraryNow?.liked;
+    _patchLibrary(
+      (l) => l.copyWith(
+        liked: [
+          if (liked) t,
+          for (final x in l.liked)
+            if (x.id != t.id) x,
+        ],
+      ),
+    );
     try {
       await _editing((web) => web.rate(t.videoId!, liked: liked));
-      library(refresh: true).ignore();
     } catch (_) {
       liked ? _likedIds.remove(t.id) : _likedIds.add(t.id);
+      if (before != null) _patchLibrary((l) => l.copyWith(liked: before));
       notifyListeners();
       rethrow;
     }
@@ -792,10 +887,24 @@ class YoutubeMusicAccount extends ChangeNotifier {
   /// undone if YouTube Music refuses.
   Future<void> setFollowing(String artistId, bool following) async {
     following ? _followedIds.add(artistId) : _followedIds.remove(artistId);
+    if (!following) {
+      _patchLibrary(
+        (l) => l.copyWith(
+          artists: [
+            for (final a in l.artists)
+              if (a.id != artistId) a,
+          ],
+        ),
+      );
+    }
     notifyListeners();
     try {
       await _editing((web) => web.setFollowing(artistId, following: following));
-      library(refresh: true).ignore();
+      // A new artist's name and picture come from YouTube Music's list.
+      if (following) {
+        final artists = await followedArtists();
+        if (artists.any((a) => a.id == artistId)) _patchLibrary((l) => l.copyWith(artists: artists));
+      }
     } catch (_) {
       following ? _followedIds.remove(artistId) : _followedIds.add(artistId);
       notifyListeners();
@@ -803,18 +912,43 @@ class YoutubeMusicAccount extends ChangeNotifier {
     }
   }
 
+  /// A library playlist as YouTube Music has it now; [cachedPlaylist] shows
+  /// it until then. Notifies when it differs from what was shown.
   Future<RemotePlaylistDetails> playlistDetails(String playlistId) async {
-    if (!usesWebSession) return RemotePlaylistDetails(tracks: await playlistTracks(playlistId), owned: false);
-    final page = await _webClient.playlistPage(playlistId, limit: _maxItems);
-    final tracks = _webTracks(page.tracks);
-    return RemotePlaylistDetails(
-      tracks: tracks,
-      owned: page.owned,
-      collaborative: page.collaborative,
-      privacy: page.privacy,
-      rowIds: {for (var i = 0; i < page.tracks.length; i++) tracks[i].id: ?page.tracks[i].setVideoId},
-    );
+    final edits = _edits;
+    final RemotePlaylistDetails d;
+    if (usesWebSession) {
+      final page = await _webClient.playlistPage(playlistId, limit: _maxItems);
+      final tracks = _webTracks(page.tracks);
+      d = RemotePlaylistDetails(
+        tracks: tracks,
+        owned: page.owned,
+        collaborative: page.collaborative,
+        privacy: page.privacy,
+        rowIds: {for (var i = 0; i < page.tracks.length; i++) tracks[i].id: ?page.tracks[i].setVideoId},
+      );
+    } else {
+      d = RemotePlaylistDetails(tracks: await playlistTracks(playlistId), owned: false);
+    }
+    // Edited meanwhile: the copy with the edit is newer than this answer.
+    final shown = _details[playlistId];
+    if (edits != _edits && shown != null) return shown;
+    _details[playlistId] = d;
+    if (shown != null && !_sameDetails(shown, d)) notifyListeners();
+    // The library's song count and cover follow the playlist.
+    final listed = _libraryNow?.playlists.where((p) => p.id == playlistId).firstOrNull;
+    if (listed != null && listed.count != d.tracks.length) {
+      _patchPlaylist(playlistId, (p) => p.copyWith(count: d.tracks.length), edit: false);
+    }
+    return d;
   }
+
+  static bool _sameDetails(RemotePlaylistDetails a, RemotePlaylistDetails b) =>
+      a.owned == b.owned &&
+      a.collaborative == b.collaborative &&
+      a.privacy == b.privacy &&
+      listEquals([for (final t in a.tracks) t.id], [for (final t in b.tracks) t.id]) &&
+      mapEquals(a.rowIds, b.rowIds);
 
   /// Creates a playlist (optionally with songs) and returns its id.
   Future<String> createPlaylist(
@@ -825,31 +959,82 @@ class YoutubeMusicAccount extends ChangeNotifier {
     final id = await _editing(
       (web) => web.createPlaylist(title, privacy: privacy, videoIds: [for (final t in tracks) ?t.videoId]),
     );
-    library(refresh: true).ignore();
+    final playlist = RemotePlaylist(
+      id: id,
+      title: title,
+      count: tracks.length,
+      thumbnailUrl: tracks.firstOrNull?.artworkUrl,
+    );
+    _patchLibrary((l) => l.copyWith(playlists: [playlist, ...l.playlists]));
+    // Its rows' ids come with the first look at it.
+    _details[id] = RemotePlaylistDetails(tracks: tracks, owned: true, privacy: privacy);
     return id;
   }
 
   Future<void> renamePlaylist(String id, String title) async {
     await _editing((web) => web.renamePlaylist(id, title));
-    library(refresh: true).ignore();
+    _patchPlaylist(id, (p) => p.copyWith(title: title));
   }
 
-  Future<void> setPlaylistPrivacy(String id, PlaylistPrivacy privacy) =>
-      _editing((web) => web.setPlaylistPrivacy(id, privacy));
+  Future<void> setPlaylistPrivacy(String id, PlaylistPrivacy privacy) async {
+    await _editing((web) => web.setPlaylistPrivacy(id, privacy));
+    _patchDetails(id, (d) => d.copyWith(privacy: privacy));
+  }
 
   Future<void> deletePlaylist(String id) async {
     await _editing((web) => web.deletePlaylist(id));
-    library(refresh: true).ignore();
+    _details.remove(id);
+    _patchLibrary(
+      (l) => l.copyWith(
+        playlists: [
+          for (final p in l.playlists)
+            if (p.id != id) p,
+        ],
+      ),
+    );
   }
 
-  Future<void> addToPlaylist(String id, List<Track> tracks) async {
-    await _editing((web) => web.addToPlaylist(id, [for (final t in tracks) ?t.videoId]));
-    library(refresh: true).ignore();
+  /// Adds songs to a playlist; they show in it (and in its count) as soon as
+  /// YouTube Music takes them, no reload. Songs already in it are skipped.
+  /// Returns how many were added.
+  Future<int> addToPlaylist(String id, List<Track> tracks) async {
+    final rows = await _editing((web) => web.addToPlaylist(id, [for (final t in tracks) ?t.videoId]));
+    final rowOf = {for (final r in rows) r.videoId: r.setVideoId};
+    final shown = _details[id];
+    // The reply names the rows it made; without that, anything not shown yet.
+    final have = {...?shown?.tracks.map((t) => t.id)};
+    final added = [
+      for (final t in tracks)
+        if (rows.isEmpty ? have.add(t.id) : rowOf.containsKey(t.videoId)) t,
+    ];
+    if (added.isEmpty) return 0;
+    _patchDetails(
+      id,
+      (d) => d.copyWith(
+        tracks: [...d.tracks, ...added],
+        rowIds: {...d.rowIds, for (final t in added) t.id: ?rowOf[t.videoId]},
+      ),
+    );
+    _patchPlaylist(
+      id,
+      (p) => p.copyWith(count: p.count + added.length, thumbnailUrl: p.thumbnailUrl ?? added.first.artworkUrl),
+    );
+    return added.length;
   }
 
   Future<void> removeFromPlaylist(String id, Track t, String rowId) async {
     await _editing((web) => web.removeFromPlaylist(id, [(videoId: t.videoId!, setVideoId: rowId)]));
-    library(refresh: true).ignore();
+    _patchDetails(
+      id,
+      (d) => d.copyWith(
+        tracks: [
+          for (final x in d.tracks)
+            if (x.id != t.id) x,
+        ],
+        rowIds: {...d.rowIds}..remove(t.id),
+      ),
+    );
+    _patchPlaylist(id, (p) => p.copyWith(count: p.count > 0 ? p.count - 1 : 0));
   }
 
   Future<void> movePlaylistItem(String id, String rowId, String? beforeRowId) =>
@@ -857,12 +1042,25 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   /// The link that lets friends add songs to the playlist. A private playlist
   /// is made unlisted first: YouTube Music keeps collaborators out of private ones.
-  Future<String> inviteLink(String id, {required PlaylistPrivacy? privacy}) => _editing((web) async {
-    if (privacy == PlaylistPrivacy.private) await web.setPlaylistPrivacy(id, PlaylistPrivacy.unlisted);
-    return web.collaborationLink(id);
-  });
+  Future<String> inviteLink(String id, {required PlaylistPrivacy? privacy}) async {
+    final link = await _editing((web) async {
+      if (privacy == PlaylistPrivacy.private) await web.setPlaylistPrivacy(id, PlaylistPrivacy.unlisted);
+      return web.collaborationLink(id);
+    });
+    _patchDetails(
+      id,
+      (d) => d.copyWith(
+        collaborative: true,
+        privacy: privacy == PlaylistPrivacy.private ? PlaylistPrivacy.unlisted : null,
+      ),
+    );
+    return link;
+  }
 
-  Future<void> stopCollaboration(String id) => _editing((web) => web.stopCollaboration(id));
+  Future<void> stopCollaboration(String id) async {
+    await _editing((web) => web.stopCollaboration(id));
+    _patchDetails(id, (d) => d.copyWith(collaborative: false));
+  }
 
   /// Joins a friend's playlist from their invite link and returns its id.
   Future<String> joinPlaylist(String inviteLink) async {
@@ -872,7 +1070,13 @@ class YoutubeMusicAccount extends ChangeNotifier {
     final mine = await library().then((l) => l.playlists, onError: (Object _) => const <RemotePlaylist>[]);
     if (mine.any((p) => p.id == invite.playlistId)) return invite.playlistId;
     await _editing((web) => web.joinCollaboration(invite.playlistId, invite.token));
-    library(refresh: true).ignore();
+    // Its name and cover come from YouTube Music's list.
+    try {
+      final lists = await playlists();
+      _patchLibrary((l) => l.copyWith(playlists: lists));
+    } catch (_) {
+      library(refresh: true).ignore();
+    }
     return invite.playlistId;
   }
 

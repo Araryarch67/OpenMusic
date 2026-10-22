@@ -52,8 +52,13 @@ Future<void> signInToYoutubeMusic(BuildContext context) async {
   }
 }
 
-Collection likedCollection(List<Track> liked) =>
-    Collection(kind: CollectionKind.remote, title: 'Liked music', subtitle: 'YouTube Music', tracks: liked);
+Collection likedCollection(List<Track> liked) => Collection(
+  kind: CollectionKind.remote,
+  id: likedMusicId,
+  title: 'Liked music',
+  subtitle: 'YouTube Music',
+  tracks: liked,
+);
 
 /// "Join a shared playlist": joins from a friend's invite link, then opens it.
 Future<void> joinSharedPlaylist(BuildContext context) async {
@@ -563,52 +568,65 @@ class LibraryPlaylistPage extends StatefulWidget {
 }
 
 class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
+  late final YoutubeMusicAccount _account = PlayerScope.read(context).ytMusic;
   late String _title = widget.playlist.title;
-  late Future<RemotePlaylistDetails> _details = _load();
-  RemotePlaylistDetails? _shown;
 
-  Future<RemotePlaylistDetails> _load() => PlayerScope.read(context).ytMusic.playlistDetails(widget.playlist.id);
+  /// Opened before: shown at once from the copy kept then, edits included.
+  late RemotePlaylistDetails? _shown = _account.cachedPlaylist(widget.playlist.id);
+  Object? _error;
 
-  void _reload() => setState(() => _details = _load());
+  @override
+  void initState() {
+    super.initState();
+    _account.addListener(_follow);
+    _reload();
+  }
 
-  void _removed(Track t) {
-    final d = _shown;
-    if (d == null) return;
-    setState(() {
-      _shown = RemotePlaylistDetails(
-        tracks: [
-          for (final x in d.tracks)
-            if (x.id != t.id) x,
-        ],
-        owned: d.owned,
-        collaborative: d.collaborative,
-        privacy: d.privacy,
-        rowIds: {...d.rowIds}..remove(t.id),
-      );
-      _details = Future.value(_shown!);
-    });
+  @override
+  void dispose() {
+    _account.removeListener(_follow);
+    super.dispose();
+  }
+
+  /// Songs added or removed anywhere in the app show here as they happen.
+  void _follow() {
+    final d = _account.cachedPlaylist(widget.playlist.id);
+    if (d != null && !identical(d, _shown)) setState(() => _shown = d);
+  }
+
+  /// Brings the playlist up to date; what's shown stays until then.
+  Future<void> _reload() async {
+    try {
+      final d = await _account.playlistDetails(widget.playlist.id);
+      if (mounted) {
+        setState(() {
+          _shown = d;
+          _error = null;
+        });
+      }
+    } catch (e) {
+      if (mounted && _shown == null) setState(() => _error = e);
+    }
   }
 
   Future<void> _rename() async {
-    final account = PlayerScope.read(context).ytMusic;
+    final account = _account;
     final messenger = ScaffoldMessenger.of(context);
     final answer = await askPlaylistName(context, initialTitle: _title, askPrivacy: false);
     if (answer == null) return;
     try {
       await account.renamePlaylist(widget.playlist.id, answer.title);
-      setState(() => _title = answer.title);
+      if (mounted) setState(() => _title = answer.title);
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
   }
 
   Future<void> _setPrivacy(PlaylistPrivacy privacy) async {
-    final account = PlayerScope.read(context).ytMusic;
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await account.setPlaylistPrivacy(widget.playlist.id, privacy);
+      await _account.setPlaylistPrivacy(widget.playlist.id, privacy);
       messenger.showSnackBar(SnackBar(content: Text('Playlist is now ${privacy.label.toLowerCase()}')));
-      _reload();
     } catch (e) {
       messenger.showSnackBar(SnackBar(content: Text('$e')));
     }
@@ -623,7 +641,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
   }
 
   Future<void> _delete() async {
-    final account = PlayerScope.read(context).ytMusic;
+    final account = _account;
     final messenger = ScaffoldMessenger.of(context);
     final history = ShellScope.of(context).history;
     final navigator = Navigator.of(context);
@@ -654,97 +672,93 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<RemotePlaylistDetails>(
-      future: _details,
-      builder: (context, snap) {
-        final d = snap.data;
-        if (d == null) {
-          return PageScaffold(
-            title: _title,
-            slivers: [
-              SliverToBoxAdapter(child: _Header(_title)),
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.all(48),
-                  child: Center(
-                    child: snap.hasError
-                        ? Column(
-                            children: [
-                              Text('Couldn\'t load this playlist: ${snap.error}'),
-                              TextButton(onPressed: _reload, child: const Text('Try again')),
-                            ],
-                          )
-                        : const CircularProgressIndicator(strokeWidth: 2.5),
-                  ),
-                ),
-              ),
-            ],
-          );
-        }
-        _shown = d;
-        final collection = Collection(
-          kind: CollectionKind.remote,
-          title: _title,
-          subtitle: [
-            if (d.privacy != null) d.privacy!.label,
-            if (d.collaborative) 'Shared',
-            'YouTube Music',
-          ].join(' · '),
-          tracks: d.tracks,
-        );
-        return PlaylistEditScope(
-          canRemove: (t) => (d.owned || d.collaborative) && d.rowIds.containsKey(t.id),
-          remove: (context, t) async {
-            final row = d.rowIds[t.id];
-            if (row != null && await removeFromRemotePlaylist(context, widget.playlist.id, t, row)) _removed(t);
-          },
-          child: CollectionPage(
-            collection: collection,
-            actions: [
-              if (d.owned)
-                PopupMenuButton<VoidCallback>(
-                  // Over the whole window, so a click anywhere (sidebar included) closes it.
-                  useRootNavigator: true,
-                  tooltip: 'Edit playlist',
-                  icon: const Icon(Icons.more_horiz_rounded, size: 30),
-                  onSelected: (action) => action(),
-                  itemBuilder: (_) => [
-                    PopupMenuItem(
-                      value: () => _invite(d),
-                      child: const MenuRow(leading: Icon(Icons.group_add_outlined), title: Text('Invite friends')),
-                    ),
-                    if (d.collaborative)
-                      PopupMenuItem(
-                        value: _stopSharing,
-                        child: const MenuRow(leading: Icon(Icons.group_off_outlined), title: Text('Stop sharing')),
-                      ),
-                    PopupMenuItem(
-                      value: _rename,
-                      child: const MenuRow(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
-                    ),
-                    for (final p in PlaylistPrivacy.values)
-                      if (p != d.privacy)
-                        PopupMenuItem(
-                          value: () => _setPrivacy(p),
-                          child: MenuRow(
-                            leading: Icon(switch (p) {
-                              PlaylistPrivacy.public => Icons.public_rounded,
-                              PlaylistPrivacy.unlisted => Icons.link_rounded,
-                              PlaylistPrivacy.private => Icons.lock_outline_rounded,
-                            }),
-                            title: Text('Make ${p.label.toLowerCase()}'),
+    final d = _shown;
+    if (d == null) {
+      return PageScaffold(
+        title: _title,
+        slivers: [
+          SliverToBoxAdapter(child: _Header(_title)),
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.all(48),
+              child: Center(
+                child: _error != null
+                    ? Column(
+                        children: [
+                          Text('Couldn\'t load this playlist: $_error'),
+                          TextButton(
+                            onPressed: () {
+                              setState(() => _error = null);
+                              _reload();
+                            },
+                            child: const Text('Try again'),
                           ),
-                        ),
-                    PopupMenuItem(
-                      value: _delete,
-                      child: const MenuRow(leading: Icon(Icons.delete_outline_rounded), title: Text('Delete playlist')),
-                    ),
-                  ],
-                ),
-            ],
+                        ],
+                      )
+                    : const CircularProgressIndicator(strokeWidth: 2.5),
+              ),
+            ),
           ),
-        );
+        ],
+      );
+    }
+    final collection = Collection(
+      kind: CollectionKind.remote,
+      title: _title,
+      subtitle: [if (d.privacy != null) d.privacy!.label, if (d.collaborative) 'Shared', 'YouTube Music'].join(' · '),
+      tracks: d.tracks,
+    );
+    return PlaylistEditScope(
+      canRemove: (t) => (d.owned || d.collaborative) && d.rowIds.containsKey(t.id),
+      remove: (context, t) async {
+        final row = d.rowIds[t.id];
+        if (row != null) await removeFromRemotePlaylist(context, widget.playlist.id, t, row);
       },
+      child: CollectionPage(
+        collection: collection,
+        actions: [
+          if (d.owned)
+            PopupMenuButton<VoidCallback>(
+              // Over the whole window, so a click anywhere (sidebar included) closes it.
+              useRootNavigator: true,
+              tooltip: 'Edit playlist',
+              icon: const Icon(Icons.more_horiz_rounded, size: 30),
+              onSelected: (action) => action(),
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: () => _invite(d),
+                  child: const MenuRow(leading: Icon(Icons.group_add_outlined), title: Text('Invite friends')),
+                ),
+                if (d.collaborative)
+                  PopupMenuItem(
+                    value: _stopSharing,
+                    child: const MenuRow(leading: Icon(Icons.group_off_outlined), title: Text('Stop sharing')),
+                  ),
+                PopupMenuItem(
+                  value: _rename,
+                  child: const MenuRow(leading: Icon(Icons.edit_outlined), title: Text('Rename')),
+                ),
+                for (final p in PlaylistPrivacy.values)
+                  if (p != d.privacy)
+                    PopupMenuItem(
+                      value: () => _setPrivacy(p),
+                      child: MenuRow(
+                        leading: Icon(switch (p) {
+                          PlaylistPrivacy.public => Icons.public_rounded,
+                          PlaylistPrivacy.unlisted => Icons.link_rounded,
+                          PlaylistPrivacy.private => Icons.lock_outline_rounded,
+                        }),
+                        title: Text('Make ${p.label.toLowerCase()}'),
+                      ),
+                    ),
+                PopupMenuItem(
+                  value: _delete,
+                  child: const MenuRow(leading: Icon(Icons.delete_outline_rounded), title: Text('Delete playlist')),
+                ),
+              ],
+            ),
+        ],
+      ),
     );
   }
 }

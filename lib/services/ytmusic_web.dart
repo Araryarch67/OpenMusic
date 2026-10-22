@@ -416,10 +416,21 @@ class YtMusicWeb {
     {'action': 'ACTION_SET_PLAYLIST_PRIVACY', 'playlistPrivacy': privacy.api},
   ]);
 
-  /// Adds songs to the end; ones already in the playlist are skipped.
-  Future<void> addToPlaylist(String playlistId, List<String> videoIds) => _edit(playlistId, [
-    for (final id in videoIds) {'action': 'ACTION_ADD_VIDEO', 'addedVideoId': id, 'dedupeOption': 'DEDUPE_OPTION_SKIP'},
-  ]);
+  /// Adds songs to the end; ones already in the playlist are skipped. Returns
+  /// the rows made, as far as the reply lists them (ytmusicapi reads them the
+  /// same way), so they can be removed again without reloading the playlist.
+  Future<List<({String videoId, String setVideoId})>> addToPlaylist(String playlistId, List<String> videoIds) async {
+    final res = await _edit(playlistId, [
+      for (final id in videoIds)
+        {'action': 'ACTION_ADD_VIDEO', 'addedVideoId': id, 'dedupeOption': 'DEDUPE_OPTION_SKIP'},
+    ]);
+    return [
+      for (final r in _list(res['playlistEditResults']))
+        if (_asMap(_asMap(r)?['playlistEditVideoAddedResultData']) case final d?)
+          if ((d['videoId'], d['setVideoId']) case (final String videoId, final String setVideoId))
+            (videoId: videoId, setVideoId: setVideoId),
+    ];
+  }
 
   /// Removes rows (see [WebTrack.setVideoId]).
   Future<void> removeFromPlaylist(String playlistId, List<({String videoId, String setVideoId})> rows) => _edit(
@@ -516,11 +527,12 @@ class YtMusicWeb {
     final id = row['videoId'];
     final title = _text(row['title']);
     if (id is! String || title == null) return null;
-    final byline = _text(row['longBylineText']) ?? _text(row['shortBylineText']) ?? '';
+    final by = _byline(_runs(row['longBylineText'] ?? row['shortBylineText']));
     return WebTrack(
       videoId: id,
       title: title,
-      artist: byline.split(' • ').first.trim(),
+      artist: by.names.join(', '),
+      artistId: by.id,
       duration: _duration(_text(row['lengthText'])),
       artworkUrl: _lastThumb(_at(row, const ['thumbnail', 'thumbnails'])),
     );
@@ -711,12 +723,30 @@ class YtMusicWeb {
     // Rows sit in shelves or item sections depending on the layout YouTube
     // serves; take every result row wherever it is, once.
     final seen = <String>{};
+    // Songs listed under an artist's top result leave the artist out ("Song • 2:13").
+    final underArtist = {
+      if (top?.kind == WebResultKind.artist)
+        for (final node in _deepFindAll(card, 'musicResponsiveListItemRenderer'))
+          if (_asMap(node) case final row?) ?_songOf(row)?.videoId,
+    };
     for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer')) {
       final hit = _asMap(node) == null ? null : resultOf(_asMap(node)!);
       if (hit == null || !seen.add(hit.browseId ?? hit.track!.videoId)) continue;
       switch (hit.kind) {
         case WebResultKind.song:
-          songs.add(hit.track!);
+          final t = hit.track!;
+          songs.add(
+            t.artist.isEmpty && underArtist.contains(t.videoId)
+                ? WebTrack(
+                    videoId: t.videoId,
+                    title: t.title,
+                    artist: top!.title,
+                    duration: t.duration,
+                    artworkUrl: t.artworkUrl,
+                    artistId: top.browseId,
+                  )
+                : t,
+          );
         case WebResultKind.artist:
           artists.add(hit);
         case WebResultKind.album:
@@ -824,20 +854,13 @@ class YtMusicWeb {
     }
     final videoId = _at(run, const ['navigationEndpoint', 'watchEndpoint', 'videoId']);
     if (videoId is! String) return null;
-    final artistRun = _list(_asMap(card['subtitle'])?['runs']).whereType<Map<String, dynamic>>().where(_isArtistRun);
-    final artistId = _at(artistRun.firstOrNull, const ['navigationEndpoint', 'browseEndpoint', 'browseId']);
+    final by = _byline(_runs(card['subtitle']));
     return WebResult(
       kind: WebResultKind.song,
       title: title,
       subtitle: subtitle,
       thumbnailUrl: thumb,
-      track: WebTrack(
-        videoId: videoId,
-        title: title,
-        artist: artistRun.map((r) => r['text'] as String).join(', '),
-        artworkUrl: thumb,
-        artistId: artistId is String ? artistId : null,
-      ),
+      track: WebTrack(videoId: videoId, title: title, artist: by.names.join(', '), artworkUrl: thumb, artistId: by.id),
     );
   }
 
@@ -860,14 +883,12 @@ class YtMusicWeb {
   static WebTrack? _twoRowSong(Map<String, dynamic> data, String videoId) {
     final title = _text(data['title']);
     if (title == null) return null;
-    final artists = [
-      for (final run in _list(_at(data, const ['subtitle', 'runs'])).whereType<Map<String, dynamic>>())
-        if (_isArtistRun(run)) run['text'] as String,
-    ];
+    final by = _byline(_runs(data['subtitle']));
     return WebTrack(
       videoId: videoId,
       title: title,
-      artist: artists.join(', '),
+      artist: by.names.join(', '),
+      artistId: by.id,
       artworkUrl: _lastThumb(
         _at(data, const ['thumbnailRenderer', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']),
       ),
@@ -922,9 +943,8 @@ class YtMusicWeb {
     videoId ??= _at(data, const ['navigationEndpoint', 'watchEndpoint', 'videoId']);
 
     String? title;
-    String? artistId;
-    final artists = <String>[];
-    for (final column in _list(data['flexColumns'])) {
+    var by = (names: const <String>[], id: null as String?);
+    for (final (i, column) in _list(data['flexColumns']).indexed) {
       final runs = _list(_at(column, const ['musicResponsiveListItemFlexColumnRenderer', 'text', 'runs']))
           .whereType<Map<String, dynamic>>()
           .toList();
@@ -933,34 +953,24 @@ class YtMusicWeb {
       if (title == null && _asMap(first['navigationEndpoint'])?['watchEndpoint'] != null) {
         title = first['text'] as String?;
         videoId ??= _at(first, const ['navigationEndpoint', 'watchEndpoint', 'videoId']);
+        continue;
       }
-      if (artists.isEmpty) {
-        artists.addAll([
-          for (final run in runs)
-            if (_isArtistRun(run)) run['text'] as String,
-        ]);
-        for (final run in runs.where(_isArtistRun)) {
-          final id = _at(run, const ['navigationEndpoint', 'browseEndpoint', 'browseId']);
-          if (id is String && id.startsWith('UC')) {
-            artistId ??= id;
-            break;
-          }
-        }
-      }
+      // The first column is the title even when it links nowhere.
+      if (i > 0 && by.names.isEmpty) by = _byline(runs);
     }
     title ??= _firstRunText(_list(data['flexColumns']).firstOrNull);
     if (title == null || videoId is! String) return null;
     return WebTrack(
       videoId: videoId,
       title: title.trim(),
-      artist: artists.isEmpty ? _looseArtist(data) : artists.join(', '),
+      artist: by.names.join(', '),
       duration:
           _duration(
             _text(_at(data, const ['fixedColumns', 0, 'musicResponsiveListItemFixedColumnRenderer', 'text'])),
           ) ??
           _flexDuration(data),
       artworkUrl: _lastThumb(_at(data, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails'])),
-      artistId: artistId,
+      artistId: by.id,
     );
   }
 
@@ -975,30 +985,59 @@ class YtMusicWeb {
     return null;
   }
 
-  static bool _isArtistRun(Map<String, dynamic> run) {
-    if (run['text'] is! String) return false;
-    final pageType = _at(run, const [
-      'navigationEndpoint',
-      'browseEndpoint',
-      'browseEndpointContextSupportedConfigs',
-      'browseEndpointContextMusicConfig',
-      'pageType',
-    ]);
-    return pageType == 'MUSIC_PAGE_TYPE_ARTIST' || pageType == 'MUSIC_PAGE_TYPE_UNKNOWN';
+  /// The word a subtitle starts with to say what the row is.
+  static const _kinds = {
+    'Song', 'Video', 'Episode', 'Podcast', 'Single', 'EP', 'Album', 'Playlist', 'Artist', 'Profile', 'Station', //
+  };
+
+  /// "38M plays", "4.1M views", "1.6K likes", "11.7K subscribers"; "2019"; "3:45".
+  static final _notAName = RegExp(
+    r'^([\d.,]+\s?[KMB]?\s+(views?|plays?|likes?|subscribers?|watching)|\d{4}|\d+(:\d\d){1,2})$',
+    caseSensitive: false,
+  );
+
+  /// Who made a song, from one subtitle line ("Song • A & B • Album • 3:45").
+  /// The "•" separate fields and the artists are the first field with names
+  /// in it: linked artists, the channel that uploaded a video, and names
+  /// YouTube Music left unlinked. The kind of row, the album, counts, the
+  /// year and the length are not names. [id] is the first artist with a page
+  /// of songs (an uploader's channel has none in YouTube Music).
+  static ({List<String> names, String? id}) _byline(List<Map<String, dynamic>> runs) {
+    final names = <String>[];
+    String? id;
+    var field = 0;
+    for (final run in runs) {
+      final text = run['text'];
+      if (text is! String) continue;
+      final name = text.trim();
+      if (name == '•') {
+        if (names.isNotEmpty) break;
+        field++;
+        continue;
+      }
+      final link = _asMap(run['navigationEndpoint']);
+      if (link == null) {
+        if (name.isEmpty || RegExp(r'^[·&,]$').hasMatch(name) || _notAName.hasMatch(name)) continue;
+        if (field == 0 && _kinds.contains(name)) continue;
+        names.add(name);
+        continue;
+      }
+      final browse = _asMap(link['browseEndpoint']);
+      final browseId = browse?['browseId'];
+      final page = _at(browse, const [
+        'browseEndpointContextSupportedConfigs',
+        'browseEndpointContextMusicConfig',
+        'pageType',
+      ]);
+      if (browseId is! String || browseId.startsWith('MPRE') || (page is String && page.contains('ALBUM'))) continue;
+      names.add(name);
+      if (page == 'MUSIC_PAGE_TYPE_ARTIST' || page == 'MUSIC_PAGE_TYPE_UNKNOWN') id ??= browseId;
+    }
+    return (names: names, id: id);
   }
 
-  /// Fallback when no column marks its links as artists: the second column
-  /// minus separators. Rare, but old rows and uploads hit it.
-  static String _looseArtist(Map<String, dynamic> data) {
-    final columns = _list(data['flexColumns']);
-    if (columns.length < 2) return '';
-    return _list(_at(columns[1], const ['musicResponsiveListItemFlexColumnRenderer', 'text', 'runs']))
-        .whereType<Map<String, dynamic>>()
-        .map((run) => run['text'])
-        .whereType<String>()
-        .where((t) => t.trim().isNotEmpty && t.trim() != '•' && t.trim() != '&' && t.trim() != ',')
-        .join(', ');
-  }
+  static List<Map<String, dynamic>> _runs(Object? text) =>
+      _list(_asMap(text)?['runs']).whereType<Map<String, dynamic>>().toList();
 
   /// One playlist card from the library grid.
   static WebPlaylist? _playlistOf(Map<String, dynamic> data) {

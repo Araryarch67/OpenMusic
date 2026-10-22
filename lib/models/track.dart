@@ -202,6 +202,9 @@ class Collection {
   Track? get cover => tracks.isEmpty ? null : tracks.first;
 }
 
+/// [Collection.id] of YouTube Music's "Liked music".
+const likedMusicId = 'LM';
+
 enum CollectionKind {
   allSongs('Playlist'),
   playlist('Playlist'),
