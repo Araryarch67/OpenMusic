@@ -17,7 +17,8 @@ Future<void> showTagEditor(BuildContext context, Track track) async {
   try {
     tags = await Metadata.readTags(track);
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('Couldn\'t read this file\'s info: $e')));
+    debugPrint('Reading tags failed: $e');
+    messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t read this song\'s info')));
     return;
   }
   if (!context.mounted) return;
@@ -30,7 +31,8 @@ Future<void> showTagEditor(BuildContext context, Track track) async {
     await c.editTags(track, saved);
     messenger.showSnackBar(const SnackBar(content: Text('Saved')));
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('Couldn\'t save: $e')));
+    debugPrint('Saving tags failed: $e');
+    messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t save the changes')));
   }
 }
 
@@ -89,7 +91,8 @@ class _TagEditorDialogState extends State<_TagEditorDialog> {
           _coverMime = found.mime;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('Cover search failed: $e');
       messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t reach the Cover Art Archive')));
     } finally {
       if (mounted) setState(() => _searching = false);
@@ -124,7 +127,13 @@ class _TagEditorDialogState extends State<_TagEditorDialog> {
                     child: SizedBox.square(
                       dimension: 72,
                       child: _cover != null
-                          ? Image.memory(_cover!, fit: BoxFit.cover)
+                          // A picked cover can be a 3000 px scan: decode only what the box shows.
+                          ? Image.memory(
+                              _cover!,
+                              key: const ValueKey('new-cover'),
+                              fit: BoxFit.cover,
+                              cacheWidth: (72 * MediaQuery.devicePixelRatioOf(context)).round(),
+                            )
                           : Artwork(track: widget.track, size: 72),
                     ),
                   ),

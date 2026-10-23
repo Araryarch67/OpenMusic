@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -43,21 +45,44 @@ abstract final class Metadata {
   static final _pendingAccents = <String, Future<Color>>{};
 
   /// Returns [track] with title/artist/album/duration filled from its tags.
-  static Future<Track> enrich(Track track) async {
+  static Future<Track> enrich(Track track) =>
+      track.path == null ? Future.value(track.copyWith(tagged: true)) : Isolate.run(() => _enrichNow(track));
+
+  /// [enrich] for many songs: batches of files are read in a few background
+  /// isolates side by side (an isolate per file cost more than reading it).
+  /// [onBatch] gets each batch as it's done.
+  static Future<void> enrichAll(List<Track> tracks, void Function(List<Track> enriched) onBatch) async {
+    const batch = 48;
+    var next = 0;
+    Future<void> worker() async {
+      while (next < tracks.length) {
+        final chunk = tracks.sublist(next, math.min(next + batch, tracks.length));
+        next += chunk.length;
+        onBatch(await _enrichBatch(chunk));
+      }
+    }
+
+    final workers = (Platform.numberOfProcessors ~/ 2).clamp(1, 4);
+    await Future.wait([for (var i = 0; i < workers; i++) worker()]);
+  }
+
+  /// A function of its own, so the isolate is sent the batch alone: a closure
+  /// written inside [enrichAll] would carry `onBatch` (and the player behind it) along.
+  static Future<List<Track>> _enrichBatch(List<Track> chunk) =>
+      Isolate.run(() => [for (final t in chunk) _enrichNow(t)]);
+
+  static Track _enrichNow(Track track) {
     final path = track.path;
     if (path == null) return track.copyWith(tagged: true);
     try {
-      final tags = await Isolate.run(() {
-        final m = readMetadata(File(path));
-        return (m.title, m.artist ?? m.albumArtist, m.album, m.duration, m.trackNumber, m.discNumber);
-      });
+      final m = readMetadata(File(path));
       return track.copyWith(
-        title: _clean(tags.$1),
-        artist: _clean(tags.$2),
-        album: _clean(tags.$3),
-        duration: tags.$4,
-        trackNumber: tags.$5,
-        discNumber: tags.$6,
+        title: _clean(m.title),
+        artist: _clean(m.artist ?? m.albumArtist),
+        album: _clean(m.album),
+        duration: m.duration,
+        trackNumber: m.trackNumber,
+        discNumber: m.discNumber,
         tagged: true,
       );
     } catch (_) {
@@ -222,15 +247,58 @@ abstract final class Metadata {
     });
   }
 
-  static Future<Uint8List?> _loadArtwork(Track track) async {
+  static Future<Uint8List?> _loadArtwork(Track track) {
     final path = track.path;
     if (path == null) return _networkArtwork(track.artworkUrl);
+    final done = Completer<Uint8List?>();
+    _fileArtQueue.add((path, done));
+    if (_fileArtReaders < 2) {
+      _fileArtReaders++;
+      // After this frame: the rows that scrolled into view all ask first.
+      Timer.run(_readFileArt);
+    }
+    return done.future;
+  }
+
+  /// Covers waiting to be read from their files.
+  static final _fileArtQueue = <(String, Completer<Uint8List?>)>[];
+  static int _fileArtReaders = 0;
+
+  /// Reads the queue a batch per isolate, not a cover per isolate: a list
+  /// scrolling into view asks for twenty at once, and starting an isolate
+  /// cost the UI thread about as much as reading the cover did.
+  static Future<void> _readFileArt() async {
     try {
-      return await Isolate.run(() => _embeddedPicture(path) ?? _sidecarImage(path));
-    } catch (_) {
-      return null;
+      while (_fileArtQueue.isNotEmpty) {
+        final batch = _fileArtQueue.take(8).toList();
+        _fileArtQueue.removeRange(0, batch.length);
+        List<Uint8List?> found;
+        try {
+          found = await _readCovers([for (final (path, _) in batch) path]);
+        } catch (_) {
+          found = List.filled(batch.length, null);
+        }
+        for (var i = 0; i < batch.length; i++) {
+          batch[i].$2.complete(found[i]);
+        }
+      }
+    } finally {
+      _fileArtReaders--;
     }
   }
+
+  static Future<List<Uint8List?>> _readCovers(List<String> paths) => Isolate.run(
+    () => [
+      for (final path in paths)
+        () {
+          try {
+            return _embeddedPicture(path) ?? _sidecarImage(path);
+          } catch (_) {
+            return null;
+          }
+        }(),
+    ],
+  );
 
   /// One connection pool for every cover: a fresh client per image would pay
   /// a TLS handshake each time.
@@ -295,14 +363,18 @@ abstract final class Metadata {
   }) async {
     final http.Client c = client ?? _artHttp;
     String quote(String s) => '"${s.replaceAllMapped(RegExp(r'["\\]'), (m) => '\\${m[0]}')}"';
-    final res = await c.get(
-      Uri.https('musicbrainz.org', '/ws/2/release-group/', {
-        'query': 'releasegroup:${quote(album)} AND artist:${quote(artist)}',
-        'fmt': 'json',
-        'limit': '5',
-      }),
-      headers: _coverHeaders,
-    );
+    final search = Uri.https('musicbrainz.org', '/ws/2/release-group/', {
+      'query': 'releasegroup:${quote(album)} AND artist:${quote(artist)}',
+      'fmt': 'json',
+      'limit': '5',
+    });
+    // MusicBrainz turns away some requests with 503 when it's busy (about one
+    // in five, even one every few seconds) and asks clients to try again shortly.
+    var res = await c.get(search, headers: _coverHeaders);
+    for (var wait = 1; res.statusCode == 503 && wait <= 2; wait++) {
+      await Future<void>.delayed(Duration(seconds: wait));
+      res = await c.get(search, headers: _coverHeaders);
+    }
     if (res.statusCode != 200) throw HttpException('MusicBrainz ${res.statusCode}');
     final groups = ((jsonDecode(utf8.decode(res.bodyBytes)) as Map)['release-groups'] as List? ?? const [])
         .cast<Map<String, dynamic>>()
@@ -344,7 +416,8 @@ abstract final class Metadata {
     ];
     for (final c in candidates) {
       final f = File(c);
-      if (f.existsSync()) return f.readAsBytesSync();
+      // A cover, not a 100 MB scan someone named cover.png.
+      if (f.existsSync() && f.lengthSync() < 32 << 20) return f.readAsBytesSync();
     }
     return null;
   }

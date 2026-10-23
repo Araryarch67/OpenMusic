@@ -15,10 +15,17 @@ const _maxCardWidth = 240.0;
 ///  * Wider: exactly one row whose cards stretch to fill the width; anything that
 ///    doesn't fit is reachable through "Show all".
 class Shelf extends StatelessWidget {
-  const Shelf({super.key, required this.title, required this.cards, this.onShowAll});
+  Shelf({super.key, required this.title, required List<Widget> cards, this.onShowAll})
+    : count = cards.length,
+      card = ((i) => cards[i]);
+
+  /// Cards made only when shown: a shelf of every album in the library can
+  /// hold thousands, and a desktop row shows a handful.
+  const Shelf.builder({super.key, required this.title, required this.count, required this.card, this.onShowAll});
 
   final String title;
-  final List<Widget> cards;
+  final int count;
+  final Widget Function(int index) card;
 
   /// Overrides the default "Show all" (a grid of [cards]).
   final VoidCallback? onShowAll;
@@ -26,14 +33,15 @@ class Shelf extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shell = ShellScope.of(context);
-    if (cards.isEmpty) return const SizedBox.shrink();
+    if (count == 0) return const SizedBox.shrink();
     return LayoutBuilder(
       builder: (context, constraints) {
         const hPad = 14.0;
         final available = constraints.maxWidth - hPad * 2;
         final columns = math.max(2, (available / _minCardWidth).floor());
-        final overflow = cards.length > columns;
-        void showAll() => onShowAll != null ? onShowAll!() : shell.open(CardGridPage(title: title, cards: cards));
+        final overflow = count > columns;
+        void showAll() =>
+            onShowAll != null ? onShowAll!() : shell.open(CardGridPage.builder(title: title, count: count, card: card));
 
         final header = SectionTitle(title, onShowAll: shell.compact || overflow || onShowAll != null ? showAll : null);
         if (shell.compact) {
@@ -47,8 +55,8 @@ class Shelf extends StatelessWidget {
                 child: ListView.builder(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 6),
-                  itemCount: cards.length,
-                  itemBuilder: (_, i) => SizedBox(width: cardWidth, child: cards[i]),
+                  itemCount: count,
+                  itemBuilder: (_, i) => SizedBox(width: cardWidth, child: card(i)),
                 ),
               ),
             ],
@@ -63,7 +71,9 @@ class Shelf extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: hPad),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
-                children: [for (final card in cards.take(columns)) SizedBox(width: cardWidth, child: card)],
+                children: [
+                  for (var i = 0; i < math.min(columns, count); i++) SizedBox(width: cardWidth, child: card(i)),
+                ],
               ),
             ),
           ],
@@ -75,10 +85,15 @@ class Shelf extends StatelessWidget {
 
 /// "Show all" destination: every card in a grid that reflows with the width.
 class CardGridPage extends StatelessWidget {
-  const CardGridPage({super.key, required this.title, required this.cards});
+  CardGridPage({super.key, required this.title, required List<Widget> cards})
+    : count = cards.length,
+      card = ((i) => cards[i]);
+
+  const CardGridPage.builder({super.key, required this.title, required this.count, required this.card});
 
   final String title;
-  final List<Widget> cards;
+  final int count;
+  final Widget Function(int index) card;
 
   @override
   Widget build(BuildContext context) {
@@ -108,8 +123,8 @@ class CardGridPage extends StatelessWidget {
                   crossAxisCount: columns,
                   mainAxisExtent: cardWidth + _cardChrome,
                 ),
-                itemCount: cards.length,
-                itemBuilder: (_, i) => cards[i],
+                itemCount: count,
+                itemBuilder: (_, i) => card(i),
               ),
             );
           },

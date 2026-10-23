@@ -51,6 +51,25 @@ void main() {
     expect(found, isNull);
   });
 
+  test('asks MusicBrainz again when it is busy (503)', () async {
+    var searches = 0;
+    final found = await Metadata.findCoverOnline(
+      'Daft Punk',
+      'Discovery',
+      client: MockClient((req) async {
+        if (req.url.host != 'musicbrainz.org') {
+          return http.Response.bytes(jpeg, 200, headers: {'content-type': 'image/jpeg'});
+        }
+        if (++searches == 1) return http.Response('', 503);
+        return groups([
+          {'id': 'x', 'score': 100},
+        ]);
+      }),
+    );
+    expect(searches, 2);
+    expect(found?.bytes, jpeg);
+  });
+
   test('throws when MusicBrainz is down, so the UI can say so', () {
     expect(
       Metadata.findCoverOnline('a', 'b', client: MockClient((_) async => http.Response('', 503))),

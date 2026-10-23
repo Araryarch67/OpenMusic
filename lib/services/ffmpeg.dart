@@ -87,7 +87,7 @@ abstract final class Ffmpeg {
   static Future<String> _fetch() async {
     final source = _source;
     if (source == null) throw StateError('FFmpeg isn\'t installed. Install it to use this.');
-    onDownload?.call('Downloading FFmpeg for this, once (about 40 MB)…');
+    onDownload?.call('Getting this ready: a one-time download (about 40 MB)…');
     final target = await _localFile();
     final work = await Directory.systemTemp.createTemp('openmusic-ffmpeg');
     try {
@@ -109,8 +109,10 @@ abstract final class Ffmpeg {
             .firstOrNull;
         if (exe == null) return false;
         await target.parent.create(recursive: true);
-        await exe.copy(target.path);
-        if (!Platform.isWindows) await Process.run('chmod', ['755', target.path]);
+        // Into place in one step: a copy cut short would otherwise be taken for ffmpeg from then on.
+        final part = await exe.copy('${target.path}.part');
+        if (!Platform.isWindows) await Process.run('chmod', ['755', part.path]);
+        await part.rename(target.path);
         return true;
       }
 

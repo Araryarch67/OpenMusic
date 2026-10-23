@@ -65,7 +65,11 @@ class Track {
     title: json['title'] as String,
     artist: json['artist'] as String,
     album: json['album'] as String?,
-    duration: json['durationMs'] == null ? null : Duration(milliseconds: json['durationMs'] as int),
+    // Older versions could save a length of 0 (see PlayerController._correctDuration): unknown, not 0:00.
+    duration: switch (json['durationMs']) {
+      final int ms when ms > 0 => Duration(milliseconds: ms),
+      _ => null,
+    },
     trackNumber: json['trackNumber'] as int?,
     discNumber: json['discNumber'] as int?,
     start: json['startMs'] == null ? null : Duration(milliseconds: json['startMs'] as int),

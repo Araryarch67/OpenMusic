@@ -15,6 +15,10 @@ setup and one obvious control:
   above it in plain words.
 - UI looks like a streaming app: dark, the only colour comes from real cover
   art (`AccentBuilder`), no decorative gradients, no emoji, no "AI" styling.
+- Error messages the user sees (SnackBars, error lines) are one calm, plain
+  sentence: "Couldn't play Song", "No internet connection. Try again." Never
+  append an exception, mpv / yt-dlp output, an HTTP code or a URL; those go
+  to `debugPrint`.
 
 ## Layout
 
@@ -23,8 +27,10 @@ lib/
   models/track.dart            Track (local file, cue slice or YouTube song), Collection
   services/
     player_controller.dart     Queue, shuffle (done in Dart, see below), autoplay, library
+    library_store.dart         The library's own file (library.json), read and written in an isolate
+    private_files.dart         The app's 0700 folder; atomic writes, 0600 secrets (the Google session)
     audio_engine.dart          Every mpv audio setting + SignalPath read-back
-    lyrics.dart                LRC parser; .lrc file → embedded tag → LRCLIB
+    lyrics.dart                .lrc / embedded tag, then YouTube Music, LRCLIB, Better Lyrics, NetEase, lyrics.ovh
     metadata.dart              Tag reading, cover art, tag editor (FLAC and MP4 in-process, others via ffmpeg)
     dlna.dart                  DLNA / UPnP: SSDP search, AVTransport control, the LAN server the TV fetches from
     cast.dart                  A cast session (DLNA or AirPlay): follows position, pause, a song's end
@@ -68,6 +74,18 @@ test/                          Unit and widget tests
   menu is open.
 - Autoplay: `PlayerController._maybeAutoplay` appends the radio of the current
   song when the queue is down to its last two songs.
+- The library is saved in its own file by `LibraryStore` (it moved out of
+  SharedPreferences' `library.v1`), never encoded on the UI isolate.
+  Sorted lists, albums, artists and search keys come from `_LibraryViews`,
+  worked out once per library change: add new derived views there, not as
+  getters that sort `_library` on every call.
+- `PlayerController` notifies for everything (song change, play / pause,
+  buffering), several times a song. Widgets that need only part of it use
+  `PlayerSelect` (rebuilds when the selected value changes),
+  `VisiblePlayerBuilder` (skips pages that are covered) or
+  `libraryRevision` (library and playlists only), not `PlayerScope.of`.
+  `integration_test/big_library_test.dart` shows a regression (see
+  Performance budget).
 
 ## How audio works
 
@@ -186,6 +204,13 @@ It fails when:
 
 Raster (GPU) time can't be measured headless; check that on real hardware
 with `flutter run --profile` and DevTools.
+
+The same script takes another target: `tool/perf.sh
+--target=integration_test/big_library_test.dart` (8240 songs: load, a folder
+scan, song changes and scrolling, as `BIG …` lines) and
+`--target=integration_test/cpu_test.dart` (`CPU …`: one core's share while a
+song plays and while paused). Compare the old code and the new in two
+copies of the project, a couple of runs each.
 
 Memory: `tool/memory.sh [runs]` runs `integration_test/memory_test.dart` the
 same way (profile, headless, fresh process per run) and prints PSS / private /

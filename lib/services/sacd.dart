@@ -269,12 +269,31 @@ class SacdDisc {
     ];
   }
 
+  static final _discs = <String, (DateTime, int, SacdDisc?)>{};
+
+  /// [read], remembered while the image is unchanged: every queued song of
+  /// a disc asks for it, on the UI thread, and the tables of contents can
+  /// be hundreds of kilobytes.
+  static SacdDisc? _cached(String path) {
+    try {
+      final st = File(path).statSync();
+      final hit = _discs[path];
+      if (hit != null && hit.$1 == st.modified && hit.$2 == st.size) return hit.$3;
+      final disc = read(path);
+      _discs[path] = (st.modified, st.size, disc);
+      if (_discs.length > 8) _discs.remove(_discs.keys.first);
+      return disc;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// The song a library track (from [tracks]) refers to.
   static (SacdDisc, SacdTrack)? find(Track t) {
     final path = t.path;
     final m = RegExp(r'#sacd(\d+)$').firstMatch(t.id);
     if (path == null || m == null) return null;
-    final disc = read(path);
+    final disc = _cached(path);
     final number = int.parse(m[1]!);
     final track = disc?.area.tracks.where((x) => x.number == number).firstOrNull;
     return track == null ? null : (disc!, track);

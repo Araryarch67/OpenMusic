@@ -13,6 +13,7 @@ import 'shell_scope.dart';
 import 'cast_picker.dart';
 import 'theme.dart';
 import 'widgets/controls.dart';
+import 'widgets/menus.dart';
 import 'widgets/signal_path.dart';
 import 'widgets/stats_for_nerds.dart';
 import 'pages/lyrics_page.dart';
@@ -271,10 +272,7 @@ class DesktopPlayerBar extends StatelessWidget {
                                 _LinkText(
                                   track.artist,
                                   style: text.bodySmall?.copyWith(color: AppColors.textSecondary),
-                                  onTap: switch (c.artistNamed(track.artist)) {
-                                    final artist? => () => shell.openCollection(artist),
-                                    null => null,
-                                  },
+                                  onTap: openArtist(context, c, track),
                                 ),
                               ],
                             ),
@@ -305,16 +303,11 @@ class DesktopPlayerBar extends StatelessWidget {
               child: FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerRight,
+                // What's used all the time stays in sight; the views (side panel,
+                // mini, expanded, full screen) are one ⋯ away.
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (onToggleSidePanel != null)
-                      IconButton(
-                        tooltip: 'Now playing view',
-                        color: sidePanelOpen ? AppColors.accent : null,
-                        onPressed: onToggleSidePanel,
-                        icon: const Icon(Icons.view_sidebar_outlined, size: 20),
-                      ),
                     // In the expanded player, lyrics open beside the cover instead.
                     ListenableBuilder(
                       listenable: Listenable.merge([fullScreenPlayer, expandedPlayerLyrics]),
@@ -340,27 +333,10 @@ class DesktopPlayerBar extends StatelessWidget {
                     const CastButton(size: 20),
                     // The bar spans the whole window, so its own width decides (not the content area's).
                     if (MediaQuery.sizeOf(context).width > 860) const VolumeSlider(),
-                    IconButton(
-                      tooltip: 'Mini player',
-                      onPressed: () => setMiniPlayer(true),
-                      icon: const Icon(Icons.picture_in_picture_alt_rounded, size: 20),
-                    ),
-                    ValueListenableBuilder(
-                      valueListenable: fullScreenPlayer,
-                      builder: (context, on, _) => IconButton(
-                        tooltip: on ? 'Close expanded player' : 'Expanded player',
-                        color: on ? AppColors.accent : null,
-                        onPressed: track == null && !on ? null : () => showExpandedPlayer(!on),
-                        icon: Icon(on ? Icons.close_fullscreen_rounded : Icons.open_in_full_rounded, size: 18),
-                      ),
-                    ),
-                    ValueListenableBuilder(
-                      valueListenable: windowFullScreen,
-                      builder: (context, on, _) => IconButton(
-                        tooltip: on ? 'Exit full screen' : 'Full screen',
-                        onPressed: track == null && !on ? null : () => setFullScreenPlayer(!on),
-                        icon: Icon(on ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded, size: 22),
-                      ),
+                    _ViewsMenu(
+                      hasTrack: track != null,
+                      sidePanelOpen: sidePanelOpen,
+                      onToggleSidePanel: onToggleSidePanel,
                     ),
                   ],
                 ),
@@ -371,6 +347,65 @@ class DesktopPlayerBar extends StatelessWidget {
       ),
     );
   }
+}
+
+/// The player bar's ⋯: the now-playing side panel, the mini player, the
+/// expanded player and full screen.
+class _ViewsMenu extends StatelessWidget {
+  const _ViewsMenu({required this.hasTrack, required this.sidePanelOpen, required this.onToggleSidePanel});
+
+  final bool hasTrack;
+  final bool sidePanelOpen;
+
+  /// Null when the window is too narrow for the side panel.
+  final VoidCallback? onToggleSidePanel;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: Listenable.merge([fullScreenPlayer, windowFullScreen]),
+    builder: (context, _) {
+      final expanded = fullScreenPlayer.value, full = windowFullScreen.value;
+      PopupMenuItem<VoidCallback> item(IconData icon, String label, VoidCallback onTap, {bool on = false}) =>
+          PopupMenuItem(
+            value: onTap,
+            child: MenuRow(
+              leading: Icon(icon, color: on ? AppColors.accent : null),
+              title: Text(label),
+            ),
+          );
+      return PopupMenuButton<VoidCallback>(
+        // Over the whole window, so a click anywhere closes it.
+        useRootNavigator: true,
+        tooltip: 'More views',
+        icon: Icon(Icons.more_horiz_rounded, size: 22, color: expanded || full ? AppColors.accent : null),
+        onSelected: (open) => open(),
+        itemBuilder: (_) => [
+          if (onToggleSidePanel case final toggle?)
+            item(
+              Icons.view_sidebar_outlined,
+              sidePanelOpen ? 'Hide now playing view' : 'Now playing view',
+              toggle,
+              on: sidePanelOpen,
+            ),
+          item(Icons.picture_in_picture_alt_rounded, 'Mini player', () => setMiniPlayer(true)),
+          if (hasTrack || expanded)
+            item(
+              expanded ? Icons.close_fullscreen_rounded : Icons.open_in_full_rounded,
+              expanded ? 'Close expanded player' : 'Expanded player',
+              () => showExpandedPlayer(!expanded),
+              on: expanded,
+            ),
+          if (hasTrack || full)
+            item(
+              full ? Icons.fullscreen_exit_rounded : Icons.fullscreen_rounded,
+              full ? 'Exit full screen' : 'Full screen',
+              () => setFullScreenPlayer(!full),
+              on: full,
+            ),
+        ],
+      );
+    },
+  );
 }
 
 /// Text that underlines on hover and navigates on click.
@@ -425,7 +460,7 @@ class NowPlayingSidePanel extends StatelessWidget {
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
     final track = c.currentTrack;
-    final next = c.upNext.firstOrNull;
+    final next = c.nextTrack;
     return ColoredBox(
       color: AppColors.panel,
       child: track == null
@@ -476,10 +511,22 @@ class NowPlayingSidePanel extends StatelessWidget {
                     style: text.headlineSmall?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -0.5),
                   ),
                   const SizedBox(height: 4),
-                  Text(track.artist, style: text.bodyLarge?.copyWith(color: AppColors.textSecondary)),
+                  // A click away from the artist's page (and the album's, for a file here).
+                  _LinkText(
+                    track.artist,
+                    style: text.bodyLarge?.copyWith(color: AppColors.textSecondary),
+                    onTap: openArtist(context, c, track),
+                  ),
                   if (track.album != null) ...[
                     const SizedBox(height: 2),
-                    Text(track.album!, style: text.bodyMedium?.copyWith(color: AppColors.textMuted)),
+                    _LinkText(
+                      track.album!,
+                      style: text.bodyMedium?.copyWith(color: AppColors.textMuted),
+                      onTap: switch (c.albumOf(track)) {
+                        final album? => () => shell.openCollection(album),
+                        null => null,
+                      },
+                    ),
                   ],
                   const SizedBox(height: 12),
                   const QualityBadge(),
@@ -879,7 +926,7 @@ class _FullScreenPlayerState extends State<FullScreenPlayer> {
     final c = PlayerScope.of(context);
     final text = Theme.of(context).textTheme;
     final track = c.currentTrack;
-    final next = c.upNext.firstOrNull;
+    final next = c.nextTrack;
     return AccentBuilder(
       track: track,
       builder: (context, accent) => AnimatedContainer(

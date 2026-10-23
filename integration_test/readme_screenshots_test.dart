@@ -172,7 +172,9 @@ void main() {
       // Desktop full-screen player.
       await c.playList(dlow, 0, from: 'D-low');
       await playing();
-      await tester.tap(find.byTooltip('Full screen'));
+      await tester.tap(find.byTooltip('More views'));
+      await settle();
+      await tester.tap(find.text('Full screen'));
       await settle(4000); // past the "Press Esc" hint
       await shot('fullscreen');
       await tester.tap(find.byTooltip('Exit full screen').first);

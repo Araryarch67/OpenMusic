@@ -57,9 +57,21 @@ class HwParams {
 abstract final class LinuxAlsa {
   static bool get supported => Platform.isLinux && Directory('/proc/asound').existsSync();
 
-  /// Every playback device of every card (`/proc/asound/cardN/pcmDp`).
+  static (DateTime, List<AlsaOutput>)? _outputs;
+
+  /// Every playback device of every card (`/proc/asound/cardN/pcmDp`). Read
+  /// again after a couple of seconds at most: the signal path asks every
+  /// second, and a card plugged in shows up soon enough.
   static List<AlsaOutput> outputs() {
     if (!supported) return const [];
+    final hit = _outputs;
+    if (hit != null && DateTime.now().difference(hit.$1) < const Duration(seconds: 2)) return hit.$2;
+    final out = _readOutputs();
+    _outputs = (DateTime.now(), out);
+    return out;
+  }
+
+  static List<AlsaOutput> _readOutputs() {
     final out = <AlsaOutput>[];
     final cards = File('/proc/asound/cards').readAsStringSync();
     for (final m in RegExp(r'^\s*(\d+) \[(\S+)\s*\]: [^\n]* - ([^\n]+)$', multiLine: true).allMatches(cards)) {

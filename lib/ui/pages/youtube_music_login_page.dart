@@ -109,7 +109,8 @@ JSON.stringify((() => {
               },
               onReceivedError: (controller, request, error) {
                 if (request.isForMainFrame != true) return;
-                setState(() => _error = error.description);
+                debugPrint('Sign-in page: ${error.description}');
+                setState(() => _error = 'Couldn\'t load the sign-in page. Check your internet connection.');
               },
             ),
           ),

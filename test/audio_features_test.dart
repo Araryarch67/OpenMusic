@@ -113,6 +113,9 @@ FILE "album.wav" WAVE
       final back = Track.fromJson(a.toJson());
       expect(back.start, a.start);
       expect(back.end, a.end);
+      // Older versions could save a length of 0: it loads as unknown, not 0:00.
+      expect(Track.fromJson({...a.toJson(), 'durationMs': 0}).duration, isNull);
+      expect(Track.fromJson({...a.toJson(), 'durationMs': 1500}).duration, const Duration(milliseconds: 1500));
     });
   });
 

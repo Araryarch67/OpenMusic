@@ -67,6 +67,29 @@ void main() {
       expect(Dlna.parseDescription(Uri.parse('http://x/'), fakeDescription.replaceAll('AVTransport', 'Nope')), isNull);
     });
 
+    test('a reply may only point at the device that sent it', () {
+      final tv = InternetAddress('192.168.1.20');
+      final own = {'192.168.1.10'};
+      expect(Dlna.fromSender(Uri.parse('http://192.168.1.20:49152/d.xml'), tv, own), isTrue);
+      expect(Dlna.fromSender(Uri.parse('http://192.168.1.1/admin'), tv, own), isFalse, reason: 'the router');
+      expect(Dlna.fromSender(Uri.parse('http://127.0.0.1:631/'), tv, own), isFalse, reason: 'a service here');
+      // A renderer running on this machine names localhost.
+      expect(Dlna.fromSender(Uri.parse('http://127.0.0.1:8200/d.xml'), InternetAddress('192.168.1.10'), own), isTrue);
+    });
+
+    test('control requests stay on the device that described itself', () {
+      final elsewhere = fakeDescription.replaceFirst(
+        '<controlURL>av/control</controlURL>',
+        '<controlURL>http://192.168.1.1/cgi-bin/x</controlURL>',
+      );
+      expect(Dlna.parseDescription(Uri.parse('http://10.0.0.5:8080/dev/desc.xml'), elsewhere), isNull);
+    });
+
+    test('an endless reply is cut off', () async {
+      final endless = Stream<List<int>>.periodic(Duration.zero, (_) => List.filled(64 << 10, 0x41));
+      await expectLater(Dlna.readCapped(endless, 1 << 20), throwsA(isA<DlnaException>()));
+    });
+
     test('times', () {
       expect(Dlna.formatTime(const Duration(hours: 1, minutes: 2, seconds: 3)), '1:02:03');
       expect(Dlna.formatTime(const Duration(seconds: 61, milliseconds: 50), millis: true), '0:01:01.050');

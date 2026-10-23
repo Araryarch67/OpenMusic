@@ -147,9 +147,14 @@ class YoutubeImporter extends ChangeNotifier {
   /// The newest download of [videoId], if any (queued, running, done or failed).
   DownloadJob? jobFor(String videoId) => _jobs.where((j) => j.videoId == videoId).lastOrNull;
 
+  /// YouTube's video ids: 11 letters, digits, `-` and `_`. Downloads are named
+  /// after them, so anything else (a reply that was tampered with) must not
+  /// reach a file name.
+  static final _videoId = RegExp(r'^[A-Za-z0-9_-]{11}$');
+
   int _enqueue(List<DownloadJob> fresh) {
     var added = 0;
-    for (final job in fresh) {
+    for (final job in fresh.where((j) => _videoId.hasMatch(j.videoId))) {
       final existing = _jobs.where((j) => j.videoId == job.videoId).firstOrNull;
       if (existing != null && existing.status != DownloadStatus.failed && existing.status != DownloadStatus.cancelled) {
         continue;
@@ -361,14 +366,17 @@ class YoutubeImporter extends ChangeNotifier {
     }
   }
 
-  static String _friendlyError(Object e) => switch (e) {
-    // Subclass first: VideoUnavailableException extends VideoUnplayableException.
-    VideoUnavailableException() => 'This video is unavailable.',
-    VideoUnplayableException() => 'This video can\'t be played (private, age-restricted or region-locked).',
-    SocketException() || http.ClientException() => 'Network error. Check your connection and retry.',
-    StateError(:final message) => message,
-    _ => e.toString(),
-  };
+  /// What the downloads list says, in plain words (yt-dlp's own errors only go to the log).
+  static String _friendlyError(Object e) {
+    debugPrint('Download failed: $e');
+    return switch (e) {
+      // Subclass first: VideoUnavailableException extends VideoUnplayableException.
+      VideoUnavailableException() => 'This video is unavailable.',
+      VideoUnplayableException() => 'This video can\'t be played (private, age-restricted or region-locked).',
+      SocketException() || http.ClientException() || TimeoutException() => 'No internet connection. Try again.',
+      _ => 'Couldn\'t download this song. Try again later.',
+    };
+  }
 
   static final _noise = RegExp(
     r'\s*[\(\[]\s*(official\s*|oficial\s*|officiel(le)?\s*)?'

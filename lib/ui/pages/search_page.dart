@@ -139,8 +139,9 @@ class _SearchPageState extends State<SearchPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
+  Widget build(BuildContext context) => VisiblePlayerBuilder(builder: _build);
+
+  Widget _build(BuildContext context, PlayerController c) {
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
     final pad = shell.compact ? 16.0 : 24.0;
@@ -542,7 +543,8 @@ Future<void> _playRemote(BuildContext context, RemotePlaylist p) async {
     final tracks = await c.ytMusic.collectionTracks(p);
     if (tracks.isNotEmpty) await c.playList(tracks, 0, from: p.title);
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('Couldn\'t play ${p.title}: $e')));
+    debugPrint('Playing ${p.title} failed: $e');
+    messenger.showSnackBar(SnackBar(content: Text('Couldn\'t play ${p.title}')));
   }
 }
 

@@ -40,11 +40,24 @@ class _TrackRowState extends State<TrackRow> {
 
   @override
   Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
+    final t = widget.track;
+    // Rebuilt when this row's own state changes (it starts or stops playing, it
+    // gets downloaded), not for every change of the player: on a song change
+    // only two rows of a long list differ.
+    return PlayerSelect<(bool, bool, bool)>(
+      select: (c) {
+        final current = c.currentTrack?.id == t.id;
+        return (current, current && c.isPlaying, t.isRemote && !c.isOffline(t));
+      },
+      builder: (context, s, _) => _row(context, isCurrent: s.$1, playing: s.$2, online: s.$3),
+    );
+  }
+
+  Widget _row(BuildContext context, {required bool isCurrent, required bool playing, required bool online}) {
+    final c = PlayerScope.read(context);
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
     final t = widget.track;
-    final isCurrent = c.currentTrack?.id == t.id;
     final wide = !shell.compact;
 
     Widget? leading;
@@ -53,13 +66,9 @@ class _TrackRowState extends State<TrackRow> {
         width: 32,
         child: Center(
           child: isCurrent && !_hover
-              ? EqualizerIcon(playing: c.isPlaying, size: 14)
+              ? EqualizerIcon(playing: playing, size: 14)
               : _hover
-              ? Icon(
-                  isCurrent && c.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: AppColors.textPrimary,
-                  size: 20,
-                )
+              ? Icon(playing ? Icons.pause_rounded : Icons.play_arrow_rounded, color: AppColors.textPrimary, size: 20)
               : Text(
                   '${widget.index}',
                   style: text.bodyMedium?.copyWith(
@@ -105,11 +114,11 @@ class _TrackRowState extends State<TrackRow> {
                       Row(
                         children: [
                           if (isCurrent && !wide) ...[
-                            EqualizerIcon(playing: c.isPlaying, size: 10),
+                            EqualizerIcon(playing: playing, size: 10),
                             const SizedBox(width: 6),
                           ],
                           // YouTube songs: cloud = streams, green pin = downloaded, plays offline.
-                          if (t.isRemote) ...[SourceMark(online: !c.isOffline(t), size: 14), const SizedBox(width: 4)],
+                          if (t.isRemote) ...[SourceMark(online: online, size: 14), const SizedBox(width: 4)],
                           Flexible(
                             child: Text(
                               t.artist,
@@ -157,6 +166,18 @@ class _TrackRowState extends State<TrackRow> {
   }
 }
 
+/// Opens [track]'s artist: YouTube Music's page for a streamed song (all of
+/// its songs, not only the ones here), the library's for a file on this
+/// device. Null when there's none to open. [host] must outlive the caller.
+VoidCallback? openArtist(BuildContext host, PlayerController c, Track track) {
+  final id = track.artistId;
+  void remote(String id) =>
+      openRemotePlaylist(host, RemotePlaylist(id: id, browseId: id, title: track.artist.split(', ').first, count: 0));
+  if (track.isRemote && id != null) return () => remote(id);
+  if (c.artistNamed(track.artist) case final local?) return () => ShellScope.of(host).openCollection(local);
+  return id == null ? null : () => remote(id);
+}
+
 /// The ⋯ menu of a song: play next, add to playlist, like, download, go to artist…
 class TrackMenuButton extends StatelessWidget {
   const TrackMenuButton({super.key, required this.track, this.visible = true, this.color});
@@ -175,8 +196,6 @@ class TrackMenuButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = PlayerScope.read(context);
     final shell = ShellScope.of(context);
-    final artist = c.artistNamed(track.artist);
-    final album = c.albumOf(track);
     return Opacity(
       opacity: visible ? 1 : 0,
       child: PopupMenuButton<void>(
@@ -186,9 +205,12 @@ class TrackMenuButton extends StatelessWidget {
         icon: Icon(Icons.more_horiz_rounded, color: color),
         // The row can be rebuilt away while the menu is open (a list refreshing),
         // so actions run against the navigator's context, which outlives it.
+        // Worked out when the menu opens, not for every row on every rebuild.
         itemBuilder: (_) {
           final host = Navigator.of(context).context;
           final editScope = PlaylistEditScope.maybeOf(context);
+          final artist = openArtist(host, c, track);
+          final album = c.albumOf(track);
           return [
             PopupMenuItem(
               onTap: () => _queued(host, c.playNext([track]), 'Plays next'),
@@ -200,15 +222,7 @@ class TrackMenuButton extends StatelessWidget {
             ),
             if (artist != null)
               PopupMenuItem(
-                onTap: () => shell.openCollection(artist),
-                child: const MenuRow(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
-              )
-            else if (track.artistId case final id?)
-              PopupMenuItem(
-                onTap: () => openRemotePlaylist(
-                  host,
-                  RemotePlaylist(id: id, browseId: id, title: track.artist.split(', ').first, count: 0),
-                ),
+                onTap: artist,
                 child: const MenuRow(leading: Icon(Icons.person_outline_rounded), title: Text('Go to artist')),
               ),
             if (album != null)

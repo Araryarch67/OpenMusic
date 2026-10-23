@@ -5,11 +5,10 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'package:http/http.dart' as http;
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
 import 'desktop_login.dart';
+import 'private_files.dart';
 import 'ytmusic_web.dart';
 
 class YoutubeMusicLibrary {
@@ -200,8 +199,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   // ── Persistence ─────────────────────────────────────────────────────────
 
-  static Future<File> _file() async =>
-      File(p.join((await getApplicationSupportDirectory()).path, 'youtube_music_account.json'));
+  static Future<File> _file() => PrivateFiles.file('youtube_music_account.json');
 
   Future<void> load() async {
     try {
@@ -220,10 +218,11 @@ class YoutubeMusicAccount extends ChangeNotifier {
     }
   }
 
+  /// Holds the session's cookies (they sign in to the whole YouTube account):
+  /// readable by this user only from the moment it exists, written in one step.
   Future<void> _save() async {
-    final f = await _file();
-    await f.parent.create(recursive: true);
-    await f.writeAsString(
+    await PrivateFiles.write(
+      await _file(),
       jsonEncode({
         'accountName': accountName,
         'avatarUrl': avatarUrl,
@@ -231,9 +230,8 @@ class YoutubeMusicAccount extends ChangeNotifier {
         'webVisitor': _webVisitor,
         'webUser': _webUser,
       }),
+      secret: true,
     );
-    // Holds the session's cookies: keep it readable by this user only.
-    if (Platform.isLinux || Platform.isMacOS) await Process.run('chmod', ['600', f.path]);
   }
 
   /// Takes over the session a WebView login just produced. The account menu is
@@ -310,8 +308,7 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   String get _discoverOwner => accountName ?? '';
 
-  static Future<File> _discoverFile() async =>
-      File(p.join((await getApplicationSupportDirectory()).path, 'discover-cache.json'));
+  static Future<File> _discoverFile() => PrivateFiles.file('discover-cache.json');
 
   Future<List<RemoteShelf>?> _cachedDiscover() async {
     try {
@@ -328,17 +325,14 @@ class YoutubeMusicAccount extends ChangeNotifier {
 
   Future<void> _saveDiscover(List<RemoteShelf> shelves) async {
     try {
-      final f = await _discoverFile();
-      await f.parent.create(recursive: true);
-      final part = File('${f.path}.part');
-      await part.writeAsString(
+      await PrivateFiles.write(
+        await _discoverFile(),
         jsonEncode({
           'owner': _discoverOwner,
           'at': DateTime.now().millisecondsSinceEpoch,
           'shelves': [for (final s in shelves) s.toJson()],
         }),
       );
-      await part.rename(f.path);
     } catch (_) {}
   }
 
@@ -896,12 +890,21 @@ class YoutubeMusicAccount extends ChangeNotifier {
   Future<List<Track>> playlistTracks(String playlistId) async =>
       _webTracks(await _browseClient.playlistTracks(playlistId, limit: _maxItems));
 
-  static String _describe(Object e) => switch (e) {
+  /// [e] in a few plain words, for a message the user sees. What went wrong
+  /// in detail only goes to the log: technical text there just scares people.
+  static String describe(Object e) => switch (e) {
     YtMusicWebError(:final message) => message,
-    TimeoutException() => 'The request timed out. Try again.',
-    SocketException() || http.ClientException() => 'Network error. Check your connection.',
-    _ => e.toString(),
+    DesktopLoginException(:final message) => message,
+    TimeoutException() ||
+    SocketException() ||
+    http.ClientException() => 'No internet connection. Check it and try again.',
+    _ => 'Something went wrong. Try again.',
   };
+
+  static String _describe(Object e) {
+    if (e is! YtMusicWebError) debugPrint('YouTube Music: $e');
+    return describe(e);
+  }
 
   @override
   void dispose() {

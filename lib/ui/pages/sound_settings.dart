@@ -115,7 +115,8 @@ class AdvancedAudioSettings extends StatelessWidget {
     try {
       await audio.setImpulse(File(path), name: file.name, into: await getApplicationSupportDirectory());
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Couldn\'t use that file: $e')));
+      debugPrint('Impulse response: $e');
+      messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t use that file')));
     }
   }
 

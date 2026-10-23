@@ -276,7 +276,7 @@ class AirPlaySession {
       _onRtspData,
       onError: (Object e) => _fail('Lost connection to ${device.name}'),
       onDone: () {
-        if (_rtsp != null) _fail('${device.name} hung up');
+        if (_rtsp != null) _fail('Lost connection to ${device.name}');
       },
     );
     final local = s.address;
@@ -355,13 +355,19 @@ class AirPlaySession {
     return r;
   }
 
+  /// Replies are a few hundred bytes; a "speaker" sending more isn't one.
+  static const _maxReply = 64 << 10;
+
   void _onRtspData(Uint8List data) {
     _rtspBuffer.add(data);
     while (true) {
       final bytes = _rtspBuffer.toBytes();
       final text = latin1.decode(bytes);
       final end = text.indexOf('\r\n\r\n');
-      if (end < 0) return;
+      if (end < 0) {
+        if (bytes.length > _maxReply) _fail('Lost connection to ${device.name}');
+        return;
+      }
       final lines = text.substring(0, end).split('\r\n');
       final headers = <String, String>{};
       for (final l in lines.skip(1)) {
@@ -369,6 +375,7 @@ class AirPlaySession {
         if (c > 0) headers[l.substring(0, c).trim().toLowerCase()] = l.substring(c + 1).trim();
       }
       final length = int.tryParse(headers['content-length'] ?? '') ?? 0;
+      if (length < 0 || length > _maxReply) return _fail('Lost connection to ${device.name}');
       if (bytes.length < end + 4 + length) return;
       _rtspBuffer
         ..clear()
@@ -385,10 +392,13 @@ class AirPlaySession {
 
   // ── Timing, control ────────────────────────────────────────────────────
 
+  // Timing and resend requests are taken from the speaker only: these ports
+  // are open to the whole network.
+
   void _onTiming() {
     final t = _timing;
     final d = t?.receive();
-    if (t == null || d == null || d.data.length < 32 || d.data[1] & 0x7F != 0x52) return;
+    if (t == null || d == null || d.address != device.host || d.data.length < 32 || d.data[1] & 0x7F != 0x52) return;
     final now = _ntpNow();
     final reply = ByteData(32)
       ..setUint8(0, 0x80)
@@ -406,9 +416,10 @@ class AirPlaySession {
   void _onControl() {
     final c = _control;
     final d = c?.receive();
-    if (c == null || d == null || d.data.length < 8 || d.data[1] & 0x7F != 0x55) return;
+    if (c == null || d == null || d.address != device.host || d.data.length < 8 || d.data[1] & 0x7F != 0x55) return;
     final v = ByteData.sublistView(d.data);
-    final first = v.getUint16(4), count = v.getUint16(6);
+    // Only what's kept ([_sent] holds the last 512) can be sent again.
+    final first = v.getUint16(4), count = math.min(v.getUint16(6), 512);
     for (var i = 0; i < count; i++) {
       final p = _sent[(first + i) & 0xFFFF];
       if (p != null) c.send([0x80, 0xD6, 0x00, 0x01, ...p], device.host, _serverControlPort);
@@ -548,7 +559,8 @@ class AirPlaySession {
     _playing = true;
     _firstSync = true;
     _stream(source, from, generation).catchError((Object e) {
-      if (generation == _generation) _fail('Couldn\'t play on ${device.name}: $e');
+      debugPrint('AirPlay: $e');
+      if (generation == _generation) _fail('Couldn\'t play on ${device.name}');
     });
   }
 

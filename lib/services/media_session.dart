@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:audio_service/audio_service.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/track.dart';
@@ -125,16 +127,37 @@ class MediaSession extends BaseAudioHandler with SeekHandler {
     );
   }
 
-  static Directory? _artDir;
+  static Future<Directory>? _artDir;
+
+  /// This user's cache folder, not the temporary one: on Linux that is the
+  /// shared /tmp, where another account could plant a link under a cover's
+  /// name (and have the cover written over a file of yours) or see what you play.
+  static Future<Directory> _openArtDir() async {
+    final dir = Directory(p.join((await getApplicationCacheDirectory()).path, 'now-playing-art'));
+    await dir.create(recursive: true);
+    // A cover for each song played: keep the newest few.
+    final old = await dir.list().where((e) => e is File).cast<File>().toList();
+    if (old.length > 64) {
+      final dated = [for (final f in old) (f, (await f.stat()).modified)]..sort((a, b) => b.$2.compareTo(a.$2));
+      for (final (f, _) in dated.skip(32)) {
+        f.delete().ignore();
+      }
+    }
+    return dir;
+  }
 
   static Future<File?> _artFile(Track t) async {
     final bytes = Metadata.cachedArtwork(t) ?? await Metadata.artwork(t);
     if (bytes == null) return null;
-    _artDir ??= Directory('${(await getTemporaryDirectory()).path}/openmusic-art');
-    final file = File('${_artDir!.path}/${sha1.convert(bytes)}.img');
+    final dir = await (_artDir ??= _openArtDir());
+    // Named after the album and the cover's size, not a hash of the picture:
+    // hashing a hi-res cover on every song change took tens of milliseconds.
+    final name = sha1.convert(utf8.encode('${t.albumKey ?? t.id}\u0000${bytes.length}'));
+    final file = File(p.join(dir.path, '$name.img'));
     if (!file.existsSync()) {
-      await _artDir!.create(recursive: true);
-      await file.writeAsBytes(bytes);
+      final part = File('${file.path}.part');
+      await part.writeAsBytes(bytes);
+      await part.rename(file.path);
     }
     return file;
   }

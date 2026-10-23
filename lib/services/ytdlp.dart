@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -87,15 +89,64 @@ abstract final class YtDlp {
       }
     }
     final local = File(p.join((await getApplicationSupportDirectory()).path, 'bin', _releaseAsset));
-    if (!local.existsSync()) {
-      await local.parent.create(recursive: true);
-      final res = await http.get(Uri.parse('https://github.com/yt-dlp/yt-dlp/releases/latest/download/$_releaseAsset'));
-      if (res.statusCode != 200) return null;
-      await local.writeAsBytes(res.bodyBytes);
-      if (!Platform.isWindows) await Process.run('chmod', ['755', local.path]);
+    // Older versions wrote it straight to its place: a download cut short stayed there for good.
+    final whole = local.existsSync() && local.lengthSync() > 4 << 20;
+    if (!whole && !await _download(local)) return null;
+    // YouTube changes break old yt-dlp releases within weeks; a copy of our own is
+    // brought up to date in the background (the system's is the package manager's job).
+    if (whole && DateTime.now().difference(local.statSync().modified) > const Duration(days: 14)) {
+      _download(local).ignore();
     }
     return local.path;
   }();
+
+  static const _releases = 'https://github.com/yt-dlp/yt-dlp/releases';
+
+  /// Fetches the newest official build and checks it against the release's own
+  /// SHA2-256SUMS before it takes [to]'s place, in one step: a damaged or cut
+  /// short download never becomes the program that runs.
+  static Future<bool> _download(File to) async {
+    final client = http.Client();
+    final part = File('${to.path}.part');
+    try {
+      // Both files from one release, even if a newer one comes out meanwhile.
+      final latest = await client.send(
+        http.Request('GET', Uri.parse('$_releases/latest/download/$_releaseAsset'))..followRedirects = false,
+      );
+      await latest.stream.drain<void>();
+      final tag = RegExp(r'/releases/download/([^/]+)/').firstMatch(latest.headers['location'] ?? '')?[1];
+      if (tag == null) throw StateError('no latest release (HTTP ${latest.statusCode})');
+      final sums = await client.get(Uri.parse('$_releases/download/$tag/SHA2-256SUMS'));
+      final expected = RegExp(
+        '^([0-9a-f]{64}) +\\*?${RegExp.escape(_releaseAsset)}\$',
+        multiLine: true,
+      ).firstMatch(sums.body)?[1];
+      if (sums.statusCode != 200 || expected == null) throw StateError('no checksum for $_releaseAsset');
+
+      final res = await client.send(http.Request('GET', Uri.parse('$_releases/download/$tag/$_releaseAsset')));
+      if (res.statusCode != 200) throw StateError('HTTP ${res.statusCode}');
+      await to.parent.create(recursive: true);
+      final digest = _DigestSink();
+      final hash = sha256.startChunkedConversion(digest);
+      final out = part.openWrite();
+      await for (final chunk in res.stream) {
+        hash.add(chunk);
+        out.add(chunk);
+      }
+      hash.close();
+      await out.close();
+      if (digest.value.toString() != expected) throw StateError('the download doesn\'t match its checksum');
+      if (!Platform.isWindows) await Process.run('chmod', ['755', part.path]);
+      await part.rename(to.path);
+      return true;
+    } catch (e) {
+      debugPrint('yt-dlp download failed: $e');
+      if (part.existsSync()) part.deleteSync();
+      return false;
+    } finally {
+      client.close();
+    }
+  }
 
   /// Resolves (and caches for a few hours) the best audio stream of a video.
   /// [aac] takes AAC over Opus, for players that can't decode Opus.
@@ -162,4 +213,15 @@ abstract final class YtDlp {
       via: 'yt-dlp',
     );
   }
+}
+
+/// Receives the one digest a chunked hash produces.
+class _DigestSink implements Sink<Digest> {
+  Digest? value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
 }

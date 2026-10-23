@@ -54,17 +54,35 @@ class _HomeShellState extends State<HomeShell> {
   late final _history = DesktopHistory(routeBuilder: (page, location) => _route(page, location: location));
 
   StreamSubscription<String>? _errors;
+  PlayerController? _player;
+  bool _hasTrack = false;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _errors ??= PlayerScope.read(context).errors.listen((message) {
+    final c = PlayerScope.identity(context);
+    if (identical(c, _player)) return;
+    _player?.removeListener(_followTrack);
+    _player = c..addListener(_followTrack);
+    _hasTrack = c.currentTrack != null;
+    _errors?.cancel();
+    _errors = c.errors.listen((message) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
     });
   }
 
+  /// All the shell itself needs from the player is whether a song is loaded
+  /// (for the side panel). Rebuilding it on every change the player notifies
+  /// rebuilt the whole window, several times a song; whatever shows what's
+  /// playing listens on its own.
+  void _followTrack() {
+    final has = _player!.currentTrack != null;
+    if (has != _hasTrack) setState(() => _hasTrack = has);
+  }
+
   @override
   void dispose() {
+    _player?.removeListener(_followTrack);
     _errors?.cancel();
     _searchFocus.dispose();
     _search.dispose();
@@ -205,7 +223,8 @@ class _HomeShellState extends State<HomeShell> {
         messenger.showSnackBar(SnackBar(content: Text('Added $added ${added == 1 ? 'song' : 'songs'}')));
       }
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('Couldn\'t add music: $e')));
+      debugPrint('Adding music failed: $e');
+      messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t add that music')));
     }
   }
 
@@ -313,7 +332,7 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
+    final c = PlayerScope.read(context);
     final size = MediaQuery.sizeOf(context);
     final width = size.width;
     // A phone keeps its layout when turned sideways (it's still held in the
@@ -356,10 +375,16 @@ class _HomeShellState extends State<HomeShell> {
       },
     };
 
-    // Phone only: one stack per bottom tab, fading between tabs.
+    // Phone only: one stack per bottom tab, fading between tabs. The hidden
+    // tabs' tickers are off: no animation runs there (a playing song's bars in
+    // a list nobody sees kept the screen redrawing), and they catch up on what
+    // changed when shown.
     Widget tabs() => _FadeOnChange(
       index: _tab.index,
-      child: IndexedStack(index: _tab.index, children: [for (final t in _Tab.values) _tabNavigator(t)]),
+      child: IndexedStack(
+        index: _tab.index,
+        children: [for (final t in _Tab.values) TickerMode(enabled: t == _tab, child: _tabNavigator(t))],
+      ),
     );
 
     final Widget body;
@@ -409,7 +434,7 @@ class _HomeShellState extends State<HomeShell> {
       );
     } else {
       final sidebarWidth = expanded ? 300.0 : 84.0;
-      final sideOpen = expanded && _sidePanel && c.currentTrack != null;
+      final sideOpen = expanded && _sidePanel && _hasTrack;
       _contentWidth = width - sidebarWidth - (sideOpen ? 340 : 0) - 24;
       body = _scoped(
         Scaffold(

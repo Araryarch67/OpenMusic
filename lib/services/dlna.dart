@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -98,6 +99,7 @@ abstract final class Dlna {
       } catch (e) {
         interfaces = const [];
       }
+      final own = {for (final i in interfaces) ...i.addresses.map((a) => a.address)};
       for (final address in [for (final i in interfaces) ...i.addresses]) {
         try {
           final socket = await RawDatagramSocket.bind(address, 0);
@@ -114,7 +116,7 @@ abstract final class Dlna {
             final d = socket.receive();
             if (d == null) return;
             final location = parseSearchReply(latin1.decode(d.data, allowInvalid: true));
-            if (location == null || !seenLocations.add(location.toString())) return;
+            if (location == null || !fromSender(location, d.address, own) || !seenLocations.add('$location')) return;
             pending.add(
               describe(location, client: client).then((r) {
                 if (r != null && seenIds.add(r.id) && !out.isClosed) out.add(r);
@@ -154,17 +156,40 @@ abstract final class Dlna {
     return location != null && location.isScheme('http') ? location : null;
   }
 
+  /// Whether a search reply's [location] is on the device that sent it. Anyone
+  /// on the network can answer a search; a reply naming another address would
+  /// have this app fetch whatever is there (a router's page, a service on this
+  /// machine). Renderers on this machine itself may name localhost.
+  @visibleForTesting
+  static bool fromSender(Uri location, InternetAddress sender, Set<String> own) {
+    if (location.host == sender.address) return true;
+    final ip = InternetAddress.tryParse(location.host);
+    return ip != null && ip.isLoopback && (sender.isLoopback || own.contains(sender.address));
+  }
+
   /// Reads a device description; null when it isn't a renderer we can drive
   /// (no AVTransport service).
   static Future<DlnaRenderer?> describe(Uri location, {http.Client? client}) async {
     final c = client ?? http.Client();
     try {
-      final res = await c.get(location).timeout(const Duration(seconds: 5));
+      final res = await c.send(http.Request('GET', location)).timeout(const Duration(seconds: 5));
+      final body = await readCapped(res.stream, 512 << 10).timeout(const Duration(seconds: 5));
       if (res.statusCode != 200) return null;
-      return parseDescription(location, utf8.decode(res.bodyBytes, allowMalformed: true));
+      return parseDescription(location, utf8.decode(body, allowMalformed: true));
     } finally {
       if (client == null) c.close();
     }
+  }
+
+  /// A reply's body, up to [max] bytes: a device that sends more (endlessly)
+  /// isn't a renderer, and mustn't fill this app's memory.
+  static Future<Uint8List> readCapped(Stream<List<int>> body, int max) async {
+    final out = BytesBuilder(copy: false);
+    await for (final chunk in body) {
+      out.add(chunk);
+      if (out.length > max) throw const DlnaException('The device sent far too much');
+    }
+    return out.takeBytes();
   }
 
   @visibleForTesting
@@ -189,7 +214,10 @@ abstract final class Dlna {
         final type = text(s, 'serviceType') ?? '';
         final control = text(s, 'controlURL');
         if (type.contains(':service:$kind:') && control != null) {
-          return (url: (base.hasScheme ? base : location).resolve(control), type: type);
+          final url = (base.hasScheme ? base : location).resolve(control);
+          // Control requests go to the device that described itself, nowhere else.
+          if (url.host != location.host || !url.isScheme('http')) continue;
+          return (url: url, type: type);
         }
       }
       return null;
@@ -251,14 +279,14 @@ class DlnaControl {
       body.write('<$key>${_escape('$value')}</$key>');
     }
     body.write('</u:$action></s:Body></s:Envelope>');
-    final res = await _http
-        .post(
-          url,
-          headers: {'Content-Type': 'text/xml; charset="utf-8"', 'SOAPACTION': '"$type#$action"'},
-          body: utf8.encode(body.toString()),
-        )
-        .timeout(const Duration(seconds: 8));
-    final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+    final req = http.Request('POST', url)
+      ..headers.addAll({'Content-Type': 'text/xml; charset="utf-8"', 'SOAPACTION': '"$type#$action"'})
+      ..bodyBytes = utf8.encode(body.toString());
+    final res = await _http.send(req).timeout(const Duration(seconds: 8));
+    final text = utf8.decode(
+      await Dlna.readCapped(res.stream, 1 << 20).timeout(const Duration(seconds: 8)),
+      allowMalformed: true,
+    );
     XmlDocument? doc;
     try {
       doc = XmlDocument.parse(text);
@@ -390,16 +418,29 @@ class CastTranscode extends CastMedia {
 /// A small HTTP server on the local network that serves what is being cast.
 ///
 /// Each item gets an unguessable path, so other devices on the network can't
-/// read anything else from this machine.
+/// read anything else from this machine. It listens only on the address the
+/// renderer reaches this machine by, not on every network it is on (a VPN, a
+/// public address): the paths go over the network in the clear.
 class CastServer {
   HttpServer? _server;
+  InternetAddress? _boundTo;
   final _media = <String, CastMedia>{};
   final _art = <String, ({Uint8List bytes, String mime})>{};
   final _random = math.Random.secure();
 
-  Future<int> _port() async {
-    final s = _server ??= await HttpServer.bind(InternetAddress.anyIPv4, 0)
-      ..listen(_handle);
+  /// FFmpeg conversions running, by item: a renderer asking again (or anyone
+  /// else holding the link) replaces its conversion instead of starting
+  /// another process each time.
+  final _transcodes = <String, Process>{};
+  static const _maxTranscodes = 2;
+
+  Future<int> _port(InternetAddress host) async {
+    final running = _server;
+    if (running != null && _boundTo == host) return running.port;
+    await running?.close(force: true);
+    final s = _server = await HttpServer.bind(host, 0);
+    _boundTo = host;
+    s.listen(_handle);
     return s.port;
   }
 
@@ -422,7 +463,7 @@ class CastServer {
   /// Serves [media] (keeping at most a few items) and returns its URL as
   /// seen from [host].
   Future<Uri> publish(CastMedia media, InternetAddress host) async {
-    final port = await _port();
+    final port = await _port(host);
     final token = _token();
     _media[token] = media;
     while (_media.length > 4) {
@@ -432,7 +473,7 @@ class CastServer {
   }
 
   Future<Uri> publishArt(Uint8List bytes, String mime, InternetAddress host) async {
-    final port = await _port();
+    final port = await _port(host);
     final token = _token();
     _art[token] = (bytes: bytes, mime: mime);
     while (_art.length > 4) {
@@ -444,8 +485,13 @@ class CastServer {
   Future<void> close() async {
     await _server?.close(force: true);
     _server = null;
+    _boundTo = null;
     _media.clear();
     _art.clear();
+    for (final p in _transcodes.values) {
+      p.kill();
+    }
+    _transcodes.clear();
   }
 
   Future<void> _handle(HttpRequest req) async {
@@ -462,7 +508,7 @@ class CastServer {
         res.contentLength = art.bytes.length;
         if (req.method == 'GET') res.add(art.bytes);
       } else if (media != null) {
-        await _serve(req, media);
+        await _serve(req, media, token!);
         return;
       } else {
         res.statusCode = HttpStatus.notFound;
@@ -491,7 +537,7 @@ class CastServer {
     return start > end ? null : (start: start, end: end);
   }
 
-  Future<void> _serve(HttpRequest req, CastMedia media) async {
+  Future<void> _serve(HttpRequest req, CastMedia media, String token) async {
     final res = req.response;
     res.headers
       ..contentType = ContentType.parse(media.mime)
@@ -533,6 +579,11 @@ class CastServer {
             if (media.maxRate != null) ...['-af', 'aresample=resampler=soxr:osr=${media.maxRate}'],
             '-c:a', 'flac', '-sample_fmt', 's32', '-bits_per_raw_sample', '24', '-f', 'flac', 'pipe:1',
           ]);
+          _transcodes.remove(token)?.kill();
+          while (_transcodes.length >= _maxTranscodes) {
+            _transcodes.remove(_transcodes.keys.first)?.kill();
+          }
+          _transcodes[token] = ffmpeg;
           ffmpeg.stderr.drain<void>().ignore();
           if (media.input case final input?) {
             // Ends early when FFmpeg stops reading (the renderer hung up).
@@ -542,6 +593,7 @@ class CastServer {
             await res.addStream(ffmpeg.stdout);
           } finally {
             ffmpeg.kill();
+            if (_transcodes[token] == ffmpeg) _transcodes.remove(token);
           }
         }
     }

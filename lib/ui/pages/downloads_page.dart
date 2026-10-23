@@ -13,7 +13,8 @@ class DownloadsPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
+    // Only the downloads matter here, not every change of what's playing.
+    final c = PlayerScope.read(context);
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
     final pad = shell.compact ? 16.0 : 24.0;
@@ -129,6 +130,8 @@ class _JobRow extends StatelessWidget {
                 height: 54,
                 child: Image.network(
                   job.thumbnailUrl,
+                  // Decoded at the size shown, not YouTube's 480 or 1280 px.
+                  cacheWidth: (96 * MediaQuery.devicePixelRatioOf(context)).round(),
                   fit: BoxFit.cover,
                   errorBuilder: (_, _, _) => ColoredBox(color: AppColors.hover),
                 ),

@@ -99,7 +99,10 @@ class YoutubeAudioSource extends StreamAudioSource {
 
   /// AAC instead of Opus (casting: most network players can't decode Opus).
   final bool aac;
-  final _http = http.Client();
+
+  /// One connection pool for every song, not one per queued song that was
+  /// never closed: a whole playlist is queued at once.
+  static final _http = http.Client();
 
   /// YouTube's player API (yt-dlp on desktop if refused), with
   /// youtube_explode as a last resort on phones. Always has a size.

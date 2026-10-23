@@ -49,12 +49,20 @@ class Buffer {
   }
 
   Uint8List read(int size) {
-    fileCursor += size;
-
     // if we read something big (~100kb), we can read it directly from file
     // it makes the read faster
     // no need to use the buffer
     if (size > _bufferSize) {
+      // OpenMusic: a size read from the file is checked against what the file
+      // still holds before anything is allocated. A crafted block claiming
+      // gigabytes (a picture, a chunk) made the reader allocate that much, and
+      // the app run out of memory showing its cover.
+      final int available = remainingBytes;
+      if (size > available) {
+        throw MetadataParserException(
+            track: File(""), message: "A block claims $size bytes, the file has $available left");
+      }
+      fileCursor += size;
       final result = Uint8List(size);
       final remaining = _bufferedBytes - _cursor;
       if (remaining > 0) {
@@ -64,6 +72,8 @@ class Buffer {
       _fill();
       return result;
     }
+
+    fileCursor += size;
 
     if (size <= _bufferedBytes - _cursor) {
       // Data fits within the current buffer

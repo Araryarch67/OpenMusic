@@ -164,7 +164,9 @@ class PlaylistTransfer {
         .get(url, headers: {'user-agent': ua, 'accept-language': 'en-US,en;q=0.9'})
         .timeout(const Duration(seconds: 30));
     if (res.statusCode == 404) throw const PlaylistTransferError('That playlist doesn\'t exist, or it\'s private.');
-    if (res.statusCode != 200) throw PlaylistTransferError('The page replied ${res.statusCode}. Try again later.');
+    if (res.statusCode != 200) {
+      throw const PlaylistTransferError('Couldn\'t open that link right now. Try again later.');
+    }
     return utf8.decode(res.bodyBytes);
   }
 

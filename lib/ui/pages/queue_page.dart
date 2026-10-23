@@ -10,8 +10,9 @@ class QueuePage extends StatelessWidget {
   const QueuePage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
+  Widget build(BuildContext context) => VisiblePlayerBuilder(builder: _build);
+
+  Widget _build(BuildContext context, PlayerController c) {
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
     final current = c.currentTrack;

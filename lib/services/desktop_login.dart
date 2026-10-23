@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 /// Linux sign-in window (linux/login_helper): Google's own login page in a
@@ -36,7 +37,8 @@ abstract final class DesktopLogin {
           .convert(err)
           .where((l) => l.trim().isNotEmpty && !l.contains('CRITICAL') && !l.contains('MESA'))
           .lastOrNull;
-      throw DesktopLoginException('The sign-in window closed unexpectedly${reason == null ? '' : ' ($reason)'}');
+      debugPrint('Sign-in window exited $code: $reason');
+      throw const DesktopLoginException('The sign-in window closed unexpectedly. Try again.');
     }
     final line = const LineSplitter().convert(out).lastWhere((l) => l.startsWith('{'), orElse: () => '');
     if (line.isEmpty) return null;

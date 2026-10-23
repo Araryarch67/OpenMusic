@@ -516,7 +516,10 @@ class AudioEngine extends ChangeNotifier {
   /// colons and brackets in a user's file name would need escaping.
   Future<void> setImpulse(File file, {required String name, required Directory into}) async {
     await into.create(recursive: true);
-    final ext = file.path.split('.').last.toLowerCase();
+    // The extension too: a name like "room.wav],..." would have written filters of its own into the graph.
+    final base = file.path.split(RegExp(r'[/\\]')).last;
+    final given = base.contains('.') ? base.split('.').last.toLowerCase() : '';
+    final ext = RegExp(r'^[a-z0-9]{1,5}$').hasMatch(given) ? given : 'wav';
     final copy = File('${into.path}${Platform.pathSeparator}impulse-${DateTime.now().millisecondsSinceEpoch}.$ext');
     await file.copy(copy.path);
     final old = impulsePath;

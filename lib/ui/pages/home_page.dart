@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../services/player_controller.dart';
@@ -29,10 +31,10 @@ class HomePage extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
-    return ListenableBuilder(listenable: c.ytMusic, builder: (context, _) => _build(context, c, c.ytMusic.libraryNow));
-  }
+  Widget build(BuildContext context) => VisiblePlayerBuilder(
+    builder: (context, c) =>
+        ListenableBuilder(listenable: c.ytMusic, builder: (context, _) => _build(context, c, c.ytMusic.libraryNow)),
+  );
 
   Widget _build(BuildContext context, PlayerController c, YoutubeMusicLibrary? online) {
     final shell = ShellScope.of(context);
@@ -129,83 +131,84 @@ class HomePage extends StatelessWidget {
               ),
             ),
           if (!account.isSignedIn) const SliverToBoxAdapter(child: SignInBanner()),
+          // The cards are made as they're shown: albums and artists can be thousands.
           if (recent.isNotEmpty)
-            ..._shelf(context, 'Recently played', [
-              for (final (i, t) in recent.indexed)
-                MediaCard(
-                  track: t,
-                  title: t.title,
-                  subtitle: t.artist,
-                  online: !c.isOffline(t),
-                  onTap: () => c.playList(recent, i, from: 'Recently played'),
-                  onPlay: () => c.playList(recent, i, from: 'Recently played'),
-                ),
-            ]),
+            _shelf('Recently played', recent.length, (i) {
+              final t = recent[i];
+              return MediaCard(
+                track: t,
+                title: t.title,
+                subtitle: t.artist,
+                online: !c.isOffline(t),
+                onTap: () => c.playList(recent, i, from: 'Recently played'),
+                onPlay: () => c.playList(recent, i, from: 'Recently played'),
+              );
+            }),
           if (playlists.isNotEmpty || remotePlaylists.isNotEmpty)
-            ..._shelf(context, 'Your playlists', [
-              for (final p in playlists)
-                MediaCard(
+            _shelf('Your playlists', playlists.length + remotePlaylists.length, (i) {
+              if (i < playlists.length) {
+                final p = playlists[i];
+                return MediaCard(
                   track: p.tracks.firstOrNull,
                   title: p.name,
                   subtitle: 'OpenMusic • ${p.tracks.length} songs',
                   onTap: () => shell.openCollection(c.playlistCollection(p)),
                   onPlay: p.tracks.isEmpty ? null : () => c.playCollection(c.playlistCollection(p)),
-                ),
-              for (final p in remotePlaylists)
-                MediaCard(
-                  track: playlistCover(p),
-                  title: p.title,
-                  subtitle: p.count == 0 ? 'YouTube Music' : 'YouTube Music • ${p.count} songs',
-                  online: true,
-                  onTap: () => openRemotePlaylist(context, p),
-                ),
-            ]),
+                );
+              }
+              final p = remotePlaylists[i - playlists.length];
+              return MediaCard(
+                track: playlistCover(p),
+                title: p.title,
+                subtitle: p.count == 0 ? 'YouTube Music' : 'YouTube Music • ${p.count} songs',
+                online: true,
+                onTap: () => openRemotePlaylist(context, p),
+              );
+            }),
           if (albums.isNotEmpty)
-            ..._shelf(context, 'Your albums', [
-              for (final a in albums)
-                MediaCard(
-                  track: a.cover,
-                  title: a.title,
-                  subtitle: a.subtitle,
-                  onTap: () => shell.openCollection(a),
-                  onPlay: () => c.playCollection(a),
-                ),
-            ]),
+            _shelf('Your albums', albums.length, (i) {
+              final a = albums[i];
+              return MediaCard(
+                track: a.cover,
+                title: a.title,
+                subtitle: a.subtitle,
+                onTap: () => shell.openCollection(a),
+                onPlay: () => c.playCollection(a),
+              );
+            }),
           if (artists.isNotEmpty)
-            ..._shelf(context, 'Artists', [
-              for (final a in artists)
-                MediaCard(
-                  track: a.cover,
-                  title: a.title,
-                  subtitle: 'Artist',
-                  circle: true,
-                  onTap: () => shell.openCollection(a),
-                  onPlay: () => c.playCollection(a),
-                ),
-            ]),
+            _shelf('Artists', artists.length, (i) {
+              final a = artists[i];
+              return MediaCard(
+                track: a.cover,
+                title: a.title,
+                subtitle: 'Artist',
+                circle: true,
+                onTap: () => shell.openCollection(a),
+                onPlay: () => c.playCollection(a),
+              );
+            }),
           if (c.library.isEmpty) const SliverToBoxAdapter(child: _AddYourMusic()),
           const DiscoverShelves(),
           if (c.library.isNotEmpty)
-            ..._shelf(context, 'Recently added', [
-              for (final t in c.recentlyAdded.take(20))
-                MediaCard(
-                  track: t,
-                  title: t.title,
-                  subtitle: t.artist,
-                  onTap: () => c.playList(c.recentlyAdded, c.recentlyAdded.indexOf(t), from: 'Recently added'),
-                  onPlay: () => c.playList(c.recentlyAdded, c.recentlyAdded.indexOf(t), from: 'Recently added'),
-                ),
-            ], onShowAll: () => shell.openCollection(c.allSongs)),
+            _shelf('Recently added', math.min(20, c.recentlyAdded.length), (i) {
+              final t = c.recentlyAdded[i];
+              return MediaCard(
+                track: t,
+                title: t.title,
+                subtitle: t.artist,
+                onTap: () => c.playList(c.recentlyAdded, i, from: 'Recently added'),
+                onPlay: () => c.playList(c.recentlyAdded, i, from: 'Recently added'),
+              );
+            }, onShowAll: () => shell.openCollection(c.allSongs)),
         ],
       ),
     );
   }
 
-  List<Widget> _shelf(BuildContext context, String title, List<Widget> cards, {VoidCallback? onShowAll}) => [
-    SliverToBoxAdapter(
-      child: Shelf(title: title, cards: cards, onShowAll: onShowAll),
-    ),
-  ];
+  Widget _shelf(String title, int count, Widget Function(int i) card, {VoidCallback? onShowAll}) => SliverToBoxAdapter(
+    child: Shelf.builder(title: title, count: count, card: card, onShowAll: onShowAll),
+  );
 }
 
 /// Shown on Home while there are no files yet: a small invitation, not a wall.

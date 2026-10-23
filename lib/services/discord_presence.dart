@@ -143,8 +143,16 @@ class DiscordPresence {
       }
       return;
     }
+    // Where Discord itself puts the socket: the first of these that is set. Not
+    // every one of them: a shared /tmp is open to other accounts on the
+    // machine, which could stand in for Discord there and hear what's playing.
     final env = Platform.environment;
-    final bases = {?env['XDG_RUNTIME_DIR'], ?env['TMPDIR'], ?env['TMP'], ?env['TEMP'], '/tmp'};
+    final base = [
+      env['XDG_RUNTIME_DIR'],
+      env['TMPDIR'],
+      env['TMP'],
+      env['TEMP'],
+    ].firstWhere((d) => d != null && d.isNotEmpty, orElse: () => '/tmp')!;
     // Plain installs, then Flatpak and Snap sandboxes.
     const subdirs = [
       '',
@@ -153,11 +161,9 @@ class DiscordPresence {
       'snap.discord/',
       '.flatpak/com.discordapp.Discord/xdg-run/',
     ];
-    for (final base in bases) {
-      for (final sub in subdirs) {
-        for (var i = 0; i < 10; i++) {
-          yield '$base/${sub}discord-ipc-$i';
-        }
+    for (final sub in subdirs) {
+      for (var i = 0; i < 10; i++) {
+        yield '$base/${sub}discord-ipc-$i';
       }
     }
   }
@@ -210,9 +216,7 @@ class _IpcConnection {
         );
         return conn;
       }
-      if (!File(path).existsSync() && FileSystemEntity.typeSync(path) != FileSystemEntityType.unixDomainSock) {
-        return null;
-      }
+      if (FileSystemEntity.typeSync(path) != FileSystemEntityType.unixDomainSock) return null;
       final socket = await Socket.connect(
         InternetAddress(path, type: InternetAddressType.unix),
         0,
@@ -239,8 +243,12 @@ class _IpcConnection {
 
     final header = await exactly(8);
     final length = ByteData.sublistView(header).getInt32(4, Endian.little);
+    if (length < 0 || length > _maxFrame) throw const FileSystemException('Not a Discord frame');
     _onData([...header, ...await exactly(length)]);
   }
+
+  /// Discord's replies are a few hundred bytes; anything this big isn't Discord.
+  static const _maxFrame = 64 << 10;
 
   void _onClosed(void Function() onClosed) {
     if (!_ready.isCompleted) _ready.complete(false);
@@ -255,6 +263,11 @@ class _IpcConnection {
       final header = ByteData.sublistView(bytes, 0, 8);
       final op = header.getInt32(0, Endian.little);
       final len = header.getInt32(4, Endian.little);
+      if (len < 0 || len > _maxFrame) {
+        _closed = true;
+        _closer();
+        return;
+      }
       if (bytes.length < 8 + len) break;
       final payload = jsonDecode(utf8.decode(bytes.sublist(8, 8 + len))) as Map<String, dynamic>;
       _handle(op, payload);

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../models/track.dart';
 import '../services/player_controller.dart';
 import '../services/playlist_transfer.dart';
+import '../services/youtube_music_account.dart';
 import 'theme.dart';
 
 /// Where an imported playlist was saved.
@@ -135,7 +136,10 @@ class _PlaylistImportDialogState extends State<PlaylistImportDialog> {
     } catch (e) {
       if (stale()) return;
       setState(() {
-        error = '$e';
+        error = switch (e) {
+          PlaylistTransferError(:final message) => message,
+          _ => YoutubeMusicAccount.describe(e),
+        };
         step = _Step.link;
       });
     }

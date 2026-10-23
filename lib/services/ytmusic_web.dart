@@ -1,7 +1,8 @@
 import 'dart:convert';
+import 'dart:isolate';
 
 import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:http/http.dart' as http;
 
 /// A song row as YouTube Music returns it.
@@ -28,6 +29,16 @@ class WebTrack {
   /// This row's id inside a playlist (the same song can be in it twice);
   /// removing and moving songs refer to it.
   final String? setVideoId;
+
+  WebTrack withArtist(String name) => WebTrack(
+    videoId: videoId,
+    title: title,
+    artist: name,
+    duration: duration,
+    artworkUrl: artworkUrl,
+    setVideoId: setVideoId,
+    artistId: artistId,
+  );
 }
 
 /// Who can see a playlist.
@@ -243,7 +254,7 @@ class YtMusicWeb {
     final m = RegExp(r'(?:^|;\s*)(?:__Secure-3PAPISID|__Secure-1PAPISID|SAPISID)=([^;]+)').firstMatch(cookies);
     final value = m?.group(1);
     if (value == null || value.isEmpty) {
-      throw const YtMusicWebError('The session has no SAPISID cookie, so it is not a signed-in session.');
+      throw const YtMusicWebError('You\'re not signed in. Sign in with Google and try again.');
     }
     return value;
   }
@@ -283,14 +294,21 @@ class YtMusicWeb {
         )
         .timeout(const Duration(seconds: 30));
     if (res.statusCode != 200) {
+      debugPrint('YouTube Music $endpoint: HTTP ${res.statusCode}');
       throw YtMusicWebError(switch (res.statusCode) {
-        401 || 403 => 'The YouTube Music session was refused; sign in again.',
-        429 => 'YouTube Music is rate limiting; try again in a minute.',
-        _ => 'YouTube Music replied ${res.statusCode}.',
+        401 || 403 => 'Please sign in to YouTube Music again.',
+        429 => 'YouTube Music is busy. Try again in a minute.',
+        _ => 'YouTube Music isn\'t answering right now. Try again later.',
       });
     }
-    final decoded = jsonDecode(utf8.decode(res.bodyBytes));
-    if (decoded is! Map<String, dynamic>) throw const YtMusicWebError('Unexpected reply from YouTube Music.');
+    final bytes = res.bodyBytes;
+    // Pages run to a megabyte or two of JSON: decoded on the UI thread, that dropped frames.
+    final decoded = bytes.length < 32 << 10
+        ? jsonDecode(utf8.decode(bytes))
+        : await Isolate.run(() => jsonDecode(utf8.decode(bytes)));
+    if (decoded is! Map<String, dynamic>) {
+      throw const YtMusicWebError('YouTube Music isn\'t answering right now. Try again later.');
+    }
     return decoded;
   }
 
@@ -300,7 +318,7 @@ class YtMusicWeb {
     final header = _asMap(_deepFind(res, 'activeAccountHeaderRenderer'));
     if (header == null) {
       throw YtMusicWebError(
-        _signedIn(res) ? 'Could not read the account menu.' : 'The session is not signed in to YouTube Music.',
+        _signedIn(res) ? 'Couldn\'t finish signing in. Try again.' : 'Signing in didn\'t finish. Try again.',
       );
     }
     return WebProfile(
@@ -414,7 +432,8 @@ class YtMusicWeb {
     });
     final status = res['status'];
     if (status is String && !status.contains('SUCCEEDED')) {
-      throw YtMusicWebError('YouTube Music refused the change ($status).');
+      debugPrint('YouTube Music edit: $status');
+      throw const YtMusicWebError('YouTube Music didn\'t take that change. Try again.');
     }
     return res;
   }
@@ -527,10 +546,10 @@ class YtMusicWeb {
       },
     });
     final panel = _asMap(_deepFind(res, 'playlistPanelRenderer'));
-    return [
+    return _withArtists([
       for (final item in _list(panel?['contents']))
         if (_asMap(_deepFind(item, 'playlistPanelVideoRenderer')) case final row?) ?_panelSong(row),
-    ];
+    ]);
   }
 
   /// A queue row: "Artist • Album • Year" under the title.
@@ -563,7 +582,15 @@ class YtMusicWeb {
     }
     if (browseId == null) return null;
 
-    final timed = await _send('browse', {'browseId': browseId}, android: true);
+    // Timed lines from the Android client; when it's refused (an old client
+    // version, a rate limit), the web page's plain text still has the words.
+    Map<String, dynamic> timed;
+    try {
+      timed = await _send('browse', {'browseId': browseId}, android: true);
+    } catch (e) {
+      debugPrint('Timed lyrics refused, using the plain ones: $e');
+      timed = const {};
+    }
     final source = _lyricsSource(timed);
     final lines = [
       for (final line in _list(_deepFind(timed, 'timedLyricsData')))
@@ -642,20 +669,22 @@ class YtMusicWeb {
     final header = _asMap(_deepFind(res, 'musicResponsiveHeaderRenderer'));
     final headerArtist = _text(header?['straplineTextOne']) ?? '';
     final headerArt = _lastThumb(_at(header, const ['thumbnail', 'musicThumbnailRenderer', 'thumbnail', 'thumbnails']));
-    return _allPages(shelf, shelf['contents'] ?? shelf['items'], limit, (item) {
-      final row = _asMap(item['musicResponsiveListItemRenderer']);
-      final track = row == null ? null : _songOf(row);
-      if (track == null) return null;
-      return WebTrack(
-        videoId: track.videoId,
-        title: track.title,
-        artist: track.artist.isEmpty ? headerArtist : track.artist,
-        duration: track.duration,
-        artworkUrl: track.artworkUrl ?? headerArt,
-        setVideoId: _at(row, const ['playlistItemData', 'playlistSetVideoId']) as String?,
-        artistId: track.artistId,
-      );
-    });
+    return _withArtists(
+      await _allPages(shelf, shelf['contents'] ?? shelf['items'], limit, (item) {
+        final row = _asMap(item['musicResponsiveListItemRenderer']);
+        final track = row == null ? null : _songOf(row);
+        if (track == null) return null;
+        return WebTrack(
+          videoId: track.videoId,
+          title: track.title,
+          artist: track.artist.isEmpty ? headerArtist : track.artist,
+          duration: track.duration,
+          artworkUrl: track.artworkUrl ?? headerArt,
+          setVideoId: _at(row, const ['playlistItemData', 'playlistSetVideoId']) as String?,
+          artistId: track.artistId,
+        );
+      }),
+    );
   }
 
   /// The carousels of a browse page: `FEmusic_home` (personal when signed in),
@@ -687,7 +716,9 @@ class YtMusicWeb {
           }
         }
       }
-      if (tracks.isNotEmpty || cards.isNotEmpty) out.add(WebShelf(title: title, tracks: tracks, cards: cards));
+      if (tracks.isNotEmpty || cards.isNotEmpty) {
+        out.add(WebShelf(title: title, tracks: await _withArtists(tracks), cards: cards));
+      }
     }
     return out;
   }
@@ -735,7 +766,13 @@ class YtMusicWeb {
           playlists.add(hit);
       }
     }
-    return WebSearch(top: top, songs: songs, artists: artists, albums: albums, playlists: playlists);
+    return WebSearch(
+      top: await _withArtist(top),
+      songs: await _withArtists(songs),
+      artists: artists,
+      albums: albums,
+      playlists: playlists,
+    );
   }
 
   /// Search params per filter chip, as ytmusicapi builds them.
@@ -769,7 +806,8 @@ class YtMusicWeb {
       for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer'))
         if (_asMap(node) case final row?) ?resultOf(row),
     ];
-    return WebSuggestions(queries: queries, items: items);
+    // A video here comes as "Video • 36M views", without who uploaded it.
+    return WebSuggestions(queries: queries, items: [for (final i in items) (await _withArtist(i))!]);
   }
 
   /// One result row of any kind. Songs and videos play; the rest open.
@@ -854,10 +892,10 @@ class YtMusicWeb {
   Future<List<WebTrack>> _searchRows(String query, String params) async {
     // The params values are the filter chips, as ytmusicapi sends them.
     final res = await _send('search', {'query': query, 'params': params});
-    return [
+    return _withArtists([
       for (final node in _deepFindAll(res, 'musicResponsiveListItemRenderer'))
         if (_asMap(node) case final row?) ?_songOf(row),
-    ];
+    ]);
   }
 
   static WebTrack? _twoRowSong(Map<String, dynamic> data, String videoId) {
@@ -909,10 +947,74 @@ class YtMusicWeb {
         final row = _asMap(_asMap(item)?['musicResponsiveListItemRenderer']);
         final track = row == null ? null : _songOf(row);
         if (track != null) out.add(track);
-        if (out.length >= limit) return out;
+        if (out.length >= limit) return _withArtists(out);
       }
     }
-    return out;
+    return _withArtists(out);
+  }
+
+  // ── Who uploaded it ──────────────────────────────────────────────────────
+  //
+  // Some rows have no artist at all: videos in the search suggestions, fans'
+  // uploads in playlists. They're named after the channel that uploaded them
+  // (not the song's real artist, but a name), never "Unknown artist".
+
+  static final _uploaders = <String, Future<String?>>{};
+
+  /// The channel that uploaded [videoId], from YouTube's oEmbed: one small
+  /// request, remembered. "Artist - Topic" channels give the artist's name.
+  Future<String?> uploaderOf(String videoId) => _uploaders[videoId] ??= () async {
+    try {
+      final res = await _http
+          .get(
+            Uri.https('www.youtube.com', '/oembed', {
+              'format': 'json',
+              'url': 'https://www.youtube.com/watch?v=$videoId',
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
+      final name = res.statusCode == 200 ? (jsonDecode(res.body) as Map)['author_name'] : null;
+      if (name is! String || name.trim().isEmpty) return null;
+      return name.trim().replaceFirst(RegExp(r' - Topic$'), '');
+    } catch (e) {
+      _uploaders.remove(videoId); // offline: ask again next time
+      return null;
+    }
+  }();
+
+  /// [tracks] with every missing artist filled in by [uploaderOf], a few at a
+  /// time (a playlist of fans' uploads can miss hundreds).
+  Future<List<WebTrack>> _withArtists(List<WebTrack> tracks) async {
+    final missing = {
+      for (final t in tracks)
+        if (t.artist.isEmpty) t.videoId,
+    }.toList();
+    if (missing.isEmpty) return tracks;
+    final names = <String, String>{};
+    for (var i = 0; i < missing.length; i += 8) {
+      final chunk = missing.skip(i).take(8).toList();
+      final found = await Future.wait(chunk.map(uploaderOf));
+      for (var j = 0; j < chunk.length; j++) {
+        if (found[j] case final name?) names[chunk[j]] = name;
+      }
+    }
+    return [for (final t in tracks) t.artist.isEmpty && names[t.videoId] != null ? t.withArtist(names[t.videoId]!) : t];
+  }
+
+  /// [r] with its song's artist filled in, when it's a song without one.
+  Future<WebResult?> _withArtist(WebResult? r) async {
+    final t = r?.track;
+    if (r == null || t == null || t.artist.isNotEmpty) return r;
+    final name = await uploaderOf(t.videoId);
+    if (name == null) return r;
+    return WebResult(
+      kind: r.kind,
+      title: r.title,
+      subtitle: r.subtitle,
+      thumbnailUrl: r.thumbnailUrl,
+      browseId: r.browseId,
+      track: t.withArtist(name),
+    );
   }
 
   /// One song row. Playlists, albums and history order their columns

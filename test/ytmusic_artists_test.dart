@@ -163,4 +163,50 @@ void main() {
     expect(tracks.map((t) => t.artist), ['Adrian, Astrid', 'FireVolk', 'Codfish']);
     expect(tracks.map((t) => t.artistId), ['UCastrid', null, 'UCcod']);
   });
+
+  test('a row without any artist (a suggested video) gets the uploader\'s name, never none', () async {
+    final asked = <Uri>[];
+    final web = YtMusicWeb(
+      cookies: '',
+      visitorData: '',
+      client: MockClient((req) async {
+        if (req.url.host == 'www.youtube.com' && req.url.path == '/oembed') {
+          asked.add(req.url);
+          final id = Uri.parse(req.url.queryParameters['url']!).queryParameters['v'];
+          return http.Response(
+            jsonEncode({'author_name': id == 'v1' ? 'Codfish - Boots n\' cats!' : 'Codfish - Topic'}),
+            200,
+          );
+        }
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode({
+              'contents': [
+                // "Video • 36M views": YouTube Music leaves the uploader out here.
+                row('Codfish | Boulevard of Broken Dreams (Green Day Beatbox Cover)', 'v1', [
+                  [text('Video'), dot, text('36M views')],
+                ]),
+                row('Fish Man\'s Drum & Bass', 'v2', [
+                  [text('Song'), dot, text('1.7M plays')],
+                ]),
+                row('Eyes on Fire', 'v3', [
+                  [text('Song'), dot, link('Codfish', 'UCcod', 'MUSIC_PAGE_TYPE_ARTIST')],
+                ]),
+              ],
+            }),
+          ),
+          200,
+        );
+      }),
+    );
+    final hits = (await web.suggestions('codfish')).items.map((i) => i.track!).toList();
+    expect(hits.map((t) => t.artist), [
+      'Codfish - Boots n\' cats!',
+      'Codfish',
+      'Codfish',
+    ], reason: '"- Topic" left out');
+    expect(asked, hasLength(2), reason: 'only the rows without an artist are looked up');
+    await web.suggestions('codfish');
+    expect(asked, hasLength(2), reason: 'remembered');
+  });
 }

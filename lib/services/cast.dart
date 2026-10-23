@@ -300,7 +300,8 @@ class Cast extends ChangeNotifier {
         await a.setMetadata(title: item.title, artist: item.artist, album: item.album);
         await a.load(_airPlaySource(item.media(Duration.zero)), duration: item.duration, from: from, play: play);
       } catch (e) {
-        onError('Couldn\'t play ${item.title} on ${a.device.name}: $e');
+        debugPrint('AirPlay load: $e');
+        onError('Couldn\'t play ${item.title} on ${a.device.name}');
       }
       notifyListeners();
       return;
@@ -356,7 +357,8 @@ class Cast extends ChangeNotifier {
       _loading = false;
       _playing = false;
       notifyListeners();
-      onError(e is DlnaException ? e.message : 'Couldn\'t play ${item.title} on ${c.renderer.name}: $e');
+      debugPrint('DLNA load: $e');
+      onError('Couldn\'t play ${item.title} on ${c.renderer.name}');
     }
   }
 
@@ -448,7 +450,8 @@ class Cast extends ChangeNotifier {
     try {
       await action();
     } catch (e) {
-      onError(e is DlnaException ? e.message : 'Lost touch with ${target?.name ?? 'the device'}');
+      debugPrint('Cast control: $e');
+      onError('${target?.name ?? 'The device'} didn\'t respond');
     }
   }
 

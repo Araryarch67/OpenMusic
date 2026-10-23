@@ -32,7 +32,7 @@ Future<bool> _report(BuildContext context, Future<void> Function() change, Strin
     messenger.showSnackBar(SnackBar(content: Text(done)));
     return true;
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
     return false;
   }
 }
@@ -260,7 +260,7 @@ Future<void> addToPlaylist(BuildContext context, List<Track> tracks) async {
         final n = await account.addToPlaylist(p.id, tracks);
         messenger.showSnackBar(SnackBar(content: Text(n == 0 ? 'Already in ${p.title}' : '$what to ${p.title}')));
       } catch (e) {
-        messenger.showSnackBar(SnackBar(content: Text('$e')));
+        messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
       }
   }
 }
@@ -304,7 +304,7 @@ Future<bool> inviteToPlaylist(BuildContext context, String playlistId, PlaylistP
   try {
     link = await account.inviteLink(playlistId, privacy: privacy);
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
     return false;
   }
   await Clipboard.setData(ClipboardData(text: link));
@@ -394,7 +394,7 @@ Future<String?> askToJoinPlaylist(BuildContext context) async {
   try {
     return await account.joinPlaylist(link);
   } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text('$e')));
+    messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
     return null;
   }
 }

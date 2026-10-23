@@ -68,14 +68,27 @@ class Artwork extends StatelessWidget {
   Widget _image(BuildContext context, Uint8List? bytes, Track t) {
     if (bytes == null) return _placeholder(t);
     final dpr = MediaQuery.devicePixelRatioOf(context);
-    return Image(
+    Widget image(int width) => Image(
       key: ValueKey(t.albumKey ?? t.id),
-      image: ResizeImage(MemoryImage(bytes), width: ((size ?? 300) * dpr).round(), allowUpscaling: false),
+      image: ResizeImage(MemoryImage(bytes), width: width, allowUpscaling: false),
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,
       gaplessPlayback: true,
       errorBuilder: (_, _, _) => _placeholder(t),
+    );
+    final fixed = size;
+    if (fixed != null) return image((fixed * dpr).round());
+    // Filling the parent: decoded at the size it's drawn, not a guess. A card
+    // is smaller than 300 dp (less memory), the full player's cover larger (sharp).
+    return LayoutBuilder(
+      // Keyed like the image, so the cover still fades in over the placeholder.
+      key: ValueKey(t.albumKey ?? t.id),
+      builder: (context, c) {
+        final side = c.biggest.shortestSide.isFinite ? c.biggest.shortestSide : 300.0;
+        // In 64 px steps, so a window being resized doesn't decode every cover again at each width.
+        return image(((side * dpr / 64).ceil() * 64).clamp(64, 4096));
+      },
     );
   }
 
@@ -369,7 +382,7 @@ class TransportControls extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
-    final hasQueue = c.queue.isNotEmpty;
+    final hasQueue = c.hasQueue;
     final skipSize = large ? 40.0 : 26.0;
     final modeSize = large ? 26.0 : 20.0;
     final row = Row(

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and older: Auto Backup and adb backup leave out the YouTube
+     Music session. Its cookies sign in to the whole YouTube account; they stay
+     on this phone (sign in again on a new one). -->
+<full-backup-content>
+    <exclude domain="file" path="youtube_music_account.json" />
+</full-backup-content>

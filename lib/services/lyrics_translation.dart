@@ -53,6 +53,9 @@ abstract final class LyricsTranslation {
     final lang = to ?? targetLanguage;
     final key = '$lang\u0000${lines.join('\n')}';
     final future = _cache[key] ??= _of(lines, lang, client ?? _http);
+    while (_cache.length > 16) {
+      _cache.remove(_cache.keys.first);
+    }
     return future.catchError((Object e) {
       _cache.remove(key);
       throw e;

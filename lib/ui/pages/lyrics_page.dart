@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../models/track.dart';
@@ -375,16 +377,29 @@ class _SyncedLyricsState extends State<_SyncedLyrics> with _Extras {
 
   late final List<GlobalKey> _keys = [for (final _ in widget.lyrics.lines) GlobalKey()];
   final _scroll = SmoothScrollController();
-  Stream<Duration>? _position;
+  StreamSubscription<Duration>? _ticks;
+
+  /// The line being sung. Rebuilt when it changes, not on every position tick.
+  int _at = -1;
+
+  // A little early: a line should light up as it starts, not after.
+  int _lineAt(Duration position) => widget.lyrics.lineAt(position + const Duration(milliseconds: 150));
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _position ??= PlayerScope.read(context).positionUpdates();
+    if (_ticks != null) return;
+    final c = PlayerScope.read(context);
+    _at = _lineAt(c.position);
+    _ticks = c.positionUpdates().listen((p) {
+      final at = _lineAt(p);
+      if (at != _at && mounted) setState(() => _at = at);
+    });
   }
 
   @override
   void dispose() {
+    _ticks?.cancel();
     _scroll.dispose();
     super.dispose();
   }
@@ -422,11 +437,9 @@ class _SyncedLyricsState extends State<_SyncedLyrics> with _Extras {
         _userScrolledAt = DateTime.now();
         return false;
       },
-      child: StreamBuilder<Duration>(
-        stream: _position,
-        builder: (context, snap) {
-          // A little early: a line should light up as it starts, not after.
-          final at = widget.lyrics.lineAt((snap.data ?? c.position) + const Duration(milliseconds: 150));
+      child: Builder(
+        builder: (context) {
+          final at = _at;
           _follow(at);
           return SingleChildScrollView(
             controller: _scroll,

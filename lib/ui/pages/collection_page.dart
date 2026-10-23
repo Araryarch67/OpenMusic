@@ -22,12 +22,14 @@ class CollectionPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
-    // Liked music changes with every like, wherever in the app it's made.
-    if (collection.id == likedMusicId) {
-      return ListenableBuilder(listenable: c.ytMusic, builder: (context, _) => _build(context, c));
-    }
-    return _build(context, c);
+    // Rebuilt when the library changes (and Liked music with every like,
+    // wherever in the app it's made), not on every change of what's playing:
+    // the buttons and rows that show that follow it themselves.
+    final c = PlayerScope.identity(context);
+    return ListenableBuilder(
+      listenable: collection.id == likedMusicId ? Listenable.merge([c.libraryRevision, c.ytMusic]) : c.libraryRevision,
+      builder: (context, _) => _build(context, c),
+    );
   }
 
   Widget _build(BuildContext context, PlayerController c) {
@@ -53,10 +55,18 @@ class CollectionPage extends StatelessWidget {
         } ??
         collection;
     final tracks = live.tracks;
-    final playingHere = c.isPlayingFrom(live);
     final isArtist = live.kind == CollectionKind.artist;
     final isAll = live.kind == CollectionKind.allSongs;
     final multiDisc = live.kind == CollectionKind.album && tracks.map((t) => t.discNumber ?? 1).toSet().length > 1;
+    // Song i is row i; a disc heading (multi-disc albums) is -1 - the index of the song it heads.
+    final rows = multiDisc
+        ? [
+            for (var i = 0; i < tracks.length; i++) ...[
+              if (i == 0 || tracks[i].discNumber != tracks[i - 1].discNumber) -1 - i,
+              i,
+            ],
+          ]
+        : List<int>.generate(tracks.length, (i) => i);
     final text = Theme.of(context).textTheme;
     final playlistId = live.kind == CollectionKind.playlist ? live.id : null;
     final actions = [...this.actions, if (playlistId != null) _PlaylistMenu(id: playlistId, name: live.title)];
@@ -77,29 +87,43 @@ class CollectionPage extends StatelessWidget {
                 padding: EdgeInsets.fromLTRB(shell.compact ? 16 : 24, 16, 24, 8),
                 child: Row(
                   children: [
-                    PlayButton(
-                      size: 56,
-                      color: AppColors.accent,
-                      iconColor: AppColors.onAccent,
-                      playing: playingHere && c.isPlaying,
-                      onPressed: tracks.isEmpty
-                          ? null
-                          : playingHere
-                          ? c.togglePlay
-                          : () => c.playCollection(live),
-                    ),
-                    const SizedBox(width: 16),
-                    // Lit while this collection plays shuffled; there it toggles shuffle.
-                    ModeButton(
-                      tooltip: playingHere ? (c.shuffle ? 'Disable shuffle' : 'Enable shuffle') : 'Shuffle play',
-                      active: playingHere && c.shuffle,
-                      size: 30,
-                      icon: Icons.shuffle_rounded,
-                      onPressed: tracks.isEmpty
-                          ? null
-                          : playingHere
-                          ? c.toggleShuffle
-                          : () => c.playCollection(live, shuffled: true),
+                    PlayerSelect<(bool, bool, bool)>(
+                      select: (c) {
+                        final here = c.isPlayingFrom(live);
+                        return (here, here && c.isPlaying, here && c.shuffle);
+                      },
+                      builder: (context, s, _) {
+                        final (playingHere, playing, shuffled) = s;
+                        return Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            PlayButton(
+                              size: 56,
+                              color: AppColors.accent,
+                              iconColor: AppColors.onAccent,
+                              playing: playing,
+                              onPressed: tracks.isEmpty
+                                  ? null
+                                  : playingHere
+                                  ? c.togglePlay
+                                  : () => c.playCollection(live),
+                            ),
+                            const SizedBox(width: 16),
+                            // Lit while this collection plays shuffled; there it toggles shuffle.
+                            ModeButton(
+                              tooltip: playingHere ? (shuffled ? 'Disable shuffle' : 'Enable shuffle') : 'Shuffle play',
+                              active: shuffled,
+                              size: 30,
+                              icon: Icons.shuffle_rounded,
+                              onPressed: tracks.isEmpty
+                                  ? null
+                                  : playingHere
+                                  ? c.toggleShuffle
+                                  : () => c.playCollection(live, shuffled: true),
+                            ),
+                          ],
+                        );
+                      },
                     ),
                     ...actions,
                     if (isAll) ...[
@@ -138,33 +162,35 @@ class CollectionPage extends StatelessWidget {
             if (!shell.compact) SliverToBoxAdapter(child: _ColumnHeader(showAlbum: live.kind != CollectionKind.album)),
             SliverPadding(
               padding: EdgeInsets.symmetric(horizontal: shell.compact ? 12 : 16),
-              sliver: SliverList.list(
-                children: [
-                  for (var i = 0; i < tracks.length; i++) ...[
-                    // Multi-disc albums: a "Disc 2" heading where each disc starts.
-                    if (multiDisc && (i == 0 || tracks[i].discNumber != tracks[i - 1].discNumber))
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                        child: Row(
-                          children: [
-                            Icon(Icons.album_outlined, size: 18, color: AppColors.textSecondary),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Disc ${tracks[i].discNumber ?? 1}',
-                              style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
-                            ),
-                          ],
-                        ),
+              // Rows are built as they scroll into view: All Songs can hold thousands.
+              sliver: SliverList.builder(
+                itemCount: rows.length,
+                itemBuilder: (context, r) {
+                  final i = rows[r];
+                  // Multi-disc albums: a "Disc 2" heading where each disc starts.
+                  if (i < 0) {
+                    return Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                      child: Row(
+                        children: [
+                          Icon(Icons.album_outlined, size: 18, color: AppColors.textSecondary),
+                          const SizedBox(width: 12),
+                          Text(
+                            'Disc ${tracks[-1 - i].discNumber ?? 1}',
+                            style: text.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
                       ),
-                    TrackRow(
-                      track: tracks[i],
-                      index: multiDisc ? (tracks[i].trackNumber ?? i + 1) : i + 1,
-                      showArtwork: live.kind != CollectionKind.album,
-                      showAlbum: live.kind != CollectionKind.album,
-                      onTap: () => c.playCollection(live, index: i),
-                    ),
-                  ],
-                ],
+                    );
+                  }
+                  return TrackRow(
+                    track: tracks[i],
+                    index: multiDisc ? (tracks[i].trackNumber ?? i + 1) : i + 1,
+                    showArtwork: live.kind != CollectionKind.album,
+                    showAlbum: live.kind != CollectionKind.album,
+                    onTap: () => c.playCollection(live, index: i),
+                  );
+                },
               ),
             ),
             if (isArtist) ..._artistAlbums(context, c, live),

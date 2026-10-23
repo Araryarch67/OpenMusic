@@ -209,7 +209,7 @@ class DiscoverShelves extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Couldn\'t load YouTube Music: ${snap.error}',
+                          'Couldn\'t load YouTube Music. Check your internet connection.',
                           style: text.bodyLarge?.copyWith(color: Theme.of(context).colorScheme.error),
                         ),
                         const SizedBox(height: 8),
@@ -295,7 +295,7 @@ class _RemoteCollectionPageState extends State<RemoteCollectionPage> {
                 padding: const EdgeInsets.all(48),
                 child: Center(
                   child: snap.hasError
-                      ? Text('Couldn\'t load this playlist: ${snap.error}')
+                      ? const Text('Couldn\'t load this playlist. Check your internet connection.')
                       : const CircularProgressIndicator(strokeWidth: 2.5),
                 ),
               ),
@@ -370,7 +370,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
       await account.renamePlaylist(widget.playlist.id, answer.title);
       if (mounted) setState(() => _title = answer.title);
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
     }
   }
 
@@ -380,7 +380,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
       await _account.setPlaylistPrivacy(widget.playlist.id, privacy);
       messenger.showSnackBar(SnackBar(content: Text('Playlist is now ${privacy.label.toLowerCase()}')));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
     }
   }
 
@@ -418,7 +418,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
       messenger.showSnackBar(SnackBar(content: Text('Deleted "$_title"')));
       history != null ? history.back() : navigator.maybePop();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('$e')));
+      messenger.showSnackBar(SnackBar(content: Text(YoutubeMusicAccount.describe(e))));
     }
   }
 
@@ -437,7 +437,7 @@ class _LibraryPlaylistPageState extends State<LibraryPlaylistPage> {
                 child: _error != null
                     ? Column(
                         children: [
-                          Text('Couldn\'t load this playlist: $_error'),
+                          const Text('Couldn\'t load this playlist. Check your internet connection.'),
                           TextButton(
                             onPressed: () {
                               setState(() => _error = null);

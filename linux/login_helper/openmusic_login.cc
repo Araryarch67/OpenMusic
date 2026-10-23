@@ -128,10 +128,17 @@ void OnCookies(GObject* source, GAsyncResult* result, gpointer data) {
                                       new Pending{state, header});
 }
 
+// On music.youtube.com itself: a bare prefix test would also let
+// "https://music.youtube.com.example.org/" read the session values.
+bool OnOrigin(const gchar* uri) {
+  if (uri == nullptr || !g_str_has_prefix(uri, kOrigin)) return false;
+  const char next = uri[sizeof kOrigin - 1];
+  return next == '\0' || next == '/' || next == '?' || next == '#';
+}
+
 void Check(State* state) {
   if (state->checking || state->done) return;
-  const gchar* uri = webkit_web_view_get_uri(state->view);
-  if (uri == nullptr || !g_str_has_prefix(uri, kOrigin)) return;
+  if (!OnOrigin(webkit_web_view_get_uri(state->view))) return;
   state->checking = true;
   WebKitWebsiteDataManager* data = webkit_web_view_get_website_data_manager(state->view);
   webkit_cookie_manager_get_cookies(webkit_website_data_manager_get_cookie_manager(data), kOrigin, nullptr,

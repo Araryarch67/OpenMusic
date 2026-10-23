@@ -35,8 +35,13 @@ class _LibraryListState extends State<LibraryList> {
 
   @override
   Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
-    return ListenableBuilder(listenable: c.ytMusic, builder: (context, _) => _build(context, c, c.ytMusic.libraryNow));
+    // The library and the YouTube Music account, not every change of what's
+    // playing: this list sits in the sidebar the whole time.
+    final c = PlayerScope.identity(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([c.libraryRevision, c.ytMusic]),
+      builder: (context, _) => _build(context, c, c.ytMusic.libraryNow),
+    );
   }
 
   Widget _build(BuildContext context, PlayerController c, YoutubeMusicLibrary? online) {
@@ -45,11 +50,12 @@ class _LibraryListState extends State<LibraryList> {
     final account = c.ytMusic;
     bool show(LibraryFilter f) => _filter == null || _filter == f;
 
-    final local = <Collection>[
-      if (show(LibraryFilter.albums)) ...c.albums,
-      if (show(LibraryFilter.artists)) ...c.artists,
-    ];
-    if (_filter == null) local.sort((a, b) => a.title.toLowerCase().compareTo(b.title.toLowerCase()));
+    final local = switch (_filter) {
+      null => c.albumsAndArtists,
+      LibraryFilter.albums => c.albums,
+      LibraryFilter.artists => c.artists,
+      LibraryFilter.playlists => const <Collection>[],
+    };
 
     final rows = <Widget>[
       if (show(LibraryFilter.playlists)) ...[
@@ -93,7 +99,9 @@ class _LibraryListState extends State<LibraryList> {
         if (c.library.isNotEmpty) _LibraryRow(collection: c.allSongs, collapsed: widget.collapsed),
         if (c.youtubeDownloads case final d?) _LibraryRow(collection: d, collapsed: widget.collapsed),
       ],
-      for (final col in local) _LibraryRow(collection: col, collapsed: widget.collapsed),
+    ];
+    // Albums and artists (there can be thousands) are made as they scroll into view.
+    final after = <Widget>[
       if (online != null && show(LibraryFilter.artists))
         for (final a in online.artists)
           _SimpleRow(
@@ -212,10 +220,15 @@ class _LibraryListState extends State<LibraryList> {
             ),
           Expanded(
             child: SmoothScroll(
-              builder: (context, scroll) => ListView(
+              builder: (context, scroll) => ListView.builder(
                 controller: scroll,
                 padding: EdgeInsets.fromLTRB(8, 0, 8, (widget.dense ? 8 : 16) + MediaQuery.paddingOf(context).bottom),
-                children: rows,
+                itemCount: rows.length + local.length + after.length,
+                itemBuilder: (context, i) => i < rows.length
+                    ? rows[i]
+                    : i < rows.length + local.length
+                    ? _LibraryRow(collection: local[i - rows.length], collapsed: widget.collapsed)
+                    : after[i - rows.length - local.length],
               ),
             ),
           ),
@@ -324,11 +337,18 @@ class _LibraryRow extends StatelessWidget {
   final bool online;
 
   @override
-  Widget build(BuildContext context) {
-    final c = PlayerScope.of(context);
+  Widget build(BuildContext context) => PlayerSelect<(bool, bool)>(
+    // Only what this row shows: whether its collection is what's playing.
+    select: (c) {
+      final here = c.isPlayingFrom(collection);
+      return (here, here && c.isPlaying);
+    },
+    builder: (context, s, _) => _row(context, playingHere: s.$1, playing: s.$2),
+  );
+
+  Widget _row(BuildContext context, {required bool playingHere, required bool playing}) {
     final shell = ShellScope.of(context);
     final text = Theme.of(context).textTheme;
-    final playingHere = c.isPlayingFrom(collection);
     final isArtist = collection.kind == CollectionKind.artist;
     final art = collection.kind == CollectionKind.allSongs
         ? CoverMosaic(tracks: collection.tracks, size: 48)
@@ -385,7 +405,7 @@ class _LibraryRow extends StatelessWidget {
                   ),
                   if (playingHere)
                     Icon(
-                      c.isPlaying ? Icons.volume_up_rounded : Icons.volume_mute_rounded,
+                      playing ? Icons.volume_up_rounded : Icons.volume_mute_rounded,
                       color: AppColors.accent,
                       size: 18,
                     ),

@@ -285,6 +285,7 @@ class _PreviewCardState extends State<_PreviewCard> {
                   ? ColoredBox(color: AppColors.elevated)
                   : Image.network(
                       thumb,
+                      cacheWidth: (112 * MediaQuery.devicePixelRatioOf(context)).round(),
                       fit: BoxFit.cover,
                       errorBuilder: (_, _, _) => ColoredBox(color: AppColors.elevated),
                     ),

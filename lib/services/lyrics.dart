@@ -134,7 +134,20 @@ abstract final class LyricsService {
   /// [Lyrics.none] when there are none; throws when no source could be
   /// reached (that isn't cached, so the next try asks again).
   static Future<Lyrics> forTrack(Track track) {
-    final future = _cache[track.id] ??= _find(track);
+    final cached = _cache.remove(track.id);
+    final future =
+        _cache[track.id] = // newest last
+            cached ??
+            _find(track).then((r) {
+              // A source that couldn't be asked (offline, rate limited) may have them:
+              // "none" isn't remembered then, so the next look asks again.
+              if (r.missed) _cache.remove(track.id);
+              return r.lyrics;
+            });
+    // A long session plays thousands of songs: keep the lyrics of the last few dozen.
+    while (_cache.length > 48) {
+      _cache.remove(_cache.keys.first);
+    }
     future.ignore();
     return future.catchError((Object e) {
       _cache.remove(track.id);
@@ -142,29 +155,59 @@ abstract final class LyricsService {
     });
   }
 
-  static Future<Lyrics> _find(Track track) async {
+  static Future<({Lyrics lyrics, bool missed})> _find(Track track) async {
     final path = track.path;
     if (path != null) {
       final local = await Isolate.run(() => _local(path));
-      if (local != null && !local.isEmpty) return local;
+      if (local != null && !local.isEmpty) return (lyrics: local, missed: false);
     }
     final errors = <Object>[];
+    var asked = 0;
     Future<Lyrics?> attempt(Future<Lyrics?> Function() source) async {
+      asked++;
       try {
         return await source();
       } catch (e) {
+        debugPrint('Lyrics source failed: $e');
         errors.add(e);
         return null;
       }
     }
 
+    final found = <Lyrics?>[];
+    Lyrics? timed() => found.firstWhere(_timed, orElse: () => null);
+
     // The two main sources at once; the next two only if neither has them timed.
-    final found = [
-      ...await Future.wait([attempt(() => _youtube(track)), attempt(() => _lrclib(track))]),
-    ];
-    if (found.firstWhere(_timed, orElse: () => null) case final timed?) return timed;
-    found.addAll(await Future.wait([attempt(() => _betterLyrics(track)), attempt(() => netease(track))]));
-    if (found.firstWhere(_timed, orElse: () => null) case final timed?) return timed;
+    Future<Lyrics?> search(Track t) async {
+      found.addAll(await Future.wait([attempt(() => _youtube(t)), attempt(() => _lrclib(t))]));
+      if (timed() case final l?) return l;
+      found.addAll(await Future.wait([attempt(() => _betterLyrics(t)), attempt(() => netease(t))]));
+      return timed();
+    }
+
+    if (await search(track) case final l?) return (lyrics: l, missed: false);
+
+    // Another upload of the same song (a fan's video, a lyric video, the music
+    // video of an album track) has no Lyrics tab of its own, and its title and
+    // uploader don't match the lyrics sites: ask again as the song YouTube
+    // Music's catalogue has.
+    Track? same;
+    if (track.isRemote) {
+      try {
+        final match = await _catalogueSong(track);
+        if (match != null) {
+          same = match.song;
+          // Timed lines only fit the same recording; another one gets the words alone.
+          if (await search(match.song) case final l?) {
+            return (lyrics: match.sameLength ? l : _unsynced(l), missed: false);
+          }
+        }
+      } catch (e) {
+        debugPrint('Lyrics: no catalogue song: $e');
+        errors.add(e);
+      }
+    }
+
     Lyrics? plain() {
       for (final l in found) {
         if (l == null) continue;
@@ -173,15 +216,69 @@ abstract final class LyricsService {
       return null;
     }
 
-    if (plain() case final l?) return l;
-    found.add(await attempt(() => lyricsOvh(track)));
-    if (plain() case final l?) return l;
-    if (errors.length == found.length) throw errors.first; // nothing could be asked
-    return Lyrics.none;
+    if (plain() case final l?) return (lyrics: l, missed: false);
+    found.add(await attempt(() => lyricsOvh(same ?? track)));
+    if (plain() case final l?) return (lyrics: l, missed: false);
+    if (errors.length >= asked) throw errors.first; // nothing could be asked
+    return (lyrics: Lyrics.none, missed: errors.isNotEmpty);
   }
 
-  /// Real timed lyrics: LRCLIB has junk entries with a line or two.
-  static bool _timed(Lyrics? l) => l != null && l.lines.where((line) => line.text.isNotEmpty).length >= 4;
+  /// Real timed lyrics. LRCLIB has junk entries with a line or two; from the
+  /// others a song with only a few words (a beatbox track) is still lyrics.
+  static bool _timed(Lyrics? l) =>
+      l != null && l.lines.where((line) => line.text.isNotEmpty).length >= (l.source == 'LRCLIB' ? 4 : 1);
+
+  /// Lines of another recording, as words without times.
+  static Lyrics _unsynced(Lyrics l) => l.plain != null
+      ? Lyrics(plain: l.plain, source: l.source)
+      : Lyrics(plain: [for (final line in l.lines) line.text].join('\n').trim(), source: l.source);
+
+  /// The song YouTube Music's catalogue has under the upload's words: its
+  /// title has to be in the upload's title, and the artist named there or the
+  /// length the same. [sameLength]: within a few seconds, so timed lines fit.
+  static Future<({Track song, bool sameLength})?> _catalogueSong(Track upload) async {
+    final title = _cleanTitle(upload.title);
+    final uploader = upload.artist == Track.unknownArtist ? '' : upload.artist;
+    final words = _norm('$title $uploader');
+    final web = YtMusicWeb.anonymous();
+    try {
+      // The upload's own words first, then only the song's part of them
+      // ("Song - Artist Karaoke Lower Key" → "Song - Artist").
+      for (final query in {'$title $uploader'.trim(), _core(upload.title)}) {
+        if (query.isEmpty) continue;
+        for (final hit in (await web.searchSongs(query)).take(8)) {
+          if (hit.videoId == upload.videoId) continue; // asked already
+          final name = _norm(_cleanTitle(hit.title));
+          if (name.isEmpty || !_norm(title).contains(name)) continue;
+          final artist = _norm(hit.artist.split(', ').first);
+          final named = artist.isNotEmpty && words.contains(artist);
+          final a = upload.duration, b = hit.duration;
+          final sameLength = a != null && b != null && (a - b).abs() <= const Duration(seconds: 3);
+          if (!named && !sameLength) continue;
+          final song = Track.youtube(
+            videoId: hit.videoId,
+            title: hit.title,
+            artist: hit.artist.isEmpty ? Track.unknownArtist : hit.artist,
+            duration: hit.duration,
+          );
+          return (song: song, sameLength: sameLength);
+        }
+      }
+      return null;
+    } finally {
+      web.close();
+    }
+  }
+
+  /// Words in a video's title that say it's a version of the song, and all after them.
+  static final _versionWords = RegExp(
+    r'[\s|:,–—-]*\b(karaoke|cover|covered|live|remix|lyrics?|lirik|instrumental|reaction|acoustic|versi|version|'
+    r'lower key|female key|male key|nada rendah|nada tinggi|slowed|reverb|sped up|nightcore|tiktok)\b.*$',
+    caseSensitive: false,
+  );
+
+  /// The song's part of a video title: "Tulus - Hati Hati Di Jalan Karaoke Lower Key" → "Tulus - Hati Hati Di Jalan".
+  static String _core(String title) => _cleanTitle(title).replaceFirst(_versionWords, '').replaceAll('|', ' ').trim();
 
   /// The song's own lyrics on YouTube Music (YouTube songs only).
   static Future<Lyrics?> _youtube(Track track) async {
