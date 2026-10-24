@@ -89,9 +89,14 @@ test/                          Unit and widget tests
 
 ## How audio works
 
-- just_audio everywhere; on **Linux, Windows and Android** its backend is
-  libmpv through `just_audio_media_kit`. macOS and iOS use native players, so
-  `AudioEngine.supported` is false there and the Sound settings hide.
+- just_audio everywhere, with libmpv as its backend on **every platform**
+  through `just_audio_media_kit`. Linux uses the system libmpv; the others use
+  OpenMusic's own builds, which have the FFmpeg filters the sound settings
+  need: `tool/build_libmpv_windows.sh` (committed DLL),
+  `tool/build_libmpv_android.sh` (committed `.so` files in the vendored
+  `media_kit_libs_android_audio`) and `tool/build_libmpv_apple.sh` (built on a
+  Mac, by CI or by the podspec on first build; not committed). Change one and
+  the others should follow: same mpv, same FFmpeg, same filter list.
 - `third_party/just_audio_media_kit` is vendored (public domain) to expose the
   mpv player: `JustAudioMediaKit.onPlayerCreated` and `.activePlayer`.
   just_audio recreates the platform player after `stop()`, so settings are
@@ -163,6 +168,7 @@ test/                          Unit and widget tests
 | Package | Why |
 |---|---|
 | `just_audio_media_kit` | Exposes the libmpv player (hook + `activePlayer`) |
+| `media_kit_libs_macos_audio`, `media_kit_libs_ios_audio` | Their podspecs use `Mpv.xcframework` from `tool/build_libmpv_apple.sh` instead of media_kit's download |
 | `media_kit_libs_android_audio` | Android's `libmpv.so` from `tool/build_libmpv_android.sh` (the FFmpeg filters crossfeed, room correction and Virtual speakers need) instead of media_kit's downloaded one; media_kit's helper library is kept as it was |
 | `audio_metadata_reader` | Its FLAC and MP4 writers dropped ReplayGain, lyrics, disc numbers and unknown tags (MP4 freeform `----` atoms) on every save; ours keep them |
 | `flutter_inappwebview_linux` | Stub: the real one links WPE WebKit; Linux sign-in uses `linux/login_helper` instead |
