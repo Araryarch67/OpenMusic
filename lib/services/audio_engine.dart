@@ -218,9 +218,19 @@ class SignalPath {
 
   /// Mixed by the OS (PipeWire / PulseAudio / shared WASAPI) rather than sent to the DAC as-is.
   bool get viaSystemMixer => switch (output) {
-    'pipewire' || 'pulse' || 'jack' || 'openal' || 'sdl' || 'opensles' || 'audiotrack' || 'aaudio' => true,
+    'pipewire' ||
+    'pulse' ||
+    'jack' ||
+    'openal' ||
+    'sdl' ||
+    'opensles' ||
+    'audiotrack' ||
+    'aaudio' ||
+    'audiounit' => true,
     // Shared mode goes through Windows' / macOS's mixer (its volume, effects and rate).
     'wasapi' || 'coreaudio' => !exclusive,
+    // mpv hands an exclusive Core Audio output to this driver (hog mode, the DAC's own format).
+    'coreaudio_exclusive' => false,
     'alsa' => !RegExp(r'^alsa/(hw|plughw|front|iec958|hdmi|usbstream):').hasMatch(device) || device.contains('plughw'),
     _ => false,
   };
@@ -281,10 +291,11 @@ class AudioEngine extends ChangeNotifier {
     JustAudioMediaKit.onPlayerCreated = (p) => unawaited(_applyAll(p));
   }
 
-  static bool get supported => Platform.isLinux || Platform.isWindows || Platform.isAndroid;
+  static bool get supported =>
+      Platform.isLinux || Platform.isWindows || Platform.isAndroid || Platform.isMacOS || Platform.isIOS;
 
-  /// Android offers no exclusive or raw device output: OpenSL ES plays through the system mixer.
-  static bool get hasOutputChoice => !Platform.isAndroid;
+  /// Android and iOS offer no device choice or exclusive output: the system mixer plays everything.
+  static bool get hasOutputChoice => !Platform.isAndroid && !Platform.isIOS;
 
   /// Whether the OS output can be opened exclusively by mpv's own option
   /// (WASAPI / CoreAudio). On Linux a direct ALSA device does the same.
@@ -875,6 +886,9 @@ class AudioEngine extends ChangeNotifier {
       'audio-device': _openedDevice!,
       // The app's name in the Linux mixers (PulseAudio / PipeWire); mpv's default is "mpv".
       'audio-client-name': 'OpenMusic',
+      // macOS, shared: in bit-perfect mode the DAC follows each song's rate, so Core Audio's mixer
+      // doesn't resample (Exclusive mode takes the device's own format anyway).
+      if (Platform.isMacOS) 'coreaudio-change-physical-format': bitPerfect ? 'yes' : 'no',
       'audio-exclusive': exclusiveOutput ? 'yes' : 'no',
       'audio-samplerate': bitPerfect ? '0' : '${outputRate ?? 0}',
       // Only used when the rate has to change; keeps the default otherwise.

@@ -28,5 +28,12 @@
 	<string>MainMenu</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
+	<!-- Casting: finds TVs and speakers on the local network (DLNA's SSDP and AirPlay's Bonjour). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>OpenMusic looks for TVs and speakers on your network so you can play music on them.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_raop._tcp</string>
+	</array>
 </dict>
 </plist>

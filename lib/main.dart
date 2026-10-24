@@ -23,9 +23,10 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (kDebugMode) await _logErrorsToFile();
   // just_audio has no native Linux/Windows backend; route those through libmpv.
-  // Android too: libmpv gives it the equalizer, ReplayGain, gapless, the
-  // signal path and decoders (ALAC, WavPack, DSD) that ExoPlayer lacks.
-  JustAudioMediaKit.ensureInitialized(linux: true, windows: true, android: true);
+  // Android, macOS and iOS too: libmpv gives them the equalizer, Virtual
+  // speakers, ReplayGain, gapless, the signal path and decoders (ALAC,
+  // WavPack, DSD) that ExoPlayer and AVPlayer lack.
+  JustAudioMediaKit.ensureInitialized(linux: true, windows: true, android: true, macOS: true, iOS: true);
   // The KEMAR data behind Virtual speakers asks to be credited.
   LicenseRegistry.addLicense(() async* {
     yield LicenseEntryWithLineBreaks([

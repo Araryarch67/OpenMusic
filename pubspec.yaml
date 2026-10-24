@@ -71,6 +71,11 @@ dependency_overrides:
   # Virtual speakers need (tool/build_libmpv_android.sh); media_kit's has none.
   media_kit_libs_android_audio:
     path: third_party/media_kit_libs_android_audio
+  # The same for macOS and iOS, built from source on a Mac (tool/build_libmpv_apple.sh).
+  media_kit_libs_macos_audio:
+    path: third_party/media_kit_libs_macos_audio
+  media_kit_libs_ios_audio:
+    path: third_party/media_kit_libs_ios_audio
   # Its FLAC tag writer dropped ReplayGain, lyrics, disc numbers and custom
   # tags on every save; the copy here keeps them (see flac_writer.dart).
   audio_metadata_reader:

@@ -212,7 +212,11 @@ class AdvancedAudioSettings extends StatelessWidget {
                         secondary: const Icon(Icons.verified_outlined),
                         title: const Text('Bit-perfect mode'),
                         subtitle: Text(
-                          AudioEngine.hasExclusiveMode
+                          Platform.isMacOS
+                              ? 'No equalizer, leveling or resampling in OpenMusic, and your DAC follows each song\'s sample rate. '
+                                    'Volume still works; at 100% nothing is changed. Other apps keep playing, so macOS still mixes the sound: '
+                                    'turn on Exclusive mode too to send the file to your DAC untouched.'
+                              : AudioEngine.hasExclusiveMode
                               ? 'No equalizer, leveling or resampling in OpenMusic. Volume still works; at 100% nothing is changed. '
                                     'Other apps keep playing, so Windows still mixes the sound: turn on Exclusive mode too to send the file to your DAC untouched.'
                               : 'Sends the file to your DAC untouched: no equalizer, leveling or resampling. Volume still works; at 100% nothing is changed. '
@@ -244,8 +248,11 @@ class AdvancedAudioSettings extends StatelessWidget {
                         secondary: const Icon(Icons.lock_outline_rounded),
                         title: const Text('Exclusive mode'),
                         subtitle: Text(
-                          'Takes over the device so Windows\' mixer can\'t resample: the DAC switches to each song\'s sample rate. '
-                          'Other apps go silent while OpenMusic plays, and Windows\' volume mixer can\'t control it.',
+                          Platform.isMacOS
+                              ? 'Takes over the device so macOS can\'t mix or resample: the DAC switches to each song\'s sample rate. '
+                                    'Other apps go silent while OpenMusic plays.'
+                              : 'Takes over the device so Windows\' mixer can\'t resample: the DAC switches to each song\'s sample rate. '
+                                    'Other apps go silent while OpenMusic plays, and Windows\' volume mixer can\'t control it.',
                           style: muted,
                         ),
                         value: audio.exclusive,

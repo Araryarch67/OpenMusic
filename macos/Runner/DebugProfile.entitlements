@@ -2,15 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- No App Sandbox: OpenMusic is downloaded, not from the App Store, and does what the
+	     sandbox forbids, as it does on Linux and Windows: it runs the yt-dlp and FFmpeg it
+	     downloads, keeps reading the music folders it scans after a restart, writes tags back
+	     into music files, and talks to Discord over its local socket. -->
 	<key>com.apple.security.app-sandbox</key>
-	<true/>
+	<false/>
 	<key>com.apple.security.cs.allow-jit</key>
 	<true/>
-	<key>com.apple.security.network.server</key>
-	<true/>
-	<key>com.apple.security.files.user-selected.read-only</key>
-	<true/>
 	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- Casting: TVs and speakers fetch the music from the app. -->
+	<key>com.apple.security.network.server</key>
 	<true/>
 </dict>
 </plist>

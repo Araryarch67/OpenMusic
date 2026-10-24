@@ -2,6 +2,13 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<!-- Casting: finds TVs and speakers on the local network (DLNA's SSDP and AirPlay's Bonjour). -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>OpenMusic looks for TVs and speakers on your network so you can play music on them.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_raop._tcp</string>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
