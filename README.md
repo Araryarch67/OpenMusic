@@ -34,25 +34,31 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 
 ## Features
 
-| Feature | What you get |
+| Feature | In short |
 |---|---|
-| **One library** | Files on your device, your playlists and YouTube Music show up together in Home, Search and Library. YouTube Music songs carry a small cloud (they stream). Everything else plays offline, including YouTube songs you've downloaded. |
-| **Your music** | Reads tags and cover art from FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD (DSF/DFF) and more, and plays **SACD ISO images** straight from the image (DST discs too). Groups albums and artists, splits cue sheets and shows multi-disc albums. Includes a tag editor (FLAC, MP4 / M4A, MP3, Ogg...) that keeps ReplayGain and custom tags. |
-| **YouTube Music, no account needed** | Home, charts, search and radio work signed out. Press **Sign in with Google** to add your liked songs, playlists and history. You can like songs and create, rename and delete playlists, and add or remove their songs, right from the app. |
-| **Search from anywhere** | On desktop the search box sits in the title bar, next to Home, on every screen: results appear as you type, split into Songs, Artists, Albums and Playlists with a top result first, and recent searches come back when it's empty. On phones it has its own tab, with suggestions and direct hits under the box. |
-| **Follow artists** | Artists you follow on YouTube Music show up in your library; follow or unfollow from any artist page. |
-| **Playlists** | OpenMusic playlists live on your device and can mix your own files with YouTube Music songs. |
-| **Autoplay** | When the queue ends, similar songs keep coming from YouTube Music's own *Up next* radio. You can also *Start radio* from any song. |
-| **Synced lyrics** | Follow the song line by line, from YouTube Music's own lyrics, a `.lrc` file, the file's tags, [LRCLIB](https://lrclib.net), [Better Lyrics](https://betterlyrics.org), NetEase Cloud Music or [lyrics.ovh](https://lyrics.ovh). Click a line to jump to it. Turn on **Pronunciation** (romaji for Japanese, and the like for other scripts) and **Translation** into your language under each line. |
-| **Hi-fi audio** | On desktop and Android: a 10-band parametric equalizer, ReplayGain, gapless playback, headphone crossfeed and bit-perfect output, plus **native DSD to your DAC (DoP)** and **audio plugins** (VST, LV2, CLAP through Carla) on Linux. A live **signal path** shows exactly what happens to every sample. See [Audio](#audio). |
-| **Play on TVs and speakers** | **Play on** sends the music to a TV, speaker or receiver on your network, DLNA / UPnP or AirPlay, from where it was; play, pause, seek, the queue and volume keep working from the app. |
-| **Fast** | YouTube songs start in about 0.3 s and the next one in the queue in under 20 ms (it's fetched ahead); Home appears at once on launch from the last session's shelves. Light on memory too: about 165 MB at rest on Linux. |
-| **Make it yours** | Whole colour schemes, not just an accent: Default, Monochrome, Catppuccin (Mocha, Macchiato, Frappé, Latte), Everblush, Everforest (dark and light), Nord, Gruvbox, Tokyo Night, Dracula and Rosé Pine. Pick an accent on top, any font installed on your device (or dropped into the app's `fonts` folder; Figtree is OpenMusic's own), the text size in pixels, tint the app with the cover art or keep it neutral, choose a blurred-cover or plain Now Playing background, turn on frosted-glass bars, and on Linux make the window see-through so your compositor's blur shows behind it. |
-| **Downloads** | Save any YouTube song or playlist for offline listening, byte for byte in the best quality YouTube serves. |
-| **Made for every screen** | Bottom tabs and a floating mini player on phones (swipe it to change song), a library sidebar and now-playing panel on desktop, tested from 240×320 up to 4K. Desktop navigation works like a browser: Back and Forward in the title bar, mouse side buttons, `Alt+←/→`. The window opens centred, sized to your screen. |
-| **Expanded, full-screen and mini player** | On desktop, like Spotify's: the cover fills the window (**Expanded player**) or the whole screen (`F11`, `Esc`), with the synced lyrics beside it at the press of **Lyrics**; or the window shrinks to a small always-on-top player. |
-| **System media controls** | The Android notification and lock screen, Control Center on iOS / macOS, and MPRIS on Linux (desktop media widgets, `playerctl`). |
-| **Discord, media keys, shortcuts** | Discord Rich Presence, media keys and keyboard shortcuts (`Space`, `Ctrl+K`, `Ctrl+←/→`, `Ctrl+↑/↓` for volume, `Ctrl+V` to import a copied YouTube link). |
+| **One library** | Your files, your playlists and YouTube Music, together |
+| **Every format** | FLAC, ALAC, WAV, AIFF, MP3, AAC, Ogg, Opus, WavPack, APE, DSD, SACD ISO, cue sheets |
+| **YouTube Music** | Works signed out; **Sign in with Google** for likes, playlists and history |
+| **Synced lyrics** | Line by line, with pronunciation and translation |
+| **Playlists** | Mix your files with YouTube songs; import from Spotify, Apple Music or Deezer |
+| **Autoplay and radio** | Similar songs keep coming when the queue ends |
+| **Equalizer** | 10-band parametric, presets, headroom so it never clips |
+| **Virtual speakers** | Headphones sound like two speakers in front of you (HRTF) |
+| **Mono audio** | Both sides as one, in both ears or just one: for headphones with a dead side |
+| **Crossfeed** | Gentler stereo on headphones |
+| **Room correction** | Load an impulse response, e.g. from REW |
+| **Volume leveling** | ReplayGain, per song or per album |
+| **Gapless** | No silence between songs that flow into each other |
+| **Bit-perfect and DSD** | The file to your DAC untouched, native DSD (DoP), exclusive mode |
+| **Audio plugins** | VST, LV2 and CLAP through Carla (Linux) |
+| **Signal path** | What happens to every sample, from file to speaker |
+| **Play on TVs and speakers** | DLNA / UPnP and AirPlay |
+| **Downloads** | YouTube songs and playlists, offline |
+| **Tag editor** | Keeps ReplayGain and custom tags |
+| **Make it yours** | Catppuccin, Nord, Gruvbox, Dracula and more, any font, cover-art colours |
+| **Every screen** | Phone, tablet and desktop layouts, mini and full-screen player |
+| **System controls** | Lock screen, notification, Control Center, MPRIS, media keys, Discord |
+| **Fast** | A YouTube song starts in about 0.3 s |
 
 ## Screenshots
 
@@ -63,8 +69,10 @@ A free, open-source music player for Linux, Windows, macOS, Android and iOS, bui
 | ![Lyrics](docs/screenshots/lyrics.webp) | ![Equalizer](docs/screenshots/equalizer.webp) |
 | **Full-screen player** | **Settings** |
 | ![Full-screen player](docs/screenshots/fullscreen.webp) | ![Settings](docs/screenshots/settings.webp) |
-| **Signal path** | **On a phone** |
-| ![Signal path](docs/screenshots/signal-path.webp) | <img src="docs/screenshots/phone.webp" alt="Phone" width="280"> |
+| **Virtual speakers and Mono audio** | **Signal path** |
+| ![Playback settings](docs/screenshots/sound.webp) | ![Signal path](docs/screenshots/signal-path.webp) |
+| **On a phone** | |
+| <img src="docs/screenshots/phone.webp" alt="Phone" width="280"> | |
 
 ## Build from source
 
@@ -78,6 +86,8 @@ flutter run -d linux          # or: windows, macos, android, ios
 flutter build linux --release # build/linux/x64/release/bundle/
 ```
 
+On macOS and iOS the first build also builds libmpv from source (`tool/build_libmpv_apple.sh`, about ten minutes; needs Homebrew's `meson`, `ninja`, `nasm` and `pkgconf`).
+
 After pulling changes that add packages, quit and run `flutter run` again; hot reload doesn't load new plugins.
 
 ## YouTube Music
@@ -88,28 +98,34 @@ Changes you make (likes, playlists) go through YouTube Music's own API, so they 
 
 ## Audio
 
-On Linux and Windows, playback runs on [libmpv](https://mpv.io). OpenMusic drives it directly:
+Every platform plays through [libmpv](https://mpv.io), with OpenMusic's own build of it where the stock one lacks filters (Windows, Android, macOS, iOS; see `tool/build_libmpv_*.sh`). So the sound settings are the same everywhere:
 
 | | |
 |---|---|
-| **Sound** (Settings) | Equalizer with presets and automatic headroom, volume leveling (ReplayGain per song or album), gapless playback, headphone crossfeed |
-| **Advanced audio** | Output device, including direct ALSA hardware devices; **bit-perfect mode** (no DSP, no resampling, volume fixed at 100%; WASAPI exclusive on Windows, not yet tested on real hardware); **Native DSD (DoP)**: DSF, DSDIFF and SACD songs go to a DoP-capable DAC as DSD (with bit-perfect mode); **audio plugins**: VST2, LV2, CLAP and LADSPA plugins set up in [Carla](https://kx.studio/Applications:Carla), in the chain after the equalizer (Linux, with Carla installed; VST3 not yet); **ASIO output** on Windows, built into the app's own libmpv (tested under Wine, not yet on real hardware); output sample rate; SoX resampler; buffer size |
-| **Play on** | DLNA / UPnP renderers and classic AirPlay speakers, found on the network. Files the device can't play (DSD, cue-sheet songs, WavPack...) are converted to FLAC on the fly, YouTube songs go as AAC; AirPlay gets ALAC. Never tried on real TVs or speakers yet: tested against a simulated renderer and shairport-sync |
+| **Playback** (Settings) | Equalizer with presets and automatic headroom, volume leveling (ReplayGain per song or album), gapless playback, **Virtual speakers** (MIT's KEMAR HRTF: two speakers at ±30°), headphone crossfeed, **Mono audio** (both ears, left only or right only) |
+| **Hi-fi audio** | Room correction (an impulse response); output sample rate; SoX resampler; buffer size. On desktop also: output device, including direct ALSA hardware on Linux; **bit-perfect mode**; **exclusive mode** (WASAPI on Windows, Core Audio hog mode on macOS); **Native DSD (DoP)** for DSF, DSDIFF and SACD songs; **ASIO** on Windows; **audio plugins** through [Carla](https://kx.studio/Applications:Carla) on Linux |
+| **Play on** | DLNA / UPnP renderers and classic AirPlay speakers, found on the network. Files the device can't play (DSD, cue-sheet songs, WavPack...) are converted to FLAC on the fly, YouTube songs go as AAC; AirPlay gets ALAC |
 | **Signal path** | Source codec and stored bit depth → decoder → every DSP stage → volume → resampler → output device, with a verdict: *Bit-perfect*, *Lossless to the system mixer* or *Processed* |
+
+Not yet tried on real hardware: ASIO, exclusive mode, and casting to real TVs and speakers (tested under Wine, against a simulated renderer and shairport-sync); on macOS and iOS, everything beyond the automated checks GitHub's Macs run.
 
 ## Platform notes
 
-| Platform | Playback | YouTube streaming / downloads |
-|---|---|---|
-| Linux | libmpv | YouTube's player API; yt-dlp as a fallback (system one, or the official binary downloaded automatically) |
-| Windows | libmpv (bundled) | YouTube's player API; yt-dlp as a fallback (downloaded automatically) |
-| macOS | AVPlayer | yt-dlp, AAC only (AVPlayer can't play Opus/WebM) |
-| Android | libmpv (bundled) | YouTube's player API, built-in extractor as a fallback |
-| iOS | AVPlayer | YouTube's player API, built-in extractor as a fallback |
+| | Linux | Windows | macOS | Android | iOS |
+|---|---|---|---|---|---|
+| Sound settings, signal path | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Output device, bit-perfect, DSD, exclusive | ✓ | ✓ | ✓ | – | – |
+| Add a folder | ✓ | ✓ | ✓ | ✓ | – |
+| AirPlay, TV conversions, tag editor for MP3 / Ogg… (FFmpeg) | ✓ | ✓ | ✓ | – | – |
+| Discord | ✓ | ✓ | ✓ | – | – |
+| Audio plugins (Carla), see-through window | ✓ | – | – | – | – |
+| ASIO | – | ✓ | – | – | – |
 
-The equalizer, leveling and signal path need libmpv (Linux, Windows, Android); crossfeed, room correction and the output device choice are Linux and Windows only. yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
+Android and iOS give apps no device choice or exclusive output, no Discord connection and no way to run FFmpeg; iOS apps can't scan a folder outside their own. YouTube streams through YouTube's player API everywhere, with yt-dlp (desktop) or a built-in extractor (phones) as the fallback; yt-dlp needs a JavaScript runtime (Deno or Node) for some YouTube challenges.
 
-Nothing else needs installing. The tag editor for MP3 / Ogg / WAV…, AirPlay, and casting formats a TV can't play use FFmpeg: a system one when there is one, otherwise the official static build (gyan.dev on Windows, johnvansickle.com on Linux, about 40 MB) is downloaded the first time one of them is used, checked against its published checksum and kept in the app's folder.
+Nothing else needs installing. FFmpeg (for the tag editor's MP3 / Ogg / WAV…, AirPlay and formats a TV can't play) is a system one when there is one; otherwise the official static build (gyan.dev on Windows, johnvansickle.com on Linux, Martin Riedl's on macOS, about 40 MB) is downloaded the first time it's needed, checked against its published checksum and kept in the app's folder.
+
+The macOS app isn't signed by Apple: the first time, open it from System Settings › Privacy & Security › **Open Anyway**. The iOS `.ipa` is unsigned too; sideload it with AltStore or Sideloadly.
 
 Debug builds append every Flutter error with its full stack trace to `<app support dir>/errors.log` (on Linux, `~/.local/share/dev.openmusic.openmusic/errors.log`).
 
@@ -127,6 +143,7 @@ OpenMusic stands on the shoulders of:
 - [ytmusicapi](https://github.com/sigma67/ytmusicapi), whose documentation of YouTube Music's API this app follows
 - [LRCLIB](https://lrclib.net), [Better Lyrics](https://betterlyrics.org), NetEase Cloud Music and [lyrics.ovh](https://lyrics.ovh) for free lyrics
 - [audio_metadata_reader](https://github.com/ClementBeal/audio_metadata_reader) for tags
+- Bill Gardner and Keith Martin's [KEMAR HRTF measurements](https://sound.media.mit.edu/resources/KEMAR.html) (MIT Media Lab) for Virtual speakers
 
 OpenMusic is not affiliated with YouTube, Google or Discord.
 
@@ -136,4 +153,4 @@ OpenMusic is free software: you can redistribute it and/or modify it under the t
 
 If you run a modified version for others over a network, the AGPL asks you to offer them its source too.
 
-Vendored packages in [`third_party/`](third_party) keep their own licenses (the Unlicense for `just_audio_media_kit`, MIT for `audio_metadata_reader`, GPLv3 for Steinberg's `asiosdk`).
+Vendored packages in [`third_party/`](third_party) keep their own licenses (the Unlicense for `just_audio_media_kit`, MIT for `audio_metadata_reader` and the `media_kit_libs_*` packages, GPLv3 for Steinberg's `asiosdk`).

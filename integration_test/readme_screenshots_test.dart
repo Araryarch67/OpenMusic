@@ -3,6 +3,9 @@
 //   env -u DISPLAY WAYLAND_DISPLAY=om-test GDK_BACKEND=wayland XDG_DATA_HOME=/tmp/om-shots-data \
 //     flutter test integration_test/readme_screenshots_test.dart -d linux --dart-define=SHOTS=/tmp/om-shots
 //
+// Songs play muted; better still, give it a PipeWire of its own with one null
+// sink (no devices), so the desktop's audio isn't touched at all.
+//
 // Signed out (public YouTube Music only) and with a throwaway data dir, so no
 // personal library ends up in a picture. Does nothing without SHOTS.
 
@@ -146,6 +149,11 @@ void main() {
       await tester.tap(find.text('Settings').first);
       await shot('settings');
       await tester.tap(find.text('Playback'));
+      await settle();
+      // Playback settings with Virtual speakers on.
+      await tester.tap(find.text('Virtual speakers'));
+      await shot('sound');
+      await tester.tap(find.text('Virtual speakers'));
       await settle();
       await Scrollable.ensureVisible(tester.element(find.text('Equalizer')), alignment: 0.5);
       await settle();
