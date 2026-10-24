@@ -858,11 +858,20 @@ class AudioEngine extends ChangeNotifier {
       // song loads (no filters run then), `af` gets the current one. That also puts
       // the chain in place if the first song loads before [_applyProps] is done.
       _chainSent = null; // a new mpv: its `af` is empty
+      // just_audio loads the first song without waiting for this setup, and mpv takes the
+      // output's settings (device, exclusive mode, rate, buffer) when the song opens it:
+      // the song waits here until they are in.
+      final applied = Completer<void>();
       p.onLoadHooks.add(() async {
+        await applied.future;
         if (_chainSent != filterChain) await _setChain(p);
       });
-      await refreshDevices(p);
-      await _applyProps(p);
+      try {
+        await refreshDevices(p);
+        await _applyProps(p);
+      } finally {
+        applied.complete();
+      }
     }
   }
 

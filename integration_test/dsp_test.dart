@@ -7,6 +7,7 @@
 //
 // On a desktop, run it with a throwaway app-data directory and in a headless
 // session (see AGENT.md).
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -115,12 +116,17 @@ void main() {
     await c.setAutoplay(false);
     var out = '';
     final apply = JustAudioMediaKit.onPlayerCreated!;
-    JustAudioMediaKit.onPlayerCreated = (p) async {
-      final mpv = p.platform as NativePlayer;
-      await mpv.setProperty('ao', 'pcm');
-      await mpv.setProperty('ao-pcm-file', out);
-      await mpv.setProperty('ao-pcm-waveheader', 'yes');
+    JustAudioMediaKit.onPlayerCreated = (p) {
       apply(p);
+      // Into the file, never the device: the song waits for this before it opens the output.
+      final mpv = p.platform as NativePlayer;
+      final file = out;
+      final silent = () async {
+        await mpv.setProperty('ao', 'pcm');
+        await mpv.setProperty('ao-pcm-file', file);
+        await mpv.setProperty('ao-pcm-waveheader', 'yes');
+      }();
+      mpv.onLoadHooks.add(() => silent);
     };
     addTearDown(() => JustAudioMediaKit.onPlayerCreated = apply);
 
@@ -130,21 +136,37 @@ void main() {
     /// Plays the song through mpv with [change] made first; what came out.
     Future<({int rate, List<double> db})> render(String name, Future<void> Function() change) async {
       out = '${dir.path}/out${n++}.wav';
-      await c.player.stop(); // a new mpv player, writing to [out]
-      await tester.runAsync(change); // settings reach mpv after a real (not the test's fake) timer
-      await c.player.setAudioSource(AudioSource.file(song.path));
+      // Each step in real time: in the test's fake time, a player call that waits on a
+      // timer inside just_audio or media_kit never returns (it hung about one run in seven).
+      Future<T?> step<T>(String what, Future<T> Function() f) => tester.runAsync(
+        () => f().timeout(const Duration(seconds: 30), onTimeout: () => throw StateError('$name: $what hung')),
+      );
+      await step('stop', c.player.stop); // a new mpv player, writing to [out]
+      await step('the settings', change);
+      await step('loading', () => c.player.setAudioSource(AudioSource.file(song.path)));
       await tester.pump(const Duration(milliseconds: 300));
-      await c.player.play();
+      // Not awaited: just_audio's play() returns only when playback stops, and a stall must fail here.
+      unawaited(c.player.play());
       final sw = Stopwatch()..start();
       while (c.player.processingState != ProcessingState.completed) {
-        if (sw.elapsed > const Duration(seconds: 60)) fail('$name never finished');
+        if (sw.elapsed > const Duration(seconds: 60)) {
+          final mpv = JustAudioMediaKit.activePlayer!.platform as NativePlayer;
+          final state = await tester.runAsync(() async {
+            final values = <String>[];
+            for (final k in ['current-ao', 'ao', 'pause', 'core-idle', 'eof-reached', 'time-pos', 'af']) {
+              values.add('$k=${await mpv.getProperty(k)}');
+            }
+            return values.join(' ');
+          });
+          fail('$name never finished (${c.player.processingState} at ${c.player.position}; mpv: $state)');
+        }
         if (!stages.containsKey(name)) {
-          final path = await tester.runAsync(c.audio.signalPath);
+          final path = await step('the signal path', c.audio.signalPath);
           if (path != null) stages[name] = path.filters;
         }
         await tester.pump(const Duration(milliseconds: 20));
       }
-      await c.player.stop(); // closes (and finishes) the WAV
+      await step('stop after', c.player.stop); // closes (and finishes) the WAV
       await tester.pump(const Duration(milliseconds: 300));
       final m = _measure(File(out));
       // ignore: avoid_print
