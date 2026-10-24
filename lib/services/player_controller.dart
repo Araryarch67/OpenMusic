@@ -6,7 +6,7 @@ import 'dart:isolate';
 import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show listEquals;
+import 'package:flutter/foundation.dart' show ValueListenable, listEquals;
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -272,13 +272,18 @@ class PlayerController extends ChangeNotifier {
   /// 0-1: where the volume slider sits, for this device or the cast device.
   ///
   /// This device's gain is the cube of it, as with mpv's own volume (which the
-  /// app's 64-bit filter replaces): with linear gain halfway is only −6 dB, and
-  /// all the audible change is crammed into the bottom of the slider. A cast
-  /// device's volume is its own 0-100 scale, already shaped by the device.
-  double get volume => casting ? (cast.volume ?? 0) / 100 : levelOfGain(player.volume);
+  /// app's 64-bit filter stands in for off the system mixer): with linear gain
+  /// halfway is only −6 dB, and all the audible change is crammed into the
+  /// bottom of the slider. A cast device's volume is its own 0-100 scale,
+  /// already shaped by the device.
+  double get volume => casting ? (cast.volume ?? 0) / 100 : _level.value;
 
-  /// [volume] as it changes on this device.
-  late final Stream<double> volumeLevels = player.volumeStream.map(levelOfGain);
+  /// This device's [volume]: the one level the slider shows, every song plays
+  /// at and the next launch starts from. Only [setVolume] changes it, so
+  /// just_audio's own volume (which its interruption handling doubles on
+  /// Android once a notification has ducked it) can't drift from the slider.
+  ValueListenable<double> get volumeLevel => _level;
+  final _level = ValueNotifier<double>(1);
 
   static double levelOfGain(double gain) => gain <= 0 ? 0 : math.pow(gain.clamp(0, 1), 1 / 3).toDouble();
   static double gainOfLevel(double level) => math.pow(level.clamp(0, 1), 3).toDouble();
@@ -288,12 +293,17 @@ class PlayerController extends ChangeNotifier {
   Future<void> setVolume(double v) {
     v = v.clamp(0, 1);
     if (casting) return cast.setVolume((v * 100).round());
+    _level.value = v;
     _saveVolume?.cancel();
-    _saveVolume = Timer(const Duration(milliseconds: 500), () async {
-      await (await SharedPreferences.getInstance()).setDouble(_volumeKey, v);
-    });
-    return player.setVolume(gainOfLevel(v));
+    _saveVolume = Timer(const Duration(milliseconds: 500), _storeVolume);
+    return _playAt(v);
   }
+
+  Future<void> _storeVolume() async => (await SharedPreferences.getInstance()).setDouble(_volumeKey, _level.value);
+
+  /// The engine applies it to mpv (desktop and Android); elsewhere it is just_audio's.
+  Future<void> _playAt(double level) =>
+      AudioEngine.supported ? audio.setVolume(gainOfLevel(level)) : player.setVolume(gainOfLevel(level));
 
   static const _volumeKey = 'volume.v1';
   Timer? _saveVolume;
@@ -585,7 +595,10 @@ class PlayerController extends ChangeNotifier {
     final loop = LoopMode.values.asNameMap()[prefs.getString(_loopKey)];
     if (loop != null && loop != LoopMode.off) await player.setLoopMode(loop);
     final level = prefs.getDouble(_volumeKey);
-    if (level != null) await player.setVolume(gainOfLevel(level));
+    if (level != null) {
+      _level.value = level.clamp(0, 1);
+      await _playAt(_level.value);
+    }
     Ffmpeg.onDownload = _errors.add;
     unawaited(Metadata.probeTagTools().then((_) => notifyListeners()));
     unawaited(LyricsTranslation.load());
@@ -1140,6 +1153,11 @@ class PlayerController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    // A level set in the last half second is still kept.
+    if (_saveVolume?.isActive ?? false) {
+      _saveVolume!.cancel();
+      _storeVolume().ignore();
+    }
     MemoryTrim.stop();
     cast.dispose();
     for (final s in _subs) {
@@ -1152,6 +1170,7 @@ class PlayerController extends ChangeNotifier {
     audio.dispose();
     discord.dispose();
     libraryRevision.dispose();
+    _level.dispose();
     super.dispose();
   }
 }

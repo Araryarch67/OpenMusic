@@ -54,9 +54,10 @@ class JustAudioMediaKit extends JustAudioPlatform {
   /// more than once per AudioPlayer.
   static void Function(Player player)? onPlayerCreated;
 
-  /// OpenMusic: when set, the app applies volume itself (a 64-bit float filter)
-  /// and mpv's own volume stays at 100%.
-  static Future<void> Function(Player player, double volume)? volumeOverride;
+  /// OpenMusic: when set, the app owns the volume (a 64-bit float filter, or
+  /// mpv's own volume on a float output): just_audio's setVolume applies the
+  /// app's level to the player instead of the one just_audio asked for.
+  static Future<void> Function(Player player)? volumeOverride;
 
   /// OpenMusic: the libmpv player currently backing playback, if any.
   static Player? get activePlayer => _active;

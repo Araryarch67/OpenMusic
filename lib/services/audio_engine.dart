@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
@@ -106,6 +107,7 @@ class SignalPath {
     this.exclusive = false,
     required this.filters,
     required this.volume,
+    this.volumeAtOutput = false,
     required this.leveling,
     required this.bitrate,
     this.sourceBits,
@@ -132,7 +134,21 @@ class SignalPath {
 
   /// Processing stages between decoder and output, in order.
   final List<String> filters;
+
+  /// Gain in percent (100 is untouched).
   final double volume;
+
+  /// [volume] is mpv's own, applied to the output's samples (float through
+  /// the system mixer) rather than by OpenMusic's 64-bit float filter.
+  final bool volumeAtOutput;
+
+  /// The arithmetic [volume] is applied in.
+  String get volumePrecision => !volumeAtOutput || outFormat.startsWith('double')
+      ? '64-bit float'
+      : outFormat.startsWith('float')
+      ? '32-bit float'
+      : 'fixed point';
+
   final bool leveling;
   final int? bitrate;
 
@@ -201,7 +217,14 @@ class SignalPath {
     if (inRate != outRate || inChannels != outChannels) return false;
     if (inFormat == outFormat) return true;
     final a = bitsOf(inFormat), b = bitsOf(outFormat);
-    if (a == null || b == null || _isFloat(inFormat) != _isFloat(outFormat)) return false;
+    if (a == null || b == null) return false;
+    // The system mixer gets float (for mpv's volume, see [volumeAtOutput]; shared WASAPI takes
+    // nothing else). It holds every sample exactly when its mantissa (24 bits, 53 in 64-bit
+    // float) is as wide as the file's.
+    if ((viaSystemMixer || volumeAtOutput) && !_isFloat(inFormat) && _isFloat(outFormat)) {
+      return (b == 64 ? 53 : 24) >= (sourceBits ?? a);
+    }
+    if (_isFloat(inFormat) != _isFloat(outFormat)) return false;
     return b >= a;
   }
 
@@ -238,7 +261,7 @@ class AudioEngine extends ChangeNotifier {
     // mpv's `title`: the app's name in Windows' volume mixer (media_kit's default is "JustAudioMediaKit").
     // PulseAudio / PipeWire take `audio-client-name` instead (see [_applyProps]).
     JustAudioMediaKit.title = 'OpenMusic';
-    JustAudioMediaKit.volumeOverride = _setVolume;
+    JustAudioMediaKit.volumeOverride = _volumeTo;
     JustAudioMediaKit.onPlayerCreated = (p) => unawaited(_applyAll(p));
   }
 
@@ -379,8 +402,7 @@ class AudioEngine extends ChangeNotifier {
     _dop = v;
     notifyListeners();
     if (_native case final p?) {
-      _chainSetAt = DateTime.now();
-      p.setProperty('af', filterChain).then((_) {
+      _setChain(p).then((_) {
         // The output would otherwise stay in the volume filter's float format.
         if (v != null && volumeWasOn) return p.command(['ao-reload']);
       }).ignore();
@@ -478,8 +500,8 @@ class AudioEngine extends ChangeNotifier {
         await _save();
         final p = _native;
         if (p != null) {
-          await _applyProps(p);
-          if (reopen) await p.command(['ao-reload']);
+          final volumeMoved = await _applyProps(p);
+          if (reopen || volumeMoved) await p.command(['ao-reload']);
         }
       } catch (e) {
         debugPrint('Applying audio settings failed: $e');
@@ -551,21 +573,62 @@ class AudioEngine extends ChangeNotifier {
 
   // ── mpv ─────────────────────────────────────────────────────────────────
 
-  /// The player's volume, applied by [filterChain] in 64-bit float (mpv stays at 100%).
+  /// The player's volume (a gain, 0-1): mpv's own volume through the system
+  /// mixer, the 64-bit float filter in [filterChain] otherwise (see [_volumeAtOutput]).
   double _volume = 1;
 
-  bool get _volumeActive => _volume < 0.99999 && _dop == null;
+  /// The device mpv was last told to open: [_outputDevice] may stand in for [device].
+  String? _openedDevice;
+
+  /// Through the system mixer (outside bit-perfect mode) mpv's own volume is
+  /// used. mpv applies it as the sound leaves its output buffer, so a slider
+  /// drag is heard at once rather than a buffer later, and it holds from song
+  /// to song. [filterChain] makes that output float, so it is the same float
+  /// multiply as the filter (64-bit where the mixer takes it, as PipeWire does).
+  ///
+  /// Elsewhere (a DAC direct, exclusive or ASIO output) the output is integer,
+  /// where mpv's volume has only 256 steps, so the 64-bit filter applies it
+  /// ahead of the buffer. Android keeps the filter too: its outputs aren't
+  /// known to take float.
+  bool get _volumeAtOutput {
+    if (!hasOutputChoice || bitPerfect) return false;
+    final d = _openedDevice ?? device;
+    return hasExclusiveMode ? !exclusive && !d.startsWith('asio/') : !d.startsWith('alsa/');
+  }
+
+  /// Whether [_volumeAtOutput] held when the settings last reached mpv.
+  bool? _volumeAtOutputApplied;
+
+  /// mpv's `volume` for [_volume] (mpv's gain is the cube of volume / 100).
+  String get _mpvVolume => _volumeAtOutput ? (100 * math.pow(_volume, 1 / 3)).toStringAsFixed(6) : '100';
+
+  bool get _volumeActive => _volume < 0.99999 && _dop == null && !_volumeAtOutput;
 
   @visibleForTesting
   set debugVolume(double v) => _volume = v;
 
+  /// The player's volume (a gain, 0-1), as the app's volume control set it.
+  double get volume => _volume;
+
+  /// Sets [volume] for the song playing and every one after it, in any mpv
+  /// player to come. Only the app sets it: just_audio's own volume is ignored.
+  Future<void> setVolume(double gain) {
+    _volume = gain.clamp(0, 1);
+    return switch (_player) {
+      final p? => _volumeTo(p),
+      null => Future.value(), // no player yet: [_applyProps] gives the next one [volume]
+    };
+  }
+
   Future<void>? _volumeApplying;
   bool _volumeDirty = false;
 
-  Future<void> _setVolume(Player player, double v) {
-    _volume = v.clamp(0, 1);
+  /// Applies [volume] to [player]. Also what just_audio's setVolume does, so
+  /// the level it replays to each new player (or changes itself) is never used.
+  Future<void> _volumeTo(Player player) {
     if (_dop != null) return Future.value(); // held at 100% while DoP plays; applied when it ends
     if (player.platform case final NativePlayer p) {
+      if (_volumeAtOutput) return p.setProperty('volume', _mpvVolume);
       // A slider drag sends dozens of levels a second. Sent concurrently, an
       // `af-command` could reach mpv before the chain holding the volume filter
       // was set (and be lost), so they go one at a time and the last one wins.
@@ -578,8 +641,14 @@ class AudioEngine extends ChangeNotifier {
   /// When `af` was last set: mpv builds the new filter graph only once audio flows through it.
   DateTime _chainSetAt = DateTime(0);
 
+  /// The `af` mpv holds. A level sent to the running filter isn't in it, and
+  /// mpv builds each song's filters afresh from it (see [_applyAll]).
+  String? _chainSent;
+
   Future<void> _setChain(NativePlayer p) async {
-    await p.setProperty('af', filterChain);
+    final chain = filterChain;
+    await p.setProperty('af', chain);
+    _chainSent = chain;
     _chainSetAt = DateTime.now();
   }
 
@@ -612,7 +681,16 @@ class AudioEngine extends ChangeNotifier {
     } finally {
       _volumeApplying = null;
     }
+    // Once a drag settles, `af` gets the level the running filter has, so filters mpv
+    // rebuilds mid-song (an output reopening by itself) don't go back to the old one.
+    // Only the volume filter's level differs, and mpv swaps it without a click.
+    _chainSync?.cancel();
+    _chainSync = Timer(const Duration(milliseconds: 500), () {
+      if (_volumeApplying == null && _chainSent != filterChain && identical(_native, p)) _setChain(p).ignore();
+    });
   }
+
+  Timer? _chainSync;
 
   /// Equalizer curve active right now (bit-perfect mode bypasses everything).
   bool get eqActive => eqEnabled && !bitPerfect && bands.any((b) => b.gain.abs() > 0.05);
@@ -642,18 +720,30 @@ class AudioEngine extends ChangeNotifier {
       if (crossfeedActive) '@crossfeed:lavfi=[crossfeed=strength=${n(0.1 + crossfeed * 0.6)}:range=0.5]',
       // Last, so nothing after it can clip what it lowered.
       if (_volumeActive) '@volume:lavfi=[volume=volume=${_volume.toStringAsFixed(6)}:precision=double]',
+      // Float output for mpv's volume (lossless: the system mixer works in float anyway).
+      if (_volumeAtOutput) '@output:format=format=double',
     ].join(',');
   }
 
   Future<void> _applyAll(Player player) async {
     if (player.platform case final NativePlayer p) {
+      // A level sent to the running filter is lost when the next song's filters
+      // are built from `af`, and the song would start at the old level. Before a
+      // song loads (no filters run then), `af` gets the current one. That also puts
+      // the chain in place if the first song loads before [_applyProps] is done.
+      _chainSent = null; // a new mpv: its `af` is empty
+      p.onLoadHooks.add(() async {
+        if (_chainSent != filterChain) await _setChain(p);
+      });
       await refreshDevices(p);
       await _applyProps(p);
     }
   }
 
-  Future<void> _applyProps(NativePlayer p) async {
-    final outputDevice = await _outputDevice();
+  /// Whether the volume moved between mpv's volume and the filter
+  /// ([_volumeAtOutput]): the output must then reopen, in float or back in the song's format.
+  Future<bool> _applyProps(NativePlayer p) async {
+    _openedDevice = await _outputDevice();
     final props = <String, String>{
       // media_kit turns on mpv's disk cache, which fails ("Failed to create file
       // cache") without a writable cache dir. Audio needs no more than the RAM cache.
@@ -668,20 +758,24 @@ class AudioEngine extends ChangeNotifier {
       'replaygain-fallback': '0',
       'audio-buffer': buffer.seconds.toString(),
       'af': filterChain,
-      'audio-device': outputDevice,
+      'audio-device': _openedDevice!,
       // The app's name in the Linux mixers (PulseAudio / PipeWire); mpv's default is "mpv".
       'audio-client-name': 'OpenMusic',
       'audio-exclusive': exclusiveOutput ? 'yes' : 'no',
       'audio-samplerate': bitPerfect ? '0' : '${outputRate ?? 0}',
       // Only used when the rate has to change; keeps the default otherwise.
       'audio-swresample-o': hqResamplerActive ? await _hqResampler() : '',
-      // Volume is applied in the filter chain (64-bit float); mpv must not scale samples too.
-      'volume': '100',
+      // 100 where the filter applies the volume: mpv must not scale samples too.
+      'volume': _mpvVolume,
     };
     for (final e in props.entries) {
       await p.setProperty(e.key, e.value);
     }
+    _chainSent = props['af'];
     _chainSetAt = DateTime.now();
+    final moved = _volumeAtOutputApplied != null && _volumeAtOutputApplied != _volumeAtOutput;
+    _volumeAtOutputApplied = _volumeAtOutput;
+    return moved;
   }
 
   /// The mpv device to open. On Linux, bit-perfect mode goes straight to the
@@ -764,6 +858,7 @@ class AudioEngine extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _chainSync?.cancel();
     _projectWatch?.cancel();
     _releaseCard();
     super.dispose();
@@ -970,8 +1065,8 @@ class AudioEngine extends ChangeNotifier {
       device: device,
       exclusive: await g('audio-exclusive') == 'yes',
       filters: [
-        // Volume has its own stage; the rest are listed in order.
-        for (final m in RegExp(r'@(\w+):').allMatches(af).where((m) => m[1] != 'volume'))
+        // Volume has its own stage and the float output is the Output's format; the rest are in order.
+        for (final m in RegExp(r'@(\w+):').allMatches(af).where((m) => m[1] != 'volume' && m[1] != 'output'))
           switch (m[1]) {
             'eq' => 'Equalizer',
             'preamp' => 'Equalizer headroom',
@@ -982,7 +1077,8 @@ class AudioEngine extends ChangeNotifier {
           },
       ],
       // DoP holds the volume at 100% (the filter is left out).
-      volume: (double.tryParse(await g('volume')) ?? 100) * (_dop == null ? _volume : 1),
+      volume: _dop == null ? 100 * _volume : 100,
+      volumeAtOutput: _volumeAtOutput,
       leveling: effectiveLeveling != VolumeLeveling.off,
       bitrate: int.tryParse(await g('audio-bitrate')),
       dopBitRate: _dop?.bitRate,

@@ -2,10 +2,13 @@
 // so a lost level (e.g. a slider drag's commands racing the filter chain)
 // shows up as the wrong gain. Then the controls: slider, wheel, Ctrl+↑/↓,
 // mute, the level kept for the next launch, and the title bar's ⋯ menu.
+// Also: a level set during a song still holds when the next one starts.
 //
 // Opens the app's window; run it with a throwaway app-data directory (the
 // YouTube Music session lives there):
 //   flutter test integration_test/zz_volume_test.dart -d windows   (or -d linux)
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -19,6 +22,7 @@ import 'package:just_audio/just_audio.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:media_kit/media_kit.dart' show NativePlayer;
 import 'package:openmusic/main.dart';
+import 'package:openmusic/models/track.dart';
 import 'package:openmusic/services/appearance.dart';
 import 'package:openmusic/services/player_controller.dart';
 import 'package:openmusic/ui/widgets/controls.dart';
@@ -59,7 +63,8 @@ File _sine(String path, {int seconds = 6}) {
 }
 
 /// RMS (dBFS) of a WAV mpv wrote: PCM 16/32-bit or float 32/64, any layout.
-double _rmsDb(File wav) {
+/// Measured [from] that fraction of the samples on.
+double _rmsDb(File wav, {double from = 0.5}) {
   final b = ByteData.sublistView(wav.readAsBytesSync());
   var at = 12;
   int? format, bits;
@@ -73,9 +78,9 @@ double _rmsDb(File wav) {
     } else if (id == 'data') {
       final end = size == 0 || size == 0xFFFFFFFF ? b.lengthInBytes : math.min(at + 8 + size, b.lengthInBytes);
       final step = bits! ~/ 8;
-      // The second half only: what was filtered before a change still sits in the output's
-      // buffer (ao=pcm keeps 64 Ki frames, 1.4 s; a sound card's is about 0.2 s).
-      final start = at + 8 + (end - at - 8) ~/ 2 ~/ step * step;
+      // The second half by default: what was filtered before a change still sits in the
+      // output's buffer (ao=pcm keeps 64 Ki frames, 1.4 s; a sound card's is about 0.2 s).
+      final start = at + 8 + ((end - at - 8) * from).floor() ~/ step * step;
       var sum = 0.0;
       var n = 0;
       for (var i = start; i + step <= end; i += step) {
@@ -171,6 +176,176 @@ void main() {
     final back = await render(() => c.setVolume(1));
     expect(back - full, closeTo(0, 0.05));
 
+    // just_audio's own volume (its Android interruption handling doubles it once a
+    // notification has ducked the music) changes neither what plays nor the slider.
+    await c.setVolume(0.5);
+    final ducked = await render(() => c.player.setVolume(1));
+    expect(c.volume, 0.5);
+    expect(ducked - full, closeTo(-18.06, 0.3), reason: 'still the slider\'s level');
+
+    c.dispose();
+  });
+
+  testWidgets('the level kept from the last launch is what the first song plays at', (tester) async {
+    SharedPreferences.setMockInitialValues({'discord.enabled': false, 'volume.v1': 0.5});
+    final c = PlayerController();
+    await c.load();
+    await c.setAutoplay(false);
+    expect(c.volume, 0.5, reason: 'the slider starts where it was left');
+    expect(c.volumeLevel.value, 0.5);
+    expect(c.audio.volume, closeTo(0.125, 1e-9), reason: 'the engine has its gain before any player exists');
+
+    final sine = _sine('${dir.path}/sine.wav');
+    final out = '${dir.path}/first.wav';
+    final apply = JustAudioMediaKit.onPlayerCreated!;
+    JustAudioMediaKit.onPlayerCreated = (p) async {
+      final mpv = p.platform as NativePlayer;
+      await mpv.setProperty('ao', 'pcm');
+      await mpv.setProperty('ao-pcm-file', out);
+      await mpv.setProperty('ao-pcm-waveheader', 'yes');
+      apply(p);
+    };
+    addTearDown(() => JustAudioMediaKit.onPlayerCreated = apply);
+
+    await c.player.setAudioSource(AudioSource.file(sine.path));
+    unawaited(c.player.play());
+    final sw = Stopwatch()..start();
+    while (c.player.processingState != ProcessingState.completed) {
+      if (sw.elapsed > const Duration(seconds: 30)) fail('the song never finished');
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await c.player.stop(); // closes (and finishes) the WAV
+    await tester.pump(const Duration(milliseconds: 300));
+    // From the start: the first song mustn't begin louder and settle later.
+    final db = _rmsDb(File(out), from: 0.05);
+    debugPrint('VOLUME first song after a launch: ${db.toStringAsFixed(2)} dBFS');
+    expect(db, closeTo(-9.03 - 18.06, 0.3), reason: 'half way on the slider is −18 dB');
+    c.dispose();
+  });
+
+  /// A playlist of [songs] (each a −6 dBFS sine of that many seconds) on [c]'s player.
+  Future<void> playlist(PlayerController c, List<int> songs) async {
+    await c.player.setAudioSources([
+      for (final (i, seconds) in songs.indexed)
+        if (_sine('${dir.path}/song$i.wav', seconds: seconds) case final f)
+          AudioSource.file(f.path, tag: Track.fromUri(Uri.file(f.path))),
+    ]);
+  }
+
+  /// Waits until mpv's audio flows (not loading, paused or between songs).
+  Future<void> flowing(WidgetTester tester, NativePlayer mpv) async {
+    final sw = Stopwatch()..start();
+    while (await mpv.getProperty('core-idle') != 'no') {
+      if (sw.elapsed > const Duration(seconds: 10)) fail('the song never played');
+      await tester.pump(const Duration(milliseconds: 5));
+    }
+  }
+
+  /// A slider drag from 100% down to [level] (gain [level]³): a level every 10 ms, as a
+  /// pointer moves, none waiting for the one before.
+  Future<void> drag(WidgetTester tester, PlayerController c, double level) async {
+    final steps = <Future<void>>[];
+    for (var i = 0; i <= 40; i++) {
+      steps.add(c.setVolume(1 - (1 - level) * i / 40));
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    await Future.wait(steps);
+  }
+
+  testWidgets('through the system mixer, a level set during a song is mpv\'s own and holds for the next one', (
+    tester,
+  ) async {
+    final c = PlayerController();
+    await c.load();
+    await c.setAutoplay(false);
+    final out = '${dir.path}/next.wav';
+    final apply = JustAudioMediaKit.onPlayerCreated!;
+    JustAudioMediaKit.onPlayerCreated = (p) async {
+      final mpv = p.platform as NativePlayer;
+      await mpv.setProperty('ao', 'pcm');
+      await mpv.setProperty('ao-pcm-file', out);
+      await mpv.setProperty('ao-pcm-waveheader', 'yes');
+      apply(p);
+    };
+    addTearDown(() => JustAudioMediaKit.onPlayerCreated = apply);
+
+    await c.setVolume(1);
+    await c.player.stop();
+    // mpv renders ao=pcm faster than real time: song one is long so the level surely changes in it.
+    await playlist(c, [60, 10]);
+    await tester.pump(const Duration(milliseconds: 300));
+    unawaited(c.player.play());
+    final mpv = JustAudioMediaKit.activePlayer!.platform as NativePlayer;
+    await flowing(tester, mpv);
+    // In one burst: song one renders in a fraction of a second (mpv's own volume has no chain to go stale).
+    await Future.wait([for (var i = 0; i <= 40; i++) c.setVolume(1 - i / 80)]);
+    expect(await mpv.getProperty('playlist-pos'), '0', reason: 'the level changed during song one');
+    expect(await mpv.getProperty('af'), isNot(contains('@volume')), reason: 'no filter: mpv applies it');
+    expect(double.parse(await mpv.getProperty('volume')), closeTo(50, 1e-3), reason: 'mpv\'s gain is (volume / 100)³');
+    // mpv's own end of song two (just_audio may miss "completed" at this speed).
+    final sw = Stopwatch()..start();
+    while (await mpv.getProperty('playlist-pos') != '1' || await mpv.getProperty('eof-reached') != 'yes') {
+      if (sw.elapsed > const Duration(seconds: 60)) fail('the songs never finished');
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await c.player.stop(); // closes (and finishes) the WAV
+    await tester.pump(const Duration(milliseconds: 300));
+
+    // The last 9 s are song two, a −6 dBFS sine (RMS −9 dBFS), at half way: −18 dB.
+    final db = _rmsDb(File(out), from: 1 - 9 / 70);
+    debugPrint('VOLUME next song through the mixer: ${db.toStringAsFixed(2)} dBFS');
+    expect(db, closeTo(-9.03 - 18.06, 0.3), reason: 'song two plays at the level set during song one');
+    c.dispose();
+  });
+
+  testWidgets('the 64-bit filter\'s level holds for the next song and when filters are rebuilt', (tester) async {
+    // Bit-perfect mode keeps the filter. (A missing card, so it doesn't take the real one from the desktop.)
+    SharedPreferences.setMockInitialValues({
+      'discord.enabled': false,
+      'audio.v1': jsonEncode({'bitPerfect': true, 'device': 'alsa/no-such-card'}),
+    });
+    final c = PlayerController();
+    await c.load();
+    await c.setAutoplay(false);
+    // mpv's null output plays in real time, so the level changes while a song plays: the
+    // running filter gets it, and mpv's `af` (each song's filters are built from it) doesn't.
+    final apply = JustAudioMediaKit.onPlayerCreated!;
+    JustAudioMediaKit.onPlayerCreated = (p) async {
+      await (p.platform as NativePlayer).setProperty('ao', 'null');
+      apply(p);
+    };
+    addTearDown(() => JustAudioMediaKit.onPlayerCreated = apply);
+
+    await c.setVolume(1);
+    await c.player.stop();
+    await playlist(c, [20, 20]);
+    unawaited(c.player.play());
+    final mpv = JustAudioMediaKit.activePlayer!.platform as NativePlayer;
+    await flowing(tester, mpv);
+    await tester.pump(const Duration(milliseconds: 300));
+
+    await drag(tester, c, 0.5);
+    expect(await mpv.getProperty('af'), contains('@volume'), reason: 'the filter applies it');
+    expect(double.parse(await mpv.getProperty('volume')), 100, reason: 'mpv must not scale the samples too');
+    // Straight on to song two, before the drag counts as settled.
+    final skipped = Stopwatch()..start();
+    await c.player.seekToNext();
+    while (await mpv.getProperty('playlist-pos') != '1') {
+      await tester.pump(const Duration(milliseconds: 5));
+    }
+    await flowing(tester, mpv);
+    final af = await mpv.getProperty('af');
+    debugPrint('VOLUME song two\'s filters, ${skipped.elapsedMilliseconds} ms after the drag: $af');
+    expect(skipped.elapsed, lessThan(const Duration(milliseconds: 450)), reason: 'before the settled-drag update');
+    expect(af, contains('volume=0.125000'), reason: 'song two\'s filters are built at the level set during song one');
+
+    // A drag during song two: once it settles, `af` has the level too, so filters mpv rebuilds
+    // by itself mid-song (its output reopening) don't go back to the old one.
+    await drag(tester, c, 0.25);
+    expect(await mpv.getProperty('af'), isNot(contains('volume=0.015625')), reason: 'the running filter has it');
+    await tester.pump(const Duration(milliseconds: 900));
+    expect(await mpv.getProperty('af'), contains('volume=0.015625'));
+    await c.player.stop();
     c.dispose();
   });
 

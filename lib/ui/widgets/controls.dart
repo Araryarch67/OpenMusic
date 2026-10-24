@@ -497,12 +497,12 @@ class VolumeSlider extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = PlayerScope.of(context);
     // While casting, the device's volume (the controller rebuilds this on change).
-    return StreamBuilder<double>(
-      stream: c.casting ? null : c.volumeLevels,
-      builder: (context, snapshot) {
+    return ValueListenableBuilder<double>(
+      valueListenable: c.volumeLevel,
+      builder: (context, level, _) {
         // DoP must reach the DAC untouched: its volume is the one to use.
         final dop = !c.casting && c.audio.dopPlaying != null;
-        final volume = dop ? 1.0 : (c.casting ? c.volume : snapshot.data ?? c.volume);
+        final volume = dop ? 1.0 : (c.casting ? c.volume : level);
         final setVolume = c.canSetVolume && !dop ? c.setVolume : null;
         final row = Row(
           mainAxisSize: MainAxisSize.min,

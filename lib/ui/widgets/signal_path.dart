@@ -233,7 +233,7 @@ class _SignalPathSheet extends StatelessWidget {
                       ? '100% (untouched)'
                       : p.volume <= 0
                       ? 'Muted'
-                      : '${(20 * math.log(p.volume / 100) / math.ln10).toStringAsFixed(1)} dB (64-bit float)',
+                      : '${(20 * math.log(p.volume / 100) / math.ln10).toStringAsFixed(1)} dB (${p.volumePrecision})',
                   changes: (p.volume - 100).abs() >= 0.01,
                 ),
                 if (p.inRate != p.outRate)

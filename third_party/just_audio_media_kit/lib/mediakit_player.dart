@@ -128,7 +128,7 @@ class MediaKitPlayer extends AudioPlayerPlatform {
         _updatePlaybackEvent();
       }),
       _player.stream.volume.listen((volume) {
-        // OpenMusic: mpv's volume is pinned at 100% while the app applies it.
+        // OpenMusic: the app applies the volume and reports it (mpv's may stay at 100%).
         if (JustAudioMediaKit.volumeOverride != null) return;
         _dataController.add(PlayerDataMessage(volume: volume / 100.0));
       }),
@@ -296,10 +296,10 @@ class MediaKitPlayer extends AudioPlayerPlatform {
 
   @override
   Future<SetVolumeResponse> setVolume(SetVolumeRequest request) async {
-    // OpenMusic: the app may apply volume in its own filter instead of mpv's.
+    // OpenMusic: the app owns the volume (see JustAudioMediaKit.volumeOverride).
     final override = JustAudioMediaKit.volumeOverride;
     if (override != null) {
-      await override(_player, request.volume);
+      await override(_player);
       _dataController.add(PlayerDataMessage(volume: request.volume));
       return SetVolumeResponse();
     }

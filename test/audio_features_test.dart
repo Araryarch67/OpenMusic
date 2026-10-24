@@ -27,8 +27,10 @@ SignalPath _path({
   bool exclusive = false,
   List<String> filters = const [],
   double volume = 100,
+  bool volumeAtOutput = false,
   bool leveling = false,
   String codec = 'flac',
+  int? sourceBits,
 }) => SignalPath(
   codec: codec,
   container: 'flac',
@@ -43,8 +45,10 @@ SignalPath _path({
   exclusive: exclusive,
   filters: filters,
   volume: volume,
+  volumeAtOutput: volumeAtOutput,
   leveling: leveling,
   bitrate: null,
+  sourceBits: sourceBits,
 );
 
 void main() {
@@ -140,6 +144,29 @@ FILE "album.wav" WAVE
       // A chosen WASAPI device in Exclusive mode.
       expect(_path(output: 'wasapi', device: 'wasapi/{x}', exclusive: true).bitPerfect, isTrue);
       expect(_path(output: 'wasapi', device: 'wasapi/{x}').bitPerfect, isFalse, reason: 'a chosen device, still shared');
+    });
+
+    test('the float output the system mixer gets (for mpv\'s volume) is lossless when wide enough', () {
+      final pipewire = _path(output: 'pipewire', device: 'auto', outFormat: 'double');
+      expect(pipewire.untouched, isTrue, reason: '16-bit samples fit a 64-bit float exactly');
+      expect(pipewire.bitPerfect, isFalse);
+      final pulse = _path(output: 'pulse', device: 'auto', inFormat: 's32', outFormat: 'float', sourceBits: 24);
+      expect(pulse.untouched, isTrue, reason: '24-bit samples fit a 32-bit float exactly');
+      expect(
+        _path(output: 'pulse', device: 'auto', inFormat: 's32', outFormat: 'float', sourceBits: 32).untouched,
+        isFalse,
+        reason: '32-bit samples don\'t fit a 32-bit float',
+      );
+      expect(_path(outFormat: 'double').untouched, isFalse, reason: 'a direct output is fed what the DAC gets');
+
+      expect(_path(volume: 50).volumePrecision, '64-bit float', reason: 'the filter');
+      final mpvVolume = _path(output: 'pipewire', device: 'auto', outFormat: 'double', volume: 50, volumeAtOutput: true);
+      expect(mpvVolume.volumePrecision, '64-bit float', reason: 'mpv\'s volume on PipeWire\'s 64-bit float');
+      expect(
+        _path(output: 'pulse', device: 'auto', outFormat: 'float', volume: 50, volumeAtOutput: true).volumePrecision,
+        '32-bit float',
+        reason: 'PulseAudio takes 32-bit float at most',
+      );
     });
 
     test('reads the stored bit depth from file headers', () async {
@@ -257,8 +284,12 @@ FILE "album.wav" WAVE
     setUp(() => SharedPreferences.setMockInitialValues({}));
 
     test('equalizer builds an mpv filter chain with headroom', () async {
-      final a = AudioEngine();
-      expect(a.filterChain, isEmpty);
+      final a = AudioEngine()..debugVolume = 0.25;
+      expect(
+        a.filterChain,
+        '@output:format=format=double',
+        reason: 'through the system mixer mpv\'s own volume applies, on float output',
+      );
       await a.applyPreset('Bass boost');
       expect(a.eqActive, isTrue);
       expect(a.preamp, -6);
@@ -267,7 +298,11 @@ FILE "album.wav" WAVE
       await a.setCrossfeed(0.5);
       expect(a.filterChain, contains('@crossfeed:lavfi=[crossfeed=strength=0.40'));
       await a.setBitPerfect(true);
-      expect(a.filterChain, isEmpty);
+      expect(
+        a.filterChain,
+        '@volume:lavfi=[volume=volume=0.250000:precision=double]',
+        reason: 'no DSP in bit-perfect mode, and the volume is the 64-bit filter\'s again',
+      );
       expect(a.effectiveLeveling, VolumeLeveling.off);
     });
 
@@ -330,7 +365,10 @@ FILE "album.wav" WAVE
       }
 
       final dry = await peakDb('');
-      final a = AudioEngine()..debugVolume = 0.25;
+      // A direct output: there the 64-bit filter applies the volume.
+      final a = AudioEngine()
+        ..device = 'alsa/hw:CARD=DAC,DEV=0'
+        ..debugVolume = 0.25;
       final quieter = await peakDb(a.filterChain);
       printOnFailure('dry $dry dB, 25% volume $quieter dB');
       expect(quieter - dry, closeTo(-12.04, 0.2), reason: '25% volume is -12 dB');
