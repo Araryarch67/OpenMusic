@@ -163,6 +163,7 @@ test/                          Unit and widget tests
 | Package | Why |
 |---|---|
 | `just_audio_media_kit` | Exposes the libmpv player (hook + `activePlayer`) |
+| `media_kit_libs_android_audio` | Android's `libmpv.so` from `tool/build_libmpv_android.sh` (the FFmpeg filters crossfeed, room correction and Virtual speakers need) instead of media_kit's downloaded one; media_kit's helper library is kept as it was |
 | `audio_metadata_reader` | Its FLAC and MP4 writers dropped ReplayGain, lyrics, disc numbers and unknown tags (MP4 freeform `----` atoms) on every save; ours keep them |
 | `flutter_inappwebview_linux` | Stub: the real one links WPE WebKit; Linux sign-in uses `linux/login_helper` instead |
 
@@ -192,6 +193,10 @@ env -u DISPLAY WAYLAND_DISPLAY=om-test GDK_BACKEND=wayland \
   session lives under it; without it a test runs signed in as the developer
   and could change their real account.
 - `zz_audio_test` routes mpv to `ao=null` (silent) and checks the signal path.
+- `dsp_test` renders a test song through each sound setting (`ao=pcm` into
+  files) and measures every channel. It needs nothing on the host, so it is
+  the check that a platform's own libmpv works: run it on Linux, Windows, an
+  Android emulator or phone, macOS and the iOS Simulator.
 - `zz_buttons_test` talks to the live YouTube Music service, signed out.
 - `zz_responsive_test` sweeps every screen across 90 window sizes; it needs a
   folder of tagged MP3s (see `s` at the top of the file).

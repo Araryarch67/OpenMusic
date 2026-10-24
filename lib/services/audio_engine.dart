@@ -258,14 +258,15 @@ class SignalPath {
   }
 }
 
-/// Audio settings applied to libmpv (desktop) and read back as a [SignalPath].
+/// Audio settings applied to libmpv and read back as a [SignalPath].
 ///
 /// Everything here goes through mpv properties on the player behind just_audio:
-/// equalizer and crossfeed are lavfi filters, leveling is mpv's ReplayGain,
-/// output/exclusive/rate/resampler are AO options. On platforms where
-/// just_audio uses its own native backend (iOS/macOS) [supported] is false and
-/// the settings UI hides itself. Android plays through libmpv too, but its
-/// build has fewer FFmpeg filters and no device choice: see the `has…` flags.
+/// equalizer, crossfeed, room correction and Virtual speakers are lavfi filters,
+/// Mono audio mpv's own channel conversion, leveling mpv's ReplayGain, and
+/// output/exclusive/rate/resampler are AO options. Every platform's libmpv has
+/// the FFmpeg filters these need: Linux's system one, and OpenMusic's own
+/// builds elsewhere (tool/build_libmpv_*.sh). What an OS can't offer (a device
+/// choice on Android) has its `has…` flag.
 class AudioEngine extends ChangeNotifier {
   AudioEngine() {
     // Pitch control makes media_kit own the `af` property (scaletempo); the app needs it for EQ.
@@ -282,11 +283,7 @@ class AudioEngine extends ChangeNotifier {
 
   static bool get supported => Platform.isLinux || Platform.isWindows || Platform.isAndroid;
 
-  /// media_kit's Android libmpv is built without FFmpeg's `crossfeed`, `afir`
-  /// and `amovie` filters, and Android offers no exclusive or raw device output.
-  static bool get hasCrossfeed => !Platform.isAndroid;
-  static bool get hasRoomCorrection => !Platform.isAndroid;
-  static bool get hasVirtualSpeakers => !Platform.isAndroid;
+  /// Android offers no exclusive or raw device output: OpenSL ES plays through the system mixer.
   static bool get hasOutputChoice => !Platform.isAndroid;
 
   /// Whether the OS output can be opened exclusively by mpv's own option
@@ -760,12 +757,11 @@ class AudioEngine extends ChangeNotifier {
 
   /// Off under [monoActive]: summed to one channel, the two ears' responses
   /// would only colour the sound.
-  bool get virtualSpeakersActive =>
-      hasVirtualSpeakers && virtualSpeakers && hrirPath != null && !bitPerfect && !monoActive;
+  bool get virtualSpeakersActive => virtualSpeakers && hrirPath != null && !bitPerfect && !monoActive;
 
   /// Virtual speakers already feed each ear the other side, the way crossfeed does.
-  bool get crossfeedActive => hasCrossfeed && crossfeed > 0 && !bitPerfect && !monoActive && !virtualSpeakersActive;
-  bool get convolutionActive => hasRoomCorrection && convolution && impulsePath != null && !bitPerfect;
+  bool get crossfeedActive => crossfeed > 0 && !bitPerfect && !monoActive && !virtualSpeakersActive;
+  bool get convolutionActive => convolution && impulsePath != null && !bitPerfect;
   VolumeLeveling get effectiveLeveling => bitPerfect ? VolumeLeveling.off : leveling;
 
   /// Lowered so boosted bands can't clip: the loudest band ends at 0 dB.

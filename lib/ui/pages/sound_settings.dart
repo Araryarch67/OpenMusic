@@ -66,55 +66,50 @@ class PlaybackSettings extends StatelessWidget {
                 value: audio.gapless,
                 onChanged: audio.setGapless,
               ),
-              if (AudioEngine.hasVirtualSpeakers)
-                SwitchListTile(
-                  secondary: const Icon(Icons.spatial_audio_rounded),
-                  title: const Text('Virtual speakers'),
-                  subtitle: Text(
-                    lockedNote(
-                      monoOn ? 'Off while Mono audio is on' : 'For headphones: the music plays in front of you, like from two speakers, instead of inside your head',
-                    ),
-                    style: muted,
+              SwitchListTile(
+                secondary: const Icon(Icons.spatial_audio_rounded),
+                title: const Text('Virtual speakers'),
+                subtitle: Text(
+                  lockedNote(
+                    monoOn ? 'Off while Mono audio is on' : 'For headphones: the music plays in front of you, like from two speakers, instead of inside your head',
                   ),
-                  value: speakersOn,
-                  onChanged: locked || monoOn ? null : audio.setVirtualSpeakers,
+                  style: muted,
                 ),
-              if (AudioEngine.hasCrossfeed)
-                SettingTile(
-                  icon: Icons.headphones_rounded,
-                  title: const Text('Headphone crossfeed'),
-                  subtitle: Text(
-                    lockedNote(
-                      monoOn
-                          ? 'Off while Mono audio is on'
-                          : speakersOn
-                          ? 'Not needed with Virtual speakers: they already do this'
-                          : 'Makes headphones sound more like speakers in a room',
-                    ),
-                    style: muted,
+                value: speakersOn,
+                onChanged: locked || monoOn ? null : audio.setVirtualSpeakers,
+              ),
+              SettingTile(
+                icon: Icons.headphones_rounded,
+                title: const Text('Headphone crossfeed'),
+                subtitle: Text(
+                  lockedNote(
+                    monoOn
+                        ? 'Off while Mono audio is on'
+                        : speakersOn
+                        ? 'Not needed with Virtual speakers: they already do this'
+                        : 'Makes headphones sound more like speakers in a room',
                   ),
-                  control: SizedBox(
-                    width: 200,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Slider(
-                            value: audio.crossfeed,
-                            divisions: 10,
-                            onChanged: locked || monoOn || speakersOn ? null : audio.setCrossfeed,
-                          ),
+                  style: muted,
+                ),
+                control: SizedBox(
+                  width: 200,
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Slider(
+                          value: audio.crossfeed,
+                          divisions: 10,
+                          onChanged: locked || monoOn || speakersOn ? null : audio.setCrossfeed,
                         ),
-                        SizedBox(
-                          width: 40,
-                          child: Text(
-                            audio.crossfeed == 0 ? 'Off' : '${(audio.crossfeed * 100).round()}%',
-                            style: muted,
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                      SizedBox(
+                        width: 40,
+                        child: Text(audio.crossfeed == 0 ? 'Off' : '${(audio.crossfeed * 100).round()}%', style: muted),
+                      ),
+                    ],
                   ),
                 ),
+              ),
               SettingTile(
                 icon: Icons.hearing_rounded,
                 title: const Text('Mono audio'),
@@ -275,32 +270,31 @@ class AdvancedAudioSettings extends StatelessWidget {
                           ],
                         ),
                       ),
-                    if (AudioEngine.hasRoomCorrection)
-                      SettingTile(
-                        icon: Icons.surround_sound_rounded,
-                        title: const Text('Room correction'),
-                        subtitle: Text(
-                          locked
-                              ? 'Off while bit-perfect mode is on'
-                              : audio.impulseName == null
-                              ? 'Load an impulse response (WAV or FLAC, e.g. made with REW) to correct your room or headphones'
-                              : audio.impulseName!,
-                          style: muted,
-                        ),
-                        control: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            TextButton(
-                              onPressed: locked ? null : () => _pickImpulse(context, audio),
-                              child: Text(audio.impulseName == null ? 'Choose file' : 'Change'),
-                            ),
-                            Switch(
-                              value: audio.convolution && !locked,
-                              onChanged: locked || audio.impulsePath == null ? null : audio.setConvolution,
-                            ),
-                          ],
-                        ),
+                    SettingTile(
+                      icon: Icons.surround_sound_rounded,
+                      title: const Text('Room correction'),
+                      subtitle: Text(
+                        locked
+                            ? 'Off while bit-perfect mode is on'
+                            : audio.impulseName == null
+                            ? 'Load an impulse response (WAV or FLAC, e.g. made with REW) to correct your room or headphones'
+                            : audio.impulseName!,
+                        style: muted,
                       ),
+                      control: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          TextButton(
+                            onPressed: locked ? null : () => _pickImpulse(context, audio),
+                            child: Text(audio.impulseName == null ? 'Choose file' : 'Change'),
+                          ),
+                          Switch(
+                            value: audio.convolution && !locked,
+                            onChanged: locked || audio.impulsePath == null ? null : audio.setConvolution,
+                          ),
+                        ],
+                      ),
+                    ),
                     SettingTile(
                       icon: Icons.multiline_chart_rounded,
                       title: const Text('Output sample rate'),

@@ -67,6 +67,10 @@ dependency_overrides:
   # properties (EQ filters, output device, gapless, ReplayGain, signal path).
   just_audio_media_kit:
     path: third_party/just_audio_media_kit
+  # Android's libmpv with the FFmpeg filters crossfeed, room correction and
+  # Virtual speakers need (tool/build_libmpv_android.sh); media_kit's has none.
+  media_kit_libs_android_audio:
+    path: third_party/media_kit_libs_android_audio
   # Its FLAC tag writer dropped ReplayGain, lyrics, disc numbers and custom
   # tags on every save; the copy here keeps them (see flac_writer.dart).
   audio_metadata_reader:
