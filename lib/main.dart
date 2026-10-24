@@ -4,6 +4,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:screen_retriever/screen_retriever.dart';
@@ -25,6 +26,12 @@ Future<void> main() async {
   // Android too: libmpv gives it the equalizer, ReplayGain, gapless, the
   // signal path and decoders (ALAC, WavPack, DSD) that ExoPlayer lacks.
   JustAudioMediaKit.ensureInitialized(linux: true, windows: true, android: true);
+  // The KEMAR data behind Virtual speakers asks to be credited.
+  LicenseRegistry.addLicense(() async* {
+    yield LicenseEntryWithLineBreaks([
+      'KEMAR HRTF data (Virtual speakers)',
+    ], await rootBundle.loadString('assets/audio/HRIR-NOTICE.txt'));
+  });
   await Appearance.instance.load();
 
   if (hasCustomTitleBar) {

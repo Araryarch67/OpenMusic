@@ -4,8 +4,11 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio_media_kit/just_audio_media_kit.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'linux_alsa.dart';
@@ -30,6 +33,18 @@ enum BufferSize {
   const BufferSize(this.label, this.seconds);
   final String label;
   final double seconds;
+}
+
+/// Both sides played as one sound: in both ears, or in one when the other side
+/// of the headphones doesn't work.
+enum MonoAudio {
+  off('Off (stereo)'),
+  both('Both ears'),
+  left('Left ear only'),
+  right('Right ear only');
+
+  const MonoAudio(this.label);
+  final String label;
 }
 
 /// One peaking filter of the equalizer.
@@ -271,6 +286,7 @@ class AudioEngine extends ChangeNotifier {
   /// and `amovie` filters, and Android offers no exclusive or raw device output.
   static bool get hasCrossfeed => !Platform.isAndroid;
   static bool get hasRoomCorrection => !Platform.isAndroid;
+  static bool get hasVirtualSpeakers => !Platform.isAndroid;
   static bool get hasOutputChoice => !Platform.isAndroid;
 
   /// Whether the OS output can be opened exclusively by mpv's own option
@@ -290,6 +306,22 @@ class AudioEngine extends ChangeNotifier {
 
   /// Headphone crossfeed strength 0..1 (0 = off).
   double crossfeed = 0;
+
+  /// Headphones play the song as two loudspeakers in front of the listener
+  /// would sound: each ear hears both speakers, through the head-related
+  /// impulse responses in [hrirAsset] (FFmpeg's `headphone` filter).
+  bool virtualSpeakers = false;
+
+  /// MIT's KEMAR dummy head, speakers at ±30°, 48 kHz (made by `tool/make_hrir.sh`).
+  static const hrirAsset = 'assets/audio/hrir_kemar_48k.wav';
+
+  /// The rate [hrirAsset] was made at.
+  static const _hrirRate = 48000;
+
+  /// [hrirAsset] as a file FFmpeg can open (assets aren't files on Android, iOS or macOS).
+  String? hrirPath;
+
+  MonoAudio mono = MonoAudio.off;
 
   /// Room correction: an impulse response (WAV/FLAC, e.g. from REW) convolved
   /// with everything played. Kept as a copy in the app's folder, see [setImpulse].
@@ -440,6 +472,8 @@ class AudioEngine extends ChangeNotifier {
       final b = j['bands'] as List?;
       if (b != null && b.isNotEmpty) bands = [for (final x in b) EqBand.fromJson((x as Map).cast())];
       crossfeed = (j['crossfeed'] as num?)?.toDouble() ?? crossfeed;
+      virtualSpeakers = j['virtualSpeakers'] as bool? ?? virtualSpeakers;
+      mono = MonoAudio.values.asNameMap()[j['mono']] ?? mono;
       device = j['device'] as String? ?? device;
       exclusive = j['exclusive'] as bool? ?? exclusive;
       outputRate = j['outputRate'] as int?;
@@ -458,6 +492,25 @@ class AudioEngine extends ChangeNotifier {
     } catch (e) {
       debugPrint('Ignoring bad audio settings: $e');
     }
+    if (virtualSpeakers) await _installHrir();
+  }
+
+  /// Copies [hrirAsset] next to the app's other files, for [hrirPath].
+  Future<void> _installHrir() async {
+    if (hrirPath != null) return;
+    try {
+      final data = await rootBundle.load(hrirAsset);
+      final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final file = File(p.join((await getApplicationSupportDirectory()).path, p.basename(hrirAsset)));
+      if (!file.existsSync() || !listEquals(await file.readAsBytes(), bytes)) {
+        final part = File('${file.path}.part');
+        await part.writeAsBytes(bytes, flush: true);
+        await part.rename(file.path);
+      }
+      hrirPath = file.path;
+    } catch (e) {
+      debugPrint('Virtual speakers: $e');
+    }
   }
 
   Future<void> _save() async => (await SharedPreferences.getInstance()).setString(
@@ -470,6 +523,8 @@ class AudioEngine extends ChangeNotifier {
       'eqPreset': eqPreset,
       'bands': [for (final b in bands) b.toJson()],
       'crossfeed': crossfeed,
+      'virtualSpeakers': virtualSpeakers,
+      'mono': mono.name,
       'device': device,
       'exclusive': exclusive,
       'outputRate': outputRate,
@@ -522,7 +577,14 @@ class AudioEngine extends ChangeNotifier {
   Future<void> setLeveling(VolumeLeveling v) => _set(() => leveling = v);
   Future<void> setBuffer(BufferSize v) => _set(() => buffer = v, reopen: true);
   Future<void> setCrossfeed(double v) => _set(() => crossfeed = v);
+  Future<void> setMono(MonoAudio v) => _set(() => mono = v);
   Future<void> setDevice(String v) => _set(() => device = v);
+
+  Future<void> setVirtualSpeakers(bool v) async {
+    if (v) await _installHrir();
+    return _set(() => virtualSpeakers = v);
+  }
+
   Future<void> setExclusive(bool v) => _set(() => exclusive = v, reopen: true);
   Future<void> setOutputRate(int? v) => _set(() => outputRate = v, reopen: true);
   Future<void> setHqResampler(bool v) => _set(() => hqResampler = v);
@@ -694,7 +756,15 @@ class AudioEngine extends ChangeNotifier {
 
   /// Equalizer curve active right now (bit-perfect mode bypasses everything).
   bool get eqActive => eqEnabled && !bitPerfect && bands.any((b) => b.gain.abs() > 0.05);
-  bool get crossfeedActive => hasCrossfeed && crossfeed > 0 && !bitPerfect;
+  bool get monoActive => mono != MonoAudio.off && !bitPerfect;
+
+  /// Off under [monoActive]: summed to one channel, the two ears' responses
+  /// would only colour the sound.
+  bool get virtualSpeakersActive =>
+      hasVirtualSpeakers && virtualSpeakers && hrirPath != null && !bitPerfect && !monoActive;
+
+  /// Virtual speakers already feed each ear the other side, the way crossfeed does.
+  bool get crossfeedActive => hasCrossfeed && crossfeed > 0 && !bitPerfect && !monoActive && !virtualSpeakersActive;
   bool get convolutionActive => hasRoomCorrection && convolution && impulsePath != null && !bitPerfect;
   VolumeLeveling get effectiveLeveling => bitPerfect ? VolumeLeveling.off : leveling;
 
@@ -705,19 +775,67 @@ class AudioEngine extends ChangeNotifier {
     return peak > 0 ? -peak : 0;
   }
 
+  /// A file name as an FFmpeg filter option inside a filter graph: escaped once
+  /// for the option (`:`), once more for the graph (`[`, `,`, `;`). Windows'
+  /// drive letters, an apostrophe in a user name, brackets in a folder name...
+  @visibleForTesting
+  static String graphPath(String path) {
+    String escape(String s, String special) => s.split('').map((c) => special.contains(c) ? '\\$c' : c).join();
+    return escape(escape(path.replaceAll('\\', '/'), "\\':"), "\\'[],;");
+  }
+
+  /// An mpv `lavfi` filter whose graph mpv takes as it is, by length (`%n%`):
+  /// a bracket in a file name can't end it early.
+  static String _lavfi(String label, String graph) => '@$label:lavfi=graph=%${utf8.encode(graph).length}%$graph';
+
+  /// Mono through mpv's own channel conversion (FFmpeg's `pan` is missing from
+  /// some libmpv builds): mixed to one channel, then to both sides, each at
+  /// half of left plus right, so nothing can clip. For one ear, the copy on
+  /// the other side is relabelled as LFE, which mixing back to stereo drops.
+  String get _monoChain => [
+    '@${switch (mono) {
+      MonoAudio.left => 'monoleft',
+      MonoAudio.right => 'monoright',
+      _ => 'mono',
+    }}:format=format=double:channels=mono',
+    'format=channels=stereo',
+    if (mono == MonoAudio.left || mono == MonoAudio.right) ...[
+      'format=channels=3.1',
+      mono == MonoAudio.left ? 'format=out-channels=fl-lfe-fc-fr' : 'format=out-channels=lfe-fr-fc-fl',
+      'format=channels=stereo',
+    ],
+  ].join(',');
+
+  /// Virtual speakers at the output's rate, 48 kHz when it follows the song:
+  /// `headphone` would otherwise move the whole song to [hrirAsset]'s rate,
+  /// with FFmpeg's default resampler. Here mpv converts the song (with the
+  /// high-quality resampler), and only the IR is resampled when the rates differ.
+  String get _virtualSpeakersChain {
+    final rate = outputRate ?? _hrirRate;
+    // `headphone` lowers by 3 dB per input channel; a resampled IR has rate / 48k more gain.
+    final gain = 6.0206 + 20 * math.log(_hrirRate / rate) / math.ln10;
+    final ir = 'amovie=filename=${graphPath(hrirPath!)}${rate == _hrirRate ? '' : ',aresample=$rate'}';
+    return [
+      'format=srate=$rate:channels=stereo',
+      _lavfi('hrtf', '$ir[ir];[in][ir]headphone=map=FL|FR:hrir=multich:type=freq:gain=${gain.toStringAsFixed(4)}[out]'),
+    ].join(',');
+  }
+
   /// The mpv `af` chain. Labels let the signal path name each stage.
   String get filterChain {
     String n(double v) => v.toStringAsFixed(2);
     return [
       // First: room correction applies to the signal as a whole.
-      if (convolutionActive)
-        '@convolution:lavfi=[amovie=filename=${impulsePath!.replaceAll('\\', '/').replaceAll(':', '\\:')}[ir];[in][ir]afir[out]]',
+      if (convolutionActive) _lavfi('convolution', 'amovie=filename=${graphPath(impulsePath!)}[ir];[in][ir]afir[out]'),
       if (eqActive) ...[
         if (preamp < 0) '@preamp:lavfi=[volume=volume=${n(preamp)}dB]',
         '@eq:lavfi=[${bands.where((b) => b.gain.abs() > 0.05).map((b) => 'equalizer=f=${n(b.frequency)}:t=q:w=${n(b.q)}:g=${n(b.gain)}').join(',')}]',
       ],
       if (pluginsActive) '@plugins:lavfi=[ladspa=file=${pluginBridge!.replaceAll(':', '\\:')}:plugin=openmusic_carla]',
+      if (virtualSpeakersActive) _virtualSpeakersChain,
       if (crossfeedActive) '@crossfeed:lavfi=[crossfeed=strength=${n(0.1 + crossfeed * 0.6)}:range=0.5]',
+      // After the stereo stages: what's left is one channel.
+      if (monoActive) _monoChain,
       // Last, so nothing after it can clip what it lowered.
       if (_volumeActive) '@volume:lavfi=[volume=volume=${_volume.toStringAsFixed(6)}:precision=double]',
       // Float output for mpv's volume (lossless: the system mixer works in float anyway).
@@ -1071,6 +1189,10 @@ class AudioEngine extends ChangeNotifier {
             'eq' => 'Equalizer',
             'preamp' => 'Equalizer headroom',
             'crossfeed' => 'Headphone crossfeed',
+            'hrtf' => 'Virtual speakers (HRTF)',
+            'mono' => 'Mono (both ears)',
+            'monoleft' => 'Mono (left ear only)',
+            'monoright' => 'Mono (right ear only)',
             'convolution' => 'Room correction (${impulseName ?? 'convolution'})',
             'plugins' => 'Audio plugins (Carla)',
             final other => other!,

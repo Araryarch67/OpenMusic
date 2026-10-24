@@ -11,8 +11,8 @@ setup and one obvious control:
 - YouTube Music sign-in is a single **Sign in with Google** button. Never add
   "paste your cookies", OAuth client IDs, or browser pickers.
 - Power-user audio settings live under **Settings › Advanced audio**, folded
-  away. Everyday ones (Equalizer, Volume leveling, Gapless, Crossfeed) sit
-  above it in plain words.
+  away. Everyday ones (Equalizer, Volume leveling, Gapless, Virtual speakers,
+  Crossfeed, Mono audio) sit above it in plain words.
 - UI looks like a streaming app: dark, the only colour comes from real cover
   art (`AccentBuilder`), no decorative gradients, no emoji, no "AI" styling.
 - Error messages the user sees (SnackBars, error lines) are one calm, plain
@@ -101,9 +101,20 @@ test/                          Unit and widget tests
 - All settings are mpv properties set in `AudioEngine._applyProps`. Options
   that only apply when the output opens (`audio-buffer`, `audio-exclusive`,
   `audio-samplerate`) need `reopen: true`, which sends `ao-reload`.
-- Filters are labelled (`@eq:`, `@preamp:`, `@crossfeed:`) so `signalPath()`
-  can name each stage. New DSP must use a label and add its name to the
-  `switch` in `signalPath()`.
+- Filters are labelled (`@eq:`, `@preamp:`, `@crossfeed:`, `@hrtf:`, `@mono:`)
+  so `signalPath()` can name each stage. New DSP must use a label and add its
+  name to the `switch` in `signalPath()`.
+- A file in a filter graph (room correction's IR, Virtual speakers' HRIR)
+  goes through `AudioEngine.graphPath` and `_lavfi` (mpv's `%n%` length
+  quoting). Windows' `C:`, an apostrophe or a bracket in a folder name break
+  the graph otherwise.
+- Virtual speakers: FFmpeg's `headphone` with `assets/audio/hrir_kemar_48k.wav`
+  (made by `tool/make_hrir.sh`, copied to a real file at first use). It runs
+  at 48 kHz or the chosen output rate: left alone, `headphone` would move the
+  song to the HRIR's rate with FFmpeg's default resampler.
+- Mono audio uses mpv's own `format` filters, not FFmpeg's `pan`, so it needs
+  nothing from the FFmpeg build. Mono turns Virtual speakers and crossfeed
+  off; Virtual speakers turn crossfeed off.
 - **Bit-perfect mode** must bypass every stage you add: check `bitPerfect` in
   your getter (see `eqActive`, `crossfeedActive`, `effectiveLeveling`).
 - media_kit has no `setShuffleOrder`, so shuffle is done in Dart

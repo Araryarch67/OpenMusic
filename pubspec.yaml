@@ -91,6 +91,11 @@ flutter:
   # the material Icons class.
   uses-material-design: true
 
+  assets:
+    # Virtual speakers' head-related impulse responses (tool/make_hrir.sh).
+    - assets/audio/hrir_kemar_48k.wav
+    - assets/audio/HRIR-NOTICE.txt
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

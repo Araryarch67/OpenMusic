@@ -26,6 +26,8 @@ class PlaybackSettings extends StatelessWidget {
       listenable: audio,
       builder: (context, _) {
         final locked = audio.bitPerfect;
+        final monoOn = audio.monoActive;
+        final speakersOn = audio.virtualSpeakersActive;
         String lockedNote(String normal) => locked ? 'Off while bit-perfect mode is on' : normal;
         return SettingsCard(
           children: [
@@ -64,11 +66,33 @@ class PlaybackSettings extends StatelessWidget {
                 value: audio.gapless,
                 onChanged: audio.setGapless,
               ),
+              if (AudioEngine.hasVirtualSpeakers)
+                SwitchListTile(
+                  secondary: const Icon(Icons.spatial_audio_rounded),
+                  title: const Text('Virtual speakers'),
+                  subtitle: Text(
+                    lockedNote(
+                      monoOn ? 'Off while Mono audio is on' : 'For headphones: the music plays in front of you, like from two speakers, instead of inside your head',
+                    ),
+                    style: muted,
+                  ),
+                  value: speakersOn,
+                  onChanged: locked || monoOn ? null : audio.setVirtualSpeakers,
+                ),
               if (AudioEngine.hasCrossfeed)
                 SettingTile(
                   icon: Icons.headphones_rounded,
                   title: const Text('Headphone crossfeed'),
-                  subtitle: Text(lockedNote('Makes headphones sound more like speakers in a room'), style: muted),
+                  subtitle: Text(
+                    lockedNote(
+                      monoOn
+                          ? 'Off while Mono audio is on'
+                          : speakersOn
+                          ? 'Not needed with Virtual speakers: they already do this'
+                          : 'Makes headphones sound more like speakers in a room',
+                    ),
+                    style: muted,
+                  ),
                   control: SizedBox(
                     width: 200,
                     child: Row(
@@ -77,7 +101,7 @@ class PlaybackSettings extends StatelessWidget {
                           child: Slider(
                             value: audio.crossfeed,
                             divisions: 10,
-                            onChanged: locked ? null : audio.setCrossfeed,
+                            onChanged: locked || monoOn || speakersOn ? null : audio.setCrossfeed,
                           ),
                         ),
                         SizedBox(
@@ -91,6 +115,19 @@ class PlaybackSettings extends StatelessWidget {
                     ),
                   ),
                 ),
+              SettingTile(
+                icon: Icons.hearing_rounded,
+                title: const Text('Mono audio'),
+                subtitle: Text(
+                  lockedNote('Both sides as one sound. Handy when one side of your headphones doesn\'t work'),
+                  style: muted,
+                ),
+                control: OptionPicker<MonoAudio>(
+                  value: locked ? MonoAudio.off : audio.mono,
+                  onChanged: locked ? null : audio.setMono,
+                  options: [for (final m in MonoAudio.values) (m, m.label)],
+                ),
+              ),
             ],
           ],
         );

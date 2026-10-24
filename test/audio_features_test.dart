@@ -132,7 +132,11 @@ FILE "album.wav" WAVE
       expect(_path(filters: ['Equalizer']).bitPerfect, isFalse);
       expect(_path(volume: 80).bitPerfect, isFalse);
       // Windows: shared mode goes through the system mixer; exclusive mode reaches the DAC.
-      expect(_path(output: 'wasapi', device: 'auto').bitPerfect, isFalse, reason: 'shared WASAPI is mixed');
+      expect(
+        _path(output: 'wasapi', device: 'auto').bitPerfect,
+        isFalse,
+        reason: 'shared WASAPI is mixed',
+      );
       expect(_path(output: 'wasapi', device: 'auto').viaSystemMixer, isTrue);
       expect(_path(output: 'wasapi', device: 'auto', exclusive: true).bitPerfect, isTrue);
       expect(_path(leveling: true).bitPerfect, isFalse);
@@ -143,7 +147,11 @@ FILE "album.wav" WAVE
       expect(_path(device: 'alsa/plughw:CARD=DAC').viaSystemMixer, isTrue);
       // A chosen WASAPI device in Exclusive mode.
       expect(_path(output: 'wasapi', device: 'wasapi/{x}', exclusive: true).bitPerfect, isTrue);
-      expect(_path(output: 'wasapi', device: 'wasapi/{x}').bitPerfect, isFalse, reason: 'a chosen device, still shared');
+      expect(
+        _path(output: 'wasapi', device: 'wasapi/{x}').bitPerfect,
+        isFalse,
+        reason: 'a chosen device, still shared',
+      );
     });
 
     test('the float output the system mixer gets (for mpv\'s volume) is lossless when wide enough', () {
@@ -160,7 +168,13 @@ FILE "album.wav" WAVE
       expect(_path(outFormat: 'double').untouched, isFalse, reason: 'a direct output is fed what the DAC gets');
 
       expect(_path(volume: 50).volumePrecision, '64-bit float', reason: 'the filter');
-      final mpvVolume = _path(output: 'pipewire', device: 'auto', outFormat: 'double', volume: 50, volumeAtOutput: true);
+      final mpvVolume = _path(
+        output: 'pipewire',
+        device: 'auto',
+        outFormat: 'double',
+        volume: 50,
+        volumeAtOutput: true,
+      );
       expect(mpvVolume.volumePrecision, '64-bit float', reason: 'mpv\'s volume on PipeWire\'s 64-bit float');
       expect(
         _path(output: 'pulse', device: 'auto', outFormat: 'float', volume: 50, volumeAtOutput: true).volumePrecision,
@@ -403,6 +417,136 @@ FILE "album.wav" WAVE
       expect(b.filterChain, contains('@volume:'), reason: 'volume still works in bit-perfect mode');
     });
 
+    test('mono and virtual speakers: their stages, and what turns them off', () async {
+      final a = AudioEngine()
+        ..hrirPath = p.absolute(AudioEngine.hrirAsset)
+        ..crossfeed = 0.5;
+      await a.setMono(MonoAudio.left);
+      expect(a.filterChain, contains('@monoleft:format=format=double:channels=mono'));
+      expect(a.filterChain, contains('format=out-channels=fl-lfe-fc-fr'));
+      expect(a.crossfeedActive, isFalse, reason: 'mono leaves no stereo for crossfeed to work on');
+      await a.setMono(MonoAudio.both);
+      expect(a.filterChain, contains('@mono:'));
+      expect(a.filterChain, isNot(contains('3.1')), reason: 'both ears need no relabelling');
+
+      a.virtualSpeakers = true;
+      expect(a.virtualSpeakersActive, isFalse, reason: 'summed to one channel, the ears\' responses only colour it');
+      await a.setMono(MonoAudio.off);
+      expect(a.virtualSpeakersActive, isTrue);
+      expect(a.filterChain, contains('format=srate=48000:channels=stereo,@hrtf:lavfi=graph=%'));
+      expect(a.filterChain, contains('gain=6.0206'), reason: 'cancels headphone\'s own -3 dB per channel');
+      expect(a.crossfeedActive, isFalse, reason: 'virtual speakers already feed each ear both sides');
+      expect(a.filterChain, isNot(contains('@crossfeed:')));
+
+      await a.setOutputRate(96000);
+      expect(a.filterChain, contains(',aresample=96000[ir]'));
+      expect(a.filterChain, contains('gain=0.0000'), reason: 'the IR resampled to 96 kHz has twice the gain');
+
+      await a.setBitPerfect(true);
+      await a.setMono(MonoAudio.right);
+      expect(a.filterChain, isEmpty, reason: 'bit-perfect bypasses both');
+
+      final b = AudioEngine();
+      await b.load();
+      expect(b.mono, MonoAudio.right);
+      expect(b.virtualSpeakers, isTrue);
+    });
+
+    test('file names reach FFmpeg as they are, whatever they hold', () {
+      expect(AudioEngine.graphPath(r'C:\Users\Me\ir.wav'), r'C\\:/Users/Me/ir.wav');
+      expect(AudioEngine.graphPath("/home/O'Brien/[x], y;z/ir.wav"), r"/home/O\\\'Brien/\[x\]\, y\;z/ir.wav");
+    });
+
+    test('mono and virtual speakers really change the sound (measured through mpv)', () async {
+      final dir = Directory.systemTemp.createTempSync('dsp');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      // 440 Hz on the left only, at half scale.
+      final left = '${dir.path}/left.wav';
+      final ok = await Process.run('ffmpeg', [
+        '-loglevel', 'error', '-f', 'lavfi', '-i', "aevalsrc='0.5*sin(2*PI*440*t)|0':s=48000:d=2", left, //
+      ]);
+      if (ok.exitCode != 0) return markTestSkipped('ffmpeg not available');
+      // The same full-scale tone on both sides, at the HRIR's loudest frequency: must not clip.
+      final loud = '${dir.path}/loud.wav';
+      await Process.run('ffmpeg', [
+        '-loglevel',
+        'error',
+        '-f',
+        'lavfi',
+        '-i',
+        "aevalsrc='0.999*sin(2*PI*3811*t)|0.999*sin(2*PI*3811*t)':s=48000:d=2",
+        loud, //
+      ]);
+      // A folder name FFmpeg's graph syntax would choke on unescaped.
+      final odd = Directory("${dir.path}/O'Brien [music], a;b:c")..createSync();
+      final hrir = File(AudioEngine.hrirAsset).copySync('${odd.path}/hrir.wav').path;
+
+      /// Per-channel RMS and peak in dB, and the output's rate.
+      Future<({List<double> rms, List<double> peak, int rate})> measure(String chain, String input) async {
+        final out = '${dir.path}/out.wav';
+        final r = await Process.run('mpv', [
+          '--no-config', '--ao=pcm', '--ao-pcm-file=$out', '--audio-format=s16', //
+          if (chain.isNotEmpty) '--af=$chain', input,
+        ]);
+        expect(r.exitCode, 0, reason: '${r.stderr}');
+        final bytes = File(out).readAsBytesSync();
+        final view = ByteData.sublistView(bytes);
+        var at = 12;
+        while (String.fromCharCodes(bytes.sublist(at, at + 4)) != 'data') {
+          at += 8 + view.getUint32(at + 4, Endian.little);
+        }
+        final rate = view.getUint32(24, Endian.little);
+        final pcm = ByteData.sublistView(bytes, at + 8);
+        final sum = [0.0, 0.0], peak = [0, 0];
+        var n = 0;
+        // Skip the first half second (filter start-up), measure the steady tone.
+        for (var i = rate * 2 * 2 ~/ 2; i + 3 < pcm.lengthInBytes; i += 4, n++) {
+          for (final c in [0, 1]) {
+            final v = pcm.getInt16(i + 2 * c, Endian.little);
+            sum[c] += v * v.toDouble();
+            peak[c] = math.max(peak[c], v.abs());
+          }
+        }
+        double db(double v) => v <= 0 ? -200 : 20 * math.log(v / 32768) / math.ln10;
+        return (
+          rms: [for (final s in sum) db(math.sqrt(s / n))],
+          peak: [for (final v in peak) db(v.toDouble())],
+          rate: rate,
+        );
+      }
+
+      final dry = await measure('', left);
+      final a = AudioEngine();
+      await a.setMono(MonoAudio.both);
+      final both = await measure(a.filterChain, left);
+      await a.setMono(MonoAudio.left);
+      final toLeft = await measure(a.filterChain, left);
+      await a.setMono(MonoAudio.right);
+      final toRight = await measure(a.filterChain, left);
+      final b = AudioEngine()
+        ..hrirPath = hrir
+        ..virtualSpeakers = true;
+      final speakers = await measure(b.filterChain, left);
+      final speakersLoud = await measure(b.filterChain, loud);
+      // ignore: avoid_print
+      print(
+        'measured (L, R dB RMS): dry ${dry.rms}, mono both ${both.rms}, left ${toLeft.rms}, right ${toRight.rms}, '
+        'virtual speakers ${speakers.rms} at ${speakers.rate} Hz, loudest peak ${speakersLoud.peak}',
+      );
+
+      expect(both.rms[0], closeTo(dry.rms[0] - 6.02, 0.1), reason: 'each ear gets half of left plus right');
+      expect(both.rms[1], closeTo(both.rms[0], 0.01));
+      expect(toLeft.rms[0], closeTo(both.rms[0], 0.01));
+      expect(toLeft.rms[1], lessThan(-150), reason: 'nothing on the right');
+      expect(toRight.rms[1], closeTo(both.rms[0], 0.01));
+      expect(toRight.rms[0], lessThan(-150), reason: 'nothing on the left');
+
+      expect(speakers.rate, 48000);
+      expect(speakers.rms[1], greaterThan(speakers.rms[0] - 20), reason: 'the right ear hears the left speaker too');
+      expect(speakers.rms[1], lessThan(speakers.rms[0]), reason: 'but quieter, from across the head');
+      expect(speakersLoud.peak.reduce(math.max), lessThan(-0.05), reason: 'the HRIR\'s headroom: no clipping');
+    });
+
     test('settings persist', () async {
       final a = AudioEngine();
       await a.applyPreset('Rock');
@@ -449,8 +593,11 @@ FILE "album.wav" WAVE
     // mean / name / data, as foobar2000 and Mp3tag write it) is added by hand.
     // ffmpeg puts moov after mdat, so no chunk offsets move.
     void addFreeformAtom(String path, String name, String value) {
-      Uint8List box(String type, List<int> body) =>
-          Uint8List.fromList([...(ByteData(4)..setUint32(0, body.length + 8)).buffer.asUint8List(), ...latin1.encode(type), ...body]);
+      Uint8List box(String type, List<int> body) => Uint8List.fromList([
+        ...(ByteData(4)..setUint32(0, body.length + 8)).buffer.asUint8List(),
+        ...latin1.encode(type),
+        ...body,
+      ]);
       final atom = box('----', [
         ...box('mean', [0, 0, 0, 0, ...utf8.encode('com.apple.iTunes')]),
         ...box('name', [0, 0, 0, 0, ...utf8.encode(name)]),
