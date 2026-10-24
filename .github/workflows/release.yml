@@ -175,6 +175,10 @@ jobs:
       - name: Sound settings work on this libmpv
         # Renders a song through each setting into files and measures it: nothing is heard.
         run: flutter test integration_test/dsp_test.dart -d macos
+      - name: FFmpeg is fetched on first use (AirPlay, TV conversions, tag editor)
+        run: |
+          brew uninstall --ignore-dependencies ffmpeg 2>/dev/null || true
+          flutter test integration_test/zz_ffmpeg_download_test.dart -d macos
       - name: Build
         run: flutter build macos --release $BUILD_ARGS
       - name: .dmg and .zip

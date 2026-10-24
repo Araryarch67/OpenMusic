@@ -59,7 +59,8 @@ abstract final class Ffmpeg {
       File(p.join((await getApplicationSupportDirectory()).path, 'bin', Platform.isWindows ? 'ffmpeg.exe' : 'ffmpeg'));
 
   /// Where the official builds live, with how to check them; null where none is offered.
-  static ({String url, String checksumUrl, Hash hash, String? fallbackUrl})? get _source {
+  /// A null [checksumUrl] means the checksum sits next to the file [url] redirects to.
+  static ({String url, String? checksumUrl, Hash hash, String? fallbackUrl})? get _source {
     if (Platform.isWindows) {
       // gyan.dev, the builds ffmpeg.org links for Windows: the 7z is a third of the zip's size.
       // Windows' own tar opens 7z on recent versions; older ones take the zip.
@@ -80,6 +81,12 @@ abstract final class Ffmpeg {
       if (arch == null) return null;
       final url = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-$arch-static.tar.xz';
       return (url: url, checksumUrl: '$url.md5', hash: md5, fallbackUrl: null);
+    }
+    if (Platform.isMacOS) {
+      // Martin Riedl's static builds, linked from ffmpeg.org for macOS: Apple Silicon or Intel.
+      final arch = Abi.current() == Abi.macosArm64 ? 'arm64' : 'amd64';
+      final url = 'https://ffmpeg.martin-riedl.de/redirect/latest/macos/$arch/release/ffmpeg.zip';
+      return (url: url, checksumUrl: null, hash: sha256, fallbackUrl: null);
     }
     return null;
   }
@@ -112,11 +119,14 @@ abstract final class Ffmpeg {
         // Into place in one step: a copy cut short would otherwise be taken for ffmpeg from then on.
         final part = await exe.copy('${target.path}.part');
         if (!Platform.isWindows) await Process.run('chmod', ['755', part.path]);
+        // Apple Silicon runs no unsigned code; an ad hoc signature is enough.
+        if (Platform.isMacOS) await Process.run('codesign', ['--force', '--sign', '-', part.path]);
         await part.rename(target.path);
         return true;
       }
 
-      if (!await attempt(source.url, checksumUrl: source.checksumUrl)) {
+      final url = source.checksumUrl == null ? await _resolve(source.url) : source.url;
+      if (!await attempt(url, checksumUrl: source.checksumUrl ?? '$url.sha256')) {
         final fallback = source.fallbackUrl;
         // The zip has its own checksum file next to it.
         if (fallback == null || !await attempt(fallback, checksumUrl: '$fallback.sha256')) {
@@ -135,6 +145,24 @@ abstract final class Ffmpeg {
   /// Windows' own bsdtar (Git's GNU tar on PATH can't open 7z or zip).
   static String get _tar =>
       Platform.isWindows ? p.join(Platform.environment['WINDIR'] ?? r'C:\Windows', 'System32', 'tar.exe') : 'tar';
+
+  /// Where [url] redirects to (a "latest" link), so its checksum file can be found next to it.
+  /// Martin Riedl's redirect answers 404 about half the time (the files themselves don't), so
+  /// it is asked a few times.
+  static Future<String> _resolve(String url) async {
+    final client = http.Client();
+    try {
+      for (var i = 0; i < 8; i++) {
+        final res = await client.send(http.Request('HEAD', Uri.parse(url))..followRedirects = false);
+        await res.stream.drain<void>();
+        if (res.headers['location'] case final to?) return Uri.parse(url).resolve(to).toString();
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
+      throw StateError('Couldn\'t reach the FFmpeg download; try again.');
+    } finally {
+      client.close();
+    }
+  }
 
   static Future<void> _get(String url, File to) async {
     final client = http.Client();

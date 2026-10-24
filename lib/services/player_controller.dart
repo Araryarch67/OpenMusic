@@ -7,6 +7,7 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show ValueListenable, listEquals;
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -29,6 +30,11 @@ import 'youtube_audio_source.dart';
 import 'youtube_music_account.dart';
 import 'youtube_importer.dart';
 import 'youtube_stream.dart';
+
+/// Android: "Add folder" was refused the permission to read music.
+class MusicPermissionDenied implements Exception {
+  const MusicPermissionDenied();
+}
 
 /// Owns the audio player, the library and the play queue.
 class PlayerController extends ChangeNotifier {
@@ -377,7 +383,7 @@ class PlayerController extends ChangeNotifier {
   LoopMode get loopMode => player.loopMode;
 
   /// Folder scanning needs real filesystem paths, which mobile sandboxes don't expose.
-  bool get canScanFolders => Platform.isLinux || Platform.isWindows || Platform.isMacOS;
+  bool get canScanFolders => Platform.isLinux || Platform.isWindows || Platform.isMacOS || Platform.isAndroid;
 
   // ── Derived library views ────────────────────────────────────────────────
   //
@@ -694,8 +700,19 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<int> pickFolder() async {
+    // Android: the songs are read where they are, which takes the permission to read music.
+    if (Platform.isAndroid && await _musicPermission.invokeMethod<bool>('request') != true) {
+      throw const MusicPermissionDenied();
+    }
     final dir = await FilePicker.getDirectoryPath(dialogTitle: 'Add music folder');
     if (dir == null) return 0;
+    return scanFolder(dir);
+  }
+
+  static const _musicPermission = MethodChannel('openmusic/music_permission');
+
+  /// Adds every song, cue sheet and SACD image under [dir].
+  Future<int> scanFolder(String dir) async {
     final entries = Directory(dir).list(recursive: true, followLinks: false);
     final tracks = <Track>[];
     final cues = <File>[];

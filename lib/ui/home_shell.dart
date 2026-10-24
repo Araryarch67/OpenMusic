@@ -222,6 +222,8 @@ class _HomeShellState extends State<HomeShell> {
       if (added > 0) {
         messenger.showSnackBar(SnackBar(content: Text('Added $added ${added == 1 ? 'song' : 'songs'}')));
       }
+    } on MusicPermissionDenied {
+      messenger.showSnackBar(const SnackBar(content: Text('Allow OpenMusic to read your music to add a folder')));
     } catch (e) {
       debugPrint('Adding music failed: $e');
       messenger.showSnackBar(const SnackBar(content: Text('Couldn\'t add that music')));
