@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -185,7 +184,7 @@ abstract final class YoutubeStream {
     }
     final formats = ((j['streamingData'] as Map<String, dynamic>?)?['adaptiveFormats'] as List? ?? const [])
         .cast<Map<String, dynamic>>();
-    final best = pickBest(formats, apple: aac || Platform.isIOS || Platform.isMacOS);
+    final best = pickBest(formats, aacOnly: aac);
     if (best == null) throw StateError('No audio stream for this song.');
     final url = Uri.parse(best['url'] as String);
     final mime = best['mimeType'] as String;
@@ -205,13 +204,13 @@ abstract final class YoutubeStream {
   }
 
   /// Highest-bitrate original audio: Opus wins near-ties (better per bit),
-  /// except on Apple, where AVPlayer can't play Opus-in-WebM. Leaves out
-  /// "stable volume" (DRC) and dubbed tracks, and streams needing a signature.
-  static Map<String, dynamic>? pickBest(List<Map<String, dynamic>> formats, {required bool apple}) {
+  /// unless [aacOnly] (for TVs and speakers). Leaves out "stable volume" (DRC)
+  /// and dubbed tracks, and streams needing a signature.
+  static Map<String, dynamic>? pickBest(List<Map<String, dynamic>> formats, {required bool aacOnly}) {
     bool usable(Map<String, dynamic> f) {
       final mime = f['mimeType'] as String? ?? '';
       if (!mime.startsWith('audio/') || f['url'] is! String) return false;
-      if (apple && !mime.startsWith('audio/mp4')) return false;
+      if (aacOnly && !mime.startsWith('audio/mp4')) return false;
       if (f['isDrc'] == true || (f['xtags'] as String? ?? '').contains('drc')) return false;
       final track = f['audioTrack'] as Map<String, dynamic>?;
       return track == null || track['audioIsDefault'] != false;

@@ -326,14 +326,13 @@ class YoutubeImporter extends ChangeNotifier {
 
   /// YouTube has no lossless audio; the best it serves is Opus (~130–160 kbps)
   /// or AAC (128 kbps). Take the highest-bitrate stream, preferring Opus on
-  /// ties, except on Apple platforms where AVPlayer can't play Opus-in-WebM.
-  static AudioOnlyStreamInfo? pickBestAudio(Iterable<AudioOnlyStreamInfo> streams, {bool? appleOnly}) {
-    final apple = appleOnly ?? (Platform.isIOS || Platform.isMacOS);
+  /// ties; [aacOnly] for TVs and speakers, which mostly can't decode Opus.
+  static AudioOnlyStreamInfo? pickBestAudio(Iterable<AudioOnlyStreamInfo> streams, {bool aacOnly = false}) {
     final candidates = streams
-        .where((s) => !apple || s.container == StreamContainer.mp4)
+        .where((s) => !aacOnly || s.container == StreamContainer.mp4)
         .where((s) => !_isDrcOrDubbed(s))
         .toList();
-    if (candidates.isEmpty) return apple ? null : streams.firstOrNull;
+    if (candidates.isEmpty) return aacOnly ? null : streams.firstOrNull;
     // Opus is more efficient than AAC, so near-equal bitrates go to Opus.
     int score(AudioOnlyStreamInfo s) => s.bitrate.bitsPerSecond + (_isOpus(s) ? 16000 : 0);
     candidates.sort((a, b) => score(b).compareTo(score(a)));

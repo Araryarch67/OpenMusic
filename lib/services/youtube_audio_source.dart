@@ -118,7 +118,7 @@ class YoutubeAudioSource extends StreamAudioSource {
       debugPrint('YouTube stream lookup failed, trying youtube_explode: $e');
     }
     final manifest = await yt.videos.streams.getManifest(videoId);
-    final best = YoutubeImporter.pickBestAudio(manifest.audioOnly, appleOnly: aac ? true : null);
+    final best = YoutubeImporter.pickBestAudio(manifest.audioOnly, aacOnly: aac);
     if (best == null) throw StateError('No audio stream for $videoId');
     return ResolvedAudio(
       url: best.url,

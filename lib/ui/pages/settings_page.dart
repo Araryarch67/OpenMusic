@@ -21,7 +21,7 @@ import 'youtube_music_page.dart';
 enum SettingsTopic {
   account('Account', Icons.person_outline_rounded, 'YouTube Music sign-in'),
   appearance('Appearance', Icons.palette_outlined, 'Theme, accent colour, background, text size'),
-  playback('Playback', Icons.play_circle_outline_rounded, 'Autoplay, equalizer, volume leveling, crossfeed'),
+  playback('Playback', Icons.play_circle_outline_rounded, 'Autoplay, equalizer, Virtual speakers, mono audio'),
   advanced('Hi-fi audio', Icons.tune_rounded, 'Output device, bit-perfect mode, sample rate'),
   downloads('Downloads', Icons.download_rounded, 'Where songs are saved, YouTube downloader'),
   integrations('Integrations', Icons.extension_outlined, 'Discord, lyrics services');

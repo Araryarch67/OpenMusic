@@ -511,6 +511,7 @@ class AudioEngine extends ChangeNotifier {
       final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
       final file = File(p.join((await getApplicationSupportDirectory()).path, p.basename(hrirAsset)));
       if (!file.existsSync() || !listEquals(await file.readAsBytes(), bytes)) {
+        await file.parent.create(recursive: true);
         final part = File('${file.path}.part');
         await part.writeAsBytes(bytes, flush: true);
         await part.rename(file.path);

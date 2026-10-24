@@ -65,11 +65,8 @@ abstract final class YtDlp {
   static final _resolved = <String, Future<ResolvedAudio>>{};
 
   /// Highest-quality original audio: Opus first (best per bit), then AAC.
-  /// DRC ("stable volume") variants are re-processed, so skip them. Apple's
-  /// AVPlayer can't play Opus-in-WebM, so macOS takes AAC.
-  static String get _format => Platform.isMacOS
-      ? 'ba[acodec^=mp4a][format_id!*=drc]/ba[ext=m4a]/ba'
-      : 'ba[acodec^=opus][format_id!*=drc]/ba[acodec^=mp4a][format_id!*=drc]/ba';
+  /// DRC ("stable volume") variants are re-processed, so skip them.
+  static const _format = 'ba[acodec^=opus][format_id!*=drc]/ba[acodec^=mp4a][format_id!*=drc]/ba';
 
   static String get _releaseAsset => Platform.isWindows
       ? 'yt-dlp.exe'

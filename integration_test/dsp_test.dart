@@ -101,7 +101,8 @@ void main() {
   testWidgets('mono, virtual speakers, crossfeed and room correction change what mpv renders', (tester) async {
     // Discord off: the real one, if running, would show the test song on the user's profile.
     SharedPreferences.setMockInitialValues({'discord.enabled': false});
-    final dir = (await getTemporaryDirectory()).createTempSync('om-dsp');
+    // macOS outside the App Store sandbox: the caches folder isn't there until something makes it.
+    final dir = ((await getTemporaryDirectory())..createSync(recursive: true)).createTempSync('om-dsp');
     addTearDown(() => dir.deleteSync(recursive: true));
     // 440 Hz on the left only, at −6 dBFS (−9 dBFS RMS).
     final song = _wav('${dir.path}/left.wav', 48000 * 4, (i) => (0.5 * math.sin(2 * math.pi * 440 * i / 48000), 0));
